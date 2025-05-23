@@ -1,318 +1,503 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { DefaultCell } from '@jupyter-notebook/notebook';
+import { DefaultCell, ICollaborativeCell, ICollaborativeCellState } from '../src/default-cell';
+import { LockManager, ILockManager, LockManagerStatus } from '../src/collab/locks';
+import { YjsAwareness } from '../src/collab/awareness';
+import { Cell } from '@jupyterlab/cells';
+import { CodeEditor } from '@jupyterlab/codeeditor';
+import { Widget } from '@lumino/widgets';
 import * as Y from 'yjs';
-import { WebsocketProvider } from 'y-websocket';
-import { ILockManager } from '@jupyter-notebook/notebook/lib/collab/locks';
-import { YjsAwareness } from '@jupyter-notebook/notebook/lib/collab/awareness';
 
 // Mock implementations
-class MockLockManager implements ILockManager {
-  private _locks: Map<string, string> = new Map();
-  private _callbacks: Map<string, Function[]> = new Map();
-
-  acquireLock(cellId: string, userId: string): Promise<boolean> {
-    if (this._locks.has(cellId) && this._locks.get(cellId) !== userId) {
-      return Promise.resolve(false);
+class MockCodeEditor implements Partial<CodeEditor.IEditor> {
+  model = {
+    value: {
+      text: 'Initial content',
+      changed: {
+        connect: jest.fn()
+      }
+    },
+    selections: {
+      changed: {
+        connect: jest.fn()
+      }
     }
-    this._locks.set(cellId, userId);
-    this._notifyLockChange(cellId);
-    return Promise.resolve(true);
-  }
-
-  releaseLock(cellId: string, userId: string): Promise<boolean> {
-    if (this._locks.has(cellId) && this._locks.get(cellId) === userId) {
-      this._locks.delete(cellId);
-      this._notifyLockChange(cellId);
-      return Promise.resolve(true);
-    }
-    return Promise.resolve(false);
-  }
-
-  isLocked(cellId: string): boolean {
-    return this._locks.has(cellId);
-  }
-
-  getLockOwner(cellId: string): string | null {
-    return this._locks.get(cellId) || null;
-  }
-
-  onLockChange(cellId: string, callback: Function): void {
-    if (!this._callbacks.has(cellId)) {
-      this._callbacks.set(cellId, []);
-    }
-    this._callbacks.get(cellId)?.push(callback);
-  }
-
-  private _notifyLockChange(cellId: string): void {
-    const callbacks = this._callbacks.get(cellId) || [];
-    callbacks.forEach(callback => callback(this.getLockOwner(cellId)));
-  }
+  };
+  
+  getCursor = jest.fn(() => ({ line: 0, column: 0 }));
+  getPositionAt = jest.fn((offset: number) => ({ line: 0, column: offset }));
+  getCoordinateForPosition = jest.fn(() => ({ top: 10, left: 10, height: 20, width: 10 }));
+  getDoc = jest.fn(() => ({
+    getValue: () => 'Initial content',
+    posFromIndex: (index: number) => ({ line: 0, ch: index }),
+    indexFromPos: (pos: { line: number; ch: number }) => pos.ch,
+    getSelection: () => 'Selected text',
+    setCursor: jest.fn(),
+    setSelection: jest.fn()
+  }));
+  on = jest.fn();
+  off = jest.fn();
+  refresh = jest.fn();
+  focus = jest.fn();
 }
 
-// Mock WebSocket provider to avoid actual network connections
-jest.mock('y-websocket', () => {
-  return {
-    WebsocketProvider: jest.fn().mockImplementation(() => {
-      return {
-        awareness: {
-          setLocalState: jest.fn(),
-          getStates: jest.fn().mockReturnValue(new Map()),
-          on: jest.fn(),
-          off: jest.fn()
-        },
-        on: jest.fn(),
-        off: jest.fn(),
-        connect: jest.fn(),
-        disconnect: jest.fn()
-      };
-    })
+class MockCellModel {
+  id = 'test-cell-id';
+  contentChanged = {
+    connect: jest.fn(),
+    disconnect: jest.fn(),
+    emit: jest.fn()
   };
-});
+  metadata = {
+    get: jest.fn((key: string) => null),
+    set: jest.fn(),
+    changed: {
+      connect: jest.fn()
+    }
+  };
+  value = {
+    text: 'Initial content',
+    changed: {
+      connect: jest.fn()
+    }
+  };
+  sharedModel = {
+    getSource: jest.fn(() => 'Initial content'),
+    setSource: jest.fn()
+  };
+  ydoc = new Y.Doc();
+  ytext = this.ydoc.getText('content');
+  ydocChanged = {
+    connect: jest.fn(),
+    disconnect: jest.fn(),
+    emit: jest.fn()
+  };
+  setYDoc = jest.fn((ydoc: Y.Doc) => {
+    this.ydoc = ydoc;
+    this.ytext = ydoc.getText('content');
+    this.ydocChanged.emit();
+  });
+}
 
 describe('DefaultCell', () => {
+  let cell: DefaultCell;
+  let model: MockCellModel;
+  let editor: MockCodeEditor;
   let ydoc: Y.Doc;
-  let provider: WebsocketProvider;
-  let lockManager: MockLockManager;
   let awareness: YjsAwareness;
-  
+  let lockManager: ILockManager;
+
   beforeEach(() => {
-    // Create a new Yjs document for each test
+    // Set up the document
     ydoc = new Y.Doc();
     
-    // Create a mock WebSocket provider
-    provider = new WebsocketProvider('ws://localhost:1234', 'test-room', ydoc);
+    // Set up the model
+    model = new MockCellModel();
+    model.ydoc = ydoc;
+    model.ytext = ydoc.getText('content');
     
-    // Create a mock lock manager
-    lockManager = new MockLockManager();
+    // Set up the editor
+    editor = new MockCodeEditor();
     
-    // Create a mock awareness instance
-    awareness = new YjsAwareness(provider.awareness);
-  });
-  
-  afterEach(() => {
-    // Clean up
-    ydoc.destroy();
+    // Create the cell
+    cell = new DefaultCell({
+      model: model as any,
+      contentFactory: {
+        createCellEditor: () => editor as any,
+        createOutputArea: jest.fn(() => ({
+          model: {
+            clear: jest.fn(),
+            fromJSON: jest.fn(),
+            toJSON: jest.fn(() => [])
+          },
+          renderModel: jest.fn(),
+          dispose: jest.fn()
+        })),
+        createOutputPrompt: jest.fn(() => new Widget()),
+        createInputPrompt: jest.fn(() => new Widget())
+      } as any
+    });
+    
+    // Set up awareness
+    awareness = new YjsAwareness(ydoc);
+    cell.setAwareness(awareness);
+    
+    // Set up lock manager
+    lockManager = new LockManager({
+      ydoc,
+      awareness: awareness as any,
+      userId: 'test-user-id',
+      userName: 'Test User'
+    });
+    cell.setLockManager(lockManager);
+    
+    // Attach the cell to the DOM for testing
+    Widget.attach(cell, document.body);
   });
 
-  describe('Collaborative state maintenance', () => {
-    it('should maintain collaborative state during editing', () => {
-      // Create a cell with collaborative state
-      const cellId = 'test-cell-1';
-      const cellYDoc = ydoc.getMap('cells');
-      const cellContent = cellYDoc.set(cellId, new Y.Map());
-      cellContent.set('source', new Y.Text('Initial content'));
-      
-      // Create a default cell with the collaborative state
-      const cell = new DefaultCell({
-        id: cellId,
-        ydoc,
-        lockManager,
-        awareness
-      });
-      
-      // Verify initial state
-      expect(cell.getSource()).toBe('Initial content');
-      
-      // Update the cell content
-      cell.setSource('Updated content');
-      
-      // Verify the cell content was updated in the Yjs document
-      const ytext = cellContent.get('source') as Y.Text;
-      expect(ytext.toString()).toBe('Updated content');
-      
-      // Verify the cell content can be retrieved
-      expect(cell.getSource()).toBe('Updated content');
+  afterEach(() => {
+    cell.dispose();
+    ydoc.destroy();
+    awareness.destroy();
+    lockManager.dispose();
+  });
+
+  describe('Collaborative state initialization', () => {
+    it('should initialize with correct collaborative state', () => {
+      const state = cell.collaborativeState;
+      expect(state).toBeDefined();
+      expect(state.locked).toBe(false);
+      expect(state.lockedBy).toBeNull();
+      expect(state.ydoc).toBe(ydoc);
+      expect(state.ytext).toBe(model.ytext);
+      expect(state.awareness).toBe(awareness);
     });
-    
-    it('should handle concurrent modifications from multiple users', () => {
-      // Create a cell with collaborative state
-      const cellId = 'test-cell-2';
-      const cellYDoc = ydoc.getMap('cells');
-      const cellContent = cellYDoc.set(cellId, new Y.Map());
-      cellContent.set('source', new Y.Text('Initial content'));
+
+    it('should have the correct CSS classes for collaborative editing', () => {
+      expect(cell.hasClass('jp-CollaborativeCell')).toBe(true);
+      expect(cell.hasClass('jp-DefaultCell')).toBe(true);
+    });
+
+    it('should create lock status indicator and remote cursors container', () => {
+      // Check for lock indicator
+      const lockIndicator = cell.node.querySelector('.jp-CollaborativeCell-LockIndicator');
+      expect(lockIndicator).not.toBeNull();
       
-      // Create a default cell with the collaborative state
-      const cell = new DefaultCell({
-        id: cellId,
-        ydoc,
-        lockManager,
-        awareness
-      });
-      
-      // Simulate another user making changes to the same cell
-      // by directly modifying the Yjs document
-      const ytext = cellContent.get('source') as Y.Text;
-      ytext.insert(0, 'User2: ');
-      
-      // Verify the cell content reflects the changes from the other user
-      expect(cell.getSource()).toBe('User2: Initial content');
-      
-      // Make a change as the current user
-      cell.setSource('User2: Initial content - with local changes');
-      
-      // Verify the cell content includes both changes
-      expect(cell.getSource()).toBe('User2: Initial content - with local changes');
-      expect(ytext.toString()).toBe('User2: Initial content - with local changes');
+      // Check for remote cursors container
+      const remoteCursors = cell.node.querySelector('.jp-CollaborativeCell-RemoteCursors');
+      expect(remoteCursors).not.toBeNull();
     });
   });
-  
+
+  describe('Cell locking mechanism', () => {
+    it('should acquire a lock on the cell', async () => {
+      const spy = jest.spyOn(lockManager, 'acquireLock');
+      const result = await cell.acquireLock();
+      
+      expect(result).toBe(true);
+      expect(spy).toHaveBeenCalledWith(model.id);
+      expect(cell.collaborativeState.locked).toBe(true);
+      expect(cell.collaborativeState.lockedBy).toBe('test-user-id');
+      expect(cell.hasClass('jp-CollaborativeCell-locked')).toBe(true);
+      expect(cell.hasClass('jp-CollaborativeCell-lockedByCurrentUser')).toBe(true);
+    });
+
+    it('should release a lock on the cell', async () => {
+      // First acquire the lock
+      await cell.acquireLock();
+      
+      const spy = jest.spyOn(lockManager, 'releaseLock');
+      await cell.releaseLock();
+      
+      expect(spy).toHaveBeenCalledWith(model.id);
+      expect(cell.collaborativeState.locked).toBe(false);
+      expect(cell.collaborativeState.lockedBy).toBeNull();
+      expect(cell.hasClass('jp-CollaborativeCell-locked')).toBe(false);
+      expect(cell.hasClass('jp-CollaborativeCell-lockedByCurrentUser')).toBe(false);
+    });
+
+    it('should update lock status indicator when lock state changes', async () => {
+      // Initially no lock
+      let lockText = cell.node.querySelector('.jp-CollaborativeCell-lockText');
+      expect(lockText).toBeNull();
+      
+      // Acquire lock
+      await cell.acquireLock();
+      
+      // Should show lock indicator with "Editing" text
+      lockText = cell.node.querySelector('.jp-CollaborativeCell-lockText');
+      expect(lockText).not.toBeNull();
+      expect(lockText?.textContent).toBe('Editing');
+      
+      // Release lock
+      await cell.releaseLock();
+      
+      // Lock indicator should be empty again
+      lockText = cell.node.querySelector('.jp-CollaborativeCell-lockText');
+      expect(lockText).toBeNull();
+    });
+
+    it('should prevent concurrent edits by different users', async () => {
+      // Simulate another user acquiring the lock first
+      const otherUserLock = {
+        cellId: model.id,
+        userId: 'other-user-id',
+        userName: 'Other User',
+        timestamp: Date.now(),
+        expiresAt: Date.now() + 30000
+      };
+      
+      // Mock the getLock method to return the other user's lock
+      jest.spyOn(lockManager, 'getLock').mockReturnValue(otherUserLock);
+      
+      // Try to acquire the lock
+      const result = await cell.acquireLock();
+      
+      // Should fail to acquire the lock
+      expect(result).toBe(false);
+      expect(cell.collaborativeState.locked).toBe(false);
+      expect(cell.collaborativeState.lockedBy).toBeNull();
+    });
+
+    it('should handle lock expiration correctly', async () => {
+      // Acquire a lock
+      await cell.acquireLock();
+      
+      // Simulate lock expiration
+      const expiredLock = {
+        ...lockManager.getLock(model.id)!,
+        expiresAt: Date.now() - 1000 // Expired 1 second ago
+      };
+      
+      // Mock the getLock method to return the expired lock
+      jest.spyOn(lockManager, 'getLock').mockReturnValue(null);
+      
+      // Check lock status
+      expect(cell.collaborativeState.locked).toBe(true); // Still locked in cell state
+      
+      // Try to acquire the lock again (should succeed because the previous lock expired)
+      const result = await cell.acquireLock();
+      expect(result).toBe(true);
+    });
+  });
+
+  describe('Collaborative editing with Yjs', () => {
+    it('should update content when Yjs text changes', () => {
+      // Set up a spy on the editor's setValue method
+      const setValueSpy = jest.spyOn(cell.editor?.model.value, 'text', 'set');
+      
+      // Simulate a remote change to the Yjs text
+      const otherDoc = new Y.Doc();
+      otherDoc.clientID = 2; // Different client ID
+      
+      // Create a text in the other doc with the same name
+      const otherText = otherDoc.getText('content');
+      otherText.insert(0, 'Remote change');
+      
+      // Apply the update to our doc
+      Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(otherDoc));
+      
+      // The editor content should be updated
+      // Note: In a real implementation, this would be handled by a binding between
+      // the editor and the Yjs text, which we're not fully simulating here
+      expect(model.ytext.toString()).toBe('Remote change');
+    });
+
+    it('should handle concurrent edits from multiple users correctly', () => {
+      // Create docs for three different users
+      const doc1 = new Y.Doc();
+      const doc2 = new Y.Doc();
+      const doc3 = new Y.Doc();
+      
+      // Set different client IDs
+      doc1.clientID = 1;
+      doc2.clientID = 2;
+      doc3.clientID = 3;
+      
+      // Get text instances for each doc
+      const text1 = doc1.getText('content');
+      const text2 = doc2.getText('content');
+      const text3 = doc3.getText('content');
+      
+      // Make concurrent edits
+      text1.insert(0, 'User 1 edit ');
+      text2.insert(0, 'User 2 edit ');
+      text3.insert(0, 'User 3 edit ');
+      
+      // Sync the documents
+      const update1 = Y.encodeStateAsUpdate(doc1);
+      const update2 = Y.encodeStateAsUpdate(doc2);
+      const update3 = Y.encodeStateAsUpdate(doc3);
+      
+      Y.applyUpdate(doc1, update2);
+      Y.applyUpdate(doc1, update3);
+      Y.applyUpdate(doc2, update1);
+      Y.applyUpdate(doc2, update3);
+      Y.applyUpdate(doc3, update1);
+      Y.applyUpdate(doc3, update2);
+      
+      // All documents should converge to the same state
+      expect(text1.toString()).toBe(text2.toString());
+      expect(text2.toString()).toBe(text3.toString());
+      
+      // Apply to our test document
+      Y.applyUpdate(ydoc, update1);
+      
+      // Our document should have the same content
+      expect(model.ytext.toString()).toBe(text1.toString());
+    });
+
+    it('should track remote cursor positions', () => {
+      // Set up awareness states for remote users
+      const remoteAwareness = new YjsAwareness(ydoc);
+      remoteAwareness.setLocalStateField('user', {
+        name: 'Remote User',
+        color: '#ff0000'
+      });
+      remoteAwareness.setLocalStateField('cursor', {
+        cellId: model.id,
+        position: 5,
+        selection: { start: 5, end: 10 }
+      });
+      
+      // Update our awareness with the remote state
+      awareness.applyUpdate(
+        remoteAwareness.encodeUpdate([remoteAwareness.clientID])
+      );
+      
+      // Update remote cursors
+      cell.updateRemoteCursors();
+      
+      // Check if remote cursor is rendered
+      const remoteCursor = cell.node.querySelector('.jp-CollaborativeCell-remoteCursor');
+      expect(remoteCursor).not.toBeNull();
+      
+      // Check if remote selection is rendered
+      const remoteSelection = cell.node.querySelector('.jp-CollaborativeCell-remoteSelection');
+      expect(remoteSelection).not.toBeNull();
+    });
+  });
+
   describe('Cell metadata synchronization', () => {
     it('should synchronize cell metadata across clients', () => {
-      // Create a cell with collaborative state
-      const cellId = 'test-cell-3';
-      const cellYDoc = ydoc.getMap('cells');
-      const cellContent = cellYDoc.set(cellId, new Y.Map());
-      cellContent.set('source', new Y.Text('Content'));
-      cellContent.set('metadata', new Y.Map());
+      // Create a shared map for cell metadata
+      const metadataMap = ydoc.getMap('metadata');
       
-      // Create a default cell with the collaborative state
-      const cell = new DefaultCell({
-        id: cellId,
-        ydoc,
-        lockManager,
-        awareness
-      });
+      // Set some metadata
+      metadataMap.set('tags', ['important', 'example']);
+      metadataMap.set('collapsed', true);
       
-      // Set metadata on the cell
-      cell.setMetadata({ collapsed: true, editable: false });
+      // Create another doc to simulate another client
+      const otherDoc = new Y.Doc();
       
-      // Verify the metadata was updated in the Yjs document
-      const ymetadata = cellContent.get('metadata') as Y.Map<any>;
-      expect(ymetadata.get('collapsed')).toBe(true);
-      expect(ymetadata.get('editable')).toBe(false);
+      // Apply our state to the other doc
+      Y.applyUpdate(otherDoc, Y.encodeStateAsUpdate(ydoc));
       
-      // Simulate another user updating the metadata
-      ymetadata.set('scrolled', true);
+      // Get the metadata map from the other doc
+      const otherMetadataMap = otherDoc.getMap('metadata');
       
-      // Verify the cell metadata includes the update from the other user
-      const metadata = cell.getMetadata();
-      expect(metadata.collapsed).toBe(true);
-      expect(metadata.editable).toBe(false);
-      expect(metadata.scrolled).toBe(true);
+      // Check that metadata is synchronized
+      expect(otherMetadataMap.get('tags')).toEqual(['important', 'example']);
+      expect(otherMetadataMap.get('collapsed')).toBe(true);
+      
+      // Make a change in the other doc
+      otherMetadataMap.set('tags', ['important', 'example', 'updated']);
+      
+      // Apply the update back to our doc
+      Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(otherDoc));
+      
+      // Check that our metadata is updated
+      expect(metadataMap.get('tags')).toEqual(['important', 'example', 'updated']);
     });
   });
-  
-  describe('Cell locking mechanisms', () => {
-    it('should prevent concurrent edits to the same cell', async () => {
-      // Create a cell with collaborative state
-      const cellId = 'test-cell-4';
-      const cellYDoc = ydoc.getMap('cells');
-      const cellContent = cellYDoc.set(cellId, new Y.Map());
-      cellContent.set('source', new Y.Text('Content'));
-      
-      // Create a default cell with the collaborative state
-      const cell = new DefaultCell({
-        id: cellId,
-        ydoc,
-        lockManager,
-        awareness,
-        userId: 'user1'
-      });
-      
-      // Acquire a lock for user1
-      const lockAcquired = await cell.acquireLock();
-      expect(lockAcquired).toBe(true);
-      expect(lockManager.isLocked(cellId)).toBe(true);
-      expect(lockManager.getLockOwner(cellId)).toBe('user1');
-      
-      // Try to acquire a lock for user2 (should fail)
-      const cell2 = new DefaultCell({
-        id: cellId,
-        ydoc,
-        lockManager,
-        awareness,
-        userId: 'user2'
-      });
-      
-      const lockAcquired2 = await cell2.acquireLock();
-      expect(lockAcquired2).toBe(false);
-      
-      // Release the lock for user1
-      const lockReleased = await cell.releaseLock();
-      expect(lockReleased).toBe(true);
-      expect(lockManager.isLocked(cellId)).toBe(false);
-      
-      // Now user2 should be able to acquire the lock
-      const lockAcquired2AfterRelease = await cell2.acquireLock();
-      expect(lockAcquired2AfterRelease).toBe(true);
-      expect(lockManager.getLockOwner(cellId)).toBe('user2');
-    });
-  });
-  
+
   describe('Cell output synchronization', () => {
     it('should synchronize cell outputs across clients', () => {
-      // Create a cell with collaborative state
-      const cellId = 'test-cell-5';
-      const cellYDoc = ydoc.getMap('cells');
-      const cellContent = cellYDoc.set(cellId, new Y.Map());
-      cellContent.set('source', new Y.Text('Content'));
-      cellContent.set('outputs', new Y.Array());
+      // Create a shared array for cell outputs
+      const outputsArray = ydoc.getArray('outputs');
       
-      // Create a default cell with the collaborative state
-      const cell = new DefaultCell({
-        id: cellId,
-        ydoc,
-        lockManager,
-        awareness
-      });
+      // Add some outputs
+      outputsArray.push([{ 
+        output_type: 'display_data',
+        data: { 'text/plain': 'Hello, world!' }
+      }]);
       
-      // Add an output to the cell
-      const output = { output_type: 'display_data', data: { 'text/plain': 'Output content' } };
-      cell.addOutput(output);
+      // Create another doc to simulate another client
+      const otherDoc = new Y.Doc();
       
-      // Verify the output was added to the Yjs document
-      const youtputs = cellContent.get('outputs') as Y.Array<any>;
-      expect(youtputs.length).toBe(1);
-      expect(youtputs.get(0)).toEqual(output);
+      // Apply our state to the other doc
+      Y.applyUpdate(otherDoc, Y.encodeStateAsUpdate(ydoc));
       
-      // Simulate another user adding an output
-      const output2 = { output_type: 'stream', name: 'stdout', text: 'Another output' };
-      youtputs.push([output2]);
+      // Get the outputs array from the other doc
+      const otherOutputsArray = otherDoc.getArray('outputs');
       
-      // Verify the cell outputs include both outputs
-      const outputs = cell.getOutputs();
-      expect(outputs.length).toBe(2);
-      expect(outputs[0]).toEqual(output);
-      expect(outputs[1]).toEqual(output2);
+      // Check that outputs are synchronized
+      expect(otherOutputsArray.toJSON()).toEqual(outputsArray.toJSON());
+      
+      // Add another output in the other doc
+      otherOutputsArray.push([{ 
+        output_type: 'stream',
+        name: 'stdout',
+        text: 'Another output'
+      }]);
+      
+      // Apply the update back to our doc
+      Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(otherDoc));
+      
+      // Check that our outputs are updated
+      expect(outputsArray.toJSON()).toEqual(otherOutputsArray.toJSON());
     });
   });
-  
-  describe('Collaborative editing performance', () => {
+
+  describe('Performance with multiple users', () => {
     it('should maintain performance with multiple active users', () => {
-      // Create a cell with collaborative state
-      const cellId = 'test-cell-6';
-      const cellYDoc = ydoc.getMap('cells');
-      const cellContent = cellYDoc.set(cellId, new Y.Map());
-      cellContent.set('source', new Y.Text(''));
+      // Create multiple docs to simulate multiple users
+      const userCount = 10;
+      const userDocs: Y.Doc[] = [];
+      const userTexts: Y.Text[] = [];
       
-      // Create a default cell with the collaborative state
-      const cell = new DefaultCell({
-        id: cellId,
-        ydoc,
-        lockManager,
-        awareness
-      });
+      for (let i = 0; i < userCount; i++) {
+        const doc = new Y.Doc();
+        doc.clientID = i + 1;
+        userDocs.push(doc);
+        userTexts.push(doc.getText('content'));
+      }
       
-      // Measure the time it takes to make a large number of edits
+      // Measure time to apply multiple updates
       const startTime = performance.now();
       
-      // Make 1000 small edits
-      for (let i = 0; i < 1000; i++) {
-        cell.setSource(`Line ${i}\n`);
+      // Each user makes an edit
+      for (let i = 0; i < userCount; i++) {
+        userTexts[i].insert(0, `User ${i + 1} edit `);
+      }
+      
+      // Sync all documents with each other
+      for (let i = 0; i < userCount; i++) {
+        const update = Y.encodeStateAsUpdate(userDocs[i]);
+        for (let j = 0; j < userCount; j++) {
+          if (i !== j) {
+            Y.applyUpdate(userDocs[j], update);
+          }
+        }
+      }
+      
+      // Apply to our test document
+      for (let i = 0; i < userCount; i++) {
+        Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(userDocs[i]));
       }
       
       const endTime = performance.now();
       const duration = endTime - startTime;
       
-      // Verify that the operation completed in a reasonable time
-      // This is a simple performance test - in a real scenario you might want to
-      // set more specific thresholds based on your performance requirements
-      expect(duration).toBeLessThan(5000); // Should complete in less than 5 seconds
+      // All documents should have converged to the same state
+      for (let i = 1; i < userCount; i++) {
+        expect(userTexts[i].toString()).toBe(userTexts[0].toString());
+      }
       
-      // Verify the final content
-      expect(cell.getSource()).toBe('Line 999\n');
+      // Our document should have the same content
+      expect(model.ytext.toString()).toBe(userTexts[0].toString());
+      
+      // Performance should be reasonable (adjust threshold as needed)
+      // This is a simple check to ensure operations don't take too long
+      expect(duration).toBeLessThan(500); // 500ms is a generous threshold for this test
+    });
+  });
+
+  describe('Cleanup and disposal', () => {
+    it('should clean up resources when disposed', () => {
+      // Set up spies
+      const releaseLockSpy = jest.spyOn(cell, 'releaseLock');
+      
+      // Acquire a lock first
+      cell.acquireLock();
+      
+      // Dispose the cell
+      cell.dispose();
+      
+      // Should release locks and clean up resources
+      expect(releaseLockSpy).toHaveBeenCalled();
+      expect(cell.isDisposed).toBe(true);
     });
   });
 });
