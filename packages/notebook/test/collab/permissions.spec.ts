@@ -1,606 +1,900 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { IPermissionsService } from '@jupyter-notebook/application';
+import * as Y from 'yjs';
 import {
   PermissionsManager,
   IPermissionsManager,
-  UserRole,
-  PermissionLevel,
-  ROLE_PERMISSIONS
+  PermissionRole,
+  PermissionAction,
+  PermissionScope,
+  IPermissionUser,
+  IPermissionEntry,
+  PermissionManagerStatus
 } from '../../src/collab/permissions';
-import * as Y from 'yjs';
 
 /**
- * Mock implementation of IPermissionsService for testing
+ * Helper function to create a mock user for testing
  */
-class MockPermissionsService implements IPermissionsService {
-  private _documentPermissions = new Map<
-    string,
-    IPermissionsService.IDocumentPermissions
-  >();
-  private _userPermissions = new Map<
-    string,
-    Map<string, IPermissionsService.IUserPermissions>
-  >();
-
-  readonly permissionsChanged = {
-    connect: jest.fn(),
-    disconnect: jest.fn(),
-    emit: jest.fn()
+function createMockUser(id: string, displayName: string, isAdmin: boolean = false): IPermissionUser {
+  return {
+    id,
+    displayName,
+    isAdmin,
+    avatarUrl: `https://example.com/avatars/${id}.png`,
+    email: `${id}@example.com`
   };
+}
 
-  async getDocumentPermissions(
-    documentPath: string
-  ): Promise<IPermissionsService.IDocumentPermissions> {
-    return (
-      this._documentPermissions.get(documentPath) || {
-        owner: 'default-owner',
-        accessMode: 'private',
-        defaultPermissions: {
-          read: true,
-          write: false,
-          comment: false,
-          manage: false
-        }
-      }
-    );
-  }
+/**
+ * Helper function to create a permissions manager for testing
+ */
+function createPermissionsManager(
+  currentUser: IPermissionUser,
+  initialPermissions?: IPermissionEntry[],
+  hubApiUrl?: string
+): IPermissionsManager {
+  const ydoc = new Y.Doc();
+  ydoc.clientID = parseInt(currentUser.id, 10);
+  
+  return new PermissionsManager({
+    ydoc,
+    currentUser,
+    notebookId: 'test-notebook',
+    initialPermissions,
+    hubApiUrl,
+    autoAssignOwner: true,
+    enableCellPermissions: true
+  });
+}
 
-  async setDocumentPermissions(
-    documentPath: string,
-    permissions: IPermissionsService.IDocumentPermissions
-  ): Promise<void> {
-    this._documentPermissions.set(documentPath, permissions);
-    this.permissionsChanged.emit({
-      documentPath,
-      permissions
-    });
-  }
-
-  async getUserPermissions(
-    documentPath: string,
-    userId: string
-  ): Promise<IPermissionsService.IUserPermissions> {
-    const docUsers = this._userPermissions.get(documentPath);
-    if (!docUsers) {
-      return {
-        read: false,
-        write: false,
-        comment: false,
-        manage: false
-      };
-    }
-    return (
-      docUsers.get(userId) || {
-        read: false,
-        write: false,
-        comment: false,
-        manage: false
-      }
-    );
-  }
-
-  async setUserPermissions(
-    documentPath: string,
-    userId: string,
-    permissions: IPermissionsService.IUserPermissions
-  ): Promise<void> {
-    let docUsers = this._userPermissions.get(documentPath);
-    if (!docUsers) {
-      docUsers = new Map<string, IPermissionsService.IUserPermissions>();
-      this._userPermissions.set(documentPath, docUsers);
-    }
-    docUsers.set(userId, permissions);
-    this.permissionsChanged.emit({
-      documentPath,
-      userId,
-      permissions
-    });
-  }
-
-  async hasPermission(
-    documentPath: string,
-    permission: IPermissionsService.Permission
-  ): Promise<boolean> {
-    const currentUserId = 'current-user';
-    const userPerms = await this.getUserPermissions(documentPath, currentUserId);
-    return userPerms[permission];
-  }
-
-  async getDocumentUsers(
-    documentPath: string
-  ): Promise<Map<string, IPermissionsService.IUserPermissions>> {
-    return this._userPermissions.get(documentPath) || new Map();
-  }
+/**
+ * Helper function to connect two Yjs documents
+ */
+function connectYjsDocs(doc1: Y.Doc, doc2: Y.Doc): void {
+  // Create update handlers to sync the documents
+  const doc1UpdateHandler = (update: Uint8Array) => {
+    Y.applyUpdate(doc2, update);
+  };
+  
+  const doc2UpdateHandler = (update: Uint8Array) => {
+    Y.applyUpdate(doc1, update);
+  };
+  
+  // Set up event listeners
+  doc1.on('update', doc1UpdateHandler);
+  doc2.on('update', doc2UpdateHandler);
+  
+  // Sync the initial state
+  doc1UpdateHandler(Y.encodeStateAsUpdate(doc1));
 }
 
 describe('PermissionsManager', () => {
-  let doc: Y.Doc;
-  let permissionsManager: IPermissionsManager;
-  let mockPermissionsService: MockPermissionsService;
-  const notebookPath = '/path/to/notebook.ipynb';
-  const owner = 'owner-user';
-  const currentUser = 'current-user';
-  const otherUser = 'other-user';
-
-  beforeEach(() => {
-    // Create a new Yjs document for each test
-    doc = new Y.Doc();
-    
-    // Create a mock permissions service
-    mockPermissionsService = new MockPermissionsService();
-    
-    // Create the permissions manager with the mock service
-    permissionsManager = new PermissionsManager({
-      permissionsService: mockPermissionsService,
-      currentUserId: currentUser,
-      hubUrl: 'https://hub.example.org',
-      enforcePermissions: true
+  describe('constructor', () => {
+    it('should create a permissions manager with the correct initial state', () => {
+      const user = createMockUser('1', 'User 1');
+      const permissionsManager = createPermissionsManager(user);
+      
+      expect(permissionsManager.status).toBe(PermissionManagerStatus.Ready);
+      expect(permissionsManager.currentUser).toEqual(user);
+      expect(permissionsManager.currentRole).toBe(PermissionRole.Owner); // Auto-assigned as owner
+      expect(permissionsManager.getPermissions()).toHaveLength(1); // Should have one permission entry for the current user
     });
     
-    // Initialize the permissions manager with the document
-    return permissionsManager.initialize(notebookPath, doc, owner);
-  });
-
-  afterEach(() => {
-    doc.destroy();
-  });
-
-  describe('initialization', () => {
-    it('should initialize with the owner as Owner role', async () => {
-      const role = await permissionsManager.getUserRole(notebookPath, owner);
-      expect(role).toBe(UserRole.Owner);
-    });
-
-    it('should set the access mode to private by default', async () => {
-      const accessMode = await permissionsManager.getAccessMode(notebookPath);
-      expect(accessMode).toBe('private');
-    });
-
-    it('should sync with the permissions service', async () => {
-      // Set up the mock permissions service with some data
-      await mockPermissionsService.setDocumentPermissions(notebookPath, {
-        owner: 'new-owner',
-        accessMode: 'shared',
-        defaultPermissions: {
-          read: true,
-          write: false,
-          comment: false,
-          manage: false
+    it('should initialize with provided permissions', () => {
+      const owner = createMockUser('1', 'Owner');
+      const editor = createMockUser('2', 'Editor');
+      const viewer = createMockUser('3', 'Viewer');
+      
+      const initialPermissions: IPermissionEntry[] = [
+        {
+          user: owner,
+          role: PermissionRole.Owner,
+          grantedAt: Date.now(),
+          grantedBy: owner,
+          scope: PermissionScope.Notebook
+        },
+        {
+          user: editor,
+          role: PermissionRole.Editor,
+          grantedAt: Date.now(),
+          grantedBy: owner,
+          scope: PermissionScope.Notebook
+        },
+        {
+          user: viewer,
+          role: PermissionRole.Viewer,
+          grantedAt: Date.now(),
+          grantedBy: owner,
+          scope: PermissionScope.Notebook
         }
-      });
-
-      await mockPermissionsService.setUserPermissions(notebookPath, 'user1', {
-        read: true,
-        write: true,
-        comment: true,
-        manage: false
-      });
-
-      // Sync permissions
-      await permissionsManager.syncPermissions(notebookPath);
-
-      // Verify the permissions were synced
-      const accessMode = await permissionsManager.getAccessMode(notebookPath);
-      expect(accessMode).toBe('shared');
-
-      const role = await permissionsManager.getUserRole(notebookPath, 'user1');
-      expect(role).toBe(UserRole.Editor);
-    });
-  });
-
-  describe('role-based access control', () => {
-    beforeEach(async () => {
-      // Set up different users with different roles
-      await permissionsManager.setUserRole(notebookPath, 'viewer', UserRole.Viewer);
-      await permissionsManager.setUserRole(notebookPath, 'commenter', UserRole.Commenter);
-      await permissionsManager.setUserRole(notebookPath, 'editor', UserRole.Editor);
-      await permissionsManager.setUserRole(notebookPath, 'owner', UserRole.Owner);
-    });
-
-    it('should assign correct permission levels based on roles', async () => {
-      // Viewer should have read permission only
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'viewer', IPermissionsService.Permission.Read
-      )).toBe(true);
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'viewer', IPermissionsService.Permission.Comment
-      )).toBe(false);
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'viewer', IPermissionsService.Permission.Write
-      )).toBe(false);
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'viewer', IPermissionsService.Permission.Manage
-      )).toBe(false);
-
-      // Commenter should have read and comment permissions
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'commenter', IPermissionsService.Permission.Read
-      )).toBe(true);
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'commenter', IPermissionsService.Permission.Comment
-      )).toBe(true);
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'commenter', IPermissionsService.Permission.Write
-      )).toBe(false);
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'commenter', IPermissionsService.Permission.Manage
-      )).toBe(false);
-
-      // Editor should have read, comment, and write permissions
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'editor', IPermissionsService.Permission.Read
-      )).toBe(true);
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'editor', IPermissionsService.Permission.Comment
-      )).toBe(true);
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'editor', IPermissionsService.Permission.Write
-      )).toBe(true);
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'editor', IPermissionsService.Permission.Manage
-      )).toBe(false);
-
-      // Owner should have all permissions
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'owner', IPermissionsService.Permission.Read
-      )).toBe(true);
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'owner', IPermissionsService.Permission.Comment
-      )).toBe(true);
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'owner', IPermissionsService.Permission.Write
-      )).toBe(true);
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'owner', IPermissionsService.Permission.Manage
-      )).toBe(true);
-    });
-
-    it('should enforce role-based permissions for notebook operations', async () => {
-      // Set current user to viewer
-      const viewerManager = new PermissionsManager({
-        permissionsService: mockPermissionsService,
-        currentUserId: 'viewer',
-        enforcePermissions: true
-      });
-      await viewerManager.initialize(notebookPath, doc, owner);
-
-      // Viewer should not be able to change permissions
-      await expect(viewerManager.setUserRole(
-        notebookPath, otherUser, UserRole.Editor
-      )).rejects.toThrow('You do not have permission to manage roles');
-
-      // Set current user to editor
-      const editorManager = new PermissionsManager({
-        permissionsService: mockPermissionsService,
-        currentUserId: 'editor',
-        enforcePermissions: true
-      });
-      await editorManager.initialize(notebookPath, doc, owner);
-
-      // Editor should not be able to change permissions
-      await expect(editorManager.setUserRole(
-        notebookPath, otherUser, UserRole.Editor
-      )).rejects.toThrow('You do not have permission to manage roles');
-
-      // Set current user to owner
-      const ownerManager = new PermissionsManager({
-        permissionsService: mockPermissionsService,
-        currentUserId: 'owner',
-        enforcePermissions: true
-      });
-      await ownerManager.initialize(notebookPath, doc, owner);
-
-      // Owner should be able to change permissions
-      await expect(ownerManager.setUserRole(
-        notebookPath, otherUser, UserRole.Editor
-      )).resolves.not.toThrow();
-    });
-  });
-
-  describe('cell-level permissions', () => {
-    const cellId = 'cell-123';
-
-    beforeEach(async () => {
-      // Set up users with different roles
-      await permissionsManager.setUserRole(notebookPath, 'viewer', UserRole.Viewer);
-      await permissionsManager.setUserRole(notebookPath, 'editor', UserRole.Editor);
-    });
-
-    it('should inherit permissions from notebook by default', async () => {
-      // Check that cell permissions match notebook permissions
-      const viewerCellPermission = await permissionsManager.getCellPermission(
-        notebookPath, cellId, 'viewer'
-      );
-      expect(viewerCellPermission).toBe(PermissionLevel.Read);
-
-      const editorCellPermission = await permissionsManager.getCellPermission(
-        notebookPath, cellId, 'editor'
-      );
-      expect(editorCellPermission).toBe(PermissionLevel.Write);
-    });
-
-    it('should allow setting custom cell permissions', async () => {
-      // Set custom permission for viewer on this cell
-      await permissionsManager.setCellPermission(
-        notebookPath, cellId, 'viewer', PermissionLevel.Write
-      );
-
-      // Disable inheritance for this cell
-      await permissionsManager.setCellInheritance(notebookPath, cellId, false);
-
-      // Check that the custom permission is applied
-      const viewerCellPermission = await permissionsManager.getCellPermission(
-        notebookPath, cellId, 'viewer'
-      );
-      expect(viewerCellPermission).toBe(PermissionLevel.Write);
-
-      // Editor should have no permission on this cell since inheritance is disabled
-      // and no specific permission was set
-      const editorCellPermission = await permissionsManager.getCellPermission(
-        notebookPath, cellId, 'editor'
-      );
-      expect(editorCellPermission).toBe(PermissionLevel.None);
-    });
-
-    it('should enforce cell-level permissions', async () => {
-      // Set custom permission for viewer on this cell
-      await permissionsManager.setCellPermission(
-        notebookPath, cellId, 'viewer', PermissionLevel.Write
-      );
-
-      // Disable inheritance for this cell
-      await permissionsManager.setCellInheritance(notebookPath, cellId, false);
-
-      // Check permissions for specific operations
-      expect(await permissionsManager.hasCellPermission(
-        notebookPath, cellId, 'viewer', IPermissionsService.Permission.Read
-      )).toBe(true);
-      expect(await permissionsManager.hasCellPermission(
-        notebookPath, cellId, 'viewer', IPermissionsService.Permission.Write
-      )).toBe(true);
-      expect(await permissionsManager.hasCellPermission(
-        notebookPath, cellId, 'viewer', IPermissionsService.Permission.Manage
-      )).toBe(false);
-
-      // Editor should have no permission on this cell
-      expect(await permissionsManager.hasCellPermission(
-        notebookPath, cellId, 'editor', IPermissionsService.Permission.Read
-      )).toBe(false);
-    });
-  });
-
-  describe('access modes', () => {
-    it('should support private access mode', async () => {
-      await permissionsManager.setAccessMode(notebookPath, 'private');
+      ];
       
-      // Users without explicit roles should have no access
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'unknown-user', IPermissionsService.Permission.Read
-      )).toBe(false);
-    });
-
-    it('should support shared access mode', async () => {
-      await permissionsManager.setAccessMode(notebookPath, 'shared');
+      const permissionsManager = createPermissionsManager(owner, initialPermissions);
       
-      // Users without explicit roles should have read access
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'unknown-user', IPermissionsService.Permission.Read
-      )).toBe(true);
-      
-      // But not write access
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'unknown-user', IPermissionsService.Permission.Write
-      )).toBe(false);
+      expect(permissionsManager.getPermissions()).toHaveLength(3);
+      expect(permissionsManager.getUserPermissions(editor.id)[0].role).toBe(PermissionRole.Editor);
+      expect(permissionsManager.getUserPermissions(viewer.id)[0].role).toBe(PermissionRole.Viewer);
     });
-
-    it('should support public access mode', async () => {
-      await permissionsManager.setAccessMode(notebookPath, 'public');
-      
-      // Users without explicit roles should have read access
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'unknown-user', IPermissionsService.Permission.Read
-      )).toBe(true);
-      
-      // But not write access
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'unknown-user', IPermissionsService.Permission.Write
-      )).toBe(false);
-    });
-
-    it('should sync access mode with the server', async () => {
-      await permissionsManager.setAccessMode(notebookPath, 'shared');
-      
-      // Verify the access mode was synced to the server
-      const serverPermissions = await mockPermissionsService.getDocumentPermissions(notebookPath);
-      expect(serverPermissions.accessMode).toBe('shared');
-    });
-  });
-
-  describe('permission changes and propagation', () => {
-    it('should emit events when permissions change', async () => {
-      // Set up a listener for permission changes
-      const changeHandler = jest.fn();
-      permissionsManager.permissionsChanged.connect(changeHandler);
-
-      // Make a permission change
-      await permissionsManager.setUserRole(notebookPath, otherUser, UserRole.Editor);
-
-      // Verify the event was emitted
-      expect(changeHandler).toHaveBeenCalled();
-      const event = changeHandler.mock.calls[0][1];
-      expect(event.type).toBe('user');
-      expect(event.path).toBe(notebookPath);
-      expect(event.userId).toBe(otherUser);
-      expect(event.permission).toBe(UserRole.Editor);
-    });
-
-    it('should propagate permission changes to the server', async () => {
-      // Make a permission change
-      await permissionsManager.setUserRole(notebookPath, otherUser, UserRole.Editor);
-
-      // Verify the change was propagated to the server
-      const userPermissions = await mockPermissionsService.getUserPermissions(
-        notebookPath, otherUser
-      );
-      expect(userPermissions).toEqual(ROLE_PERMISSIONS[UserRole.Editor]);
-    });
-
-    it('should update permissions when synced from server', async () => {
-      // Set permissions on the server
-      await mockPermissionsService.setUserPermissions(notebookPath, otherUser, {
-        read: true,
-        write: true,
-        comment: true,
-        manage: false
-      });
-
-      // Sync permissions
-      await permissionsManager.syncPermissions(notebookPath);
-
-      // Verify the permissions were updated
-      const role = await permissionsManager.getUserRole(notebookPath, otherUser);
-      expect(role).toBe(UserRole.Editor);
-    });
-  });
-
-  describe('ownership transfer', () => {
-    it('should allow the owner to transfer ownership', async () => {
-      // Set current user to owner
-      const ownerManager = new PermissionsManager({
-        permissionsService: mockPermissionsService,
-        currentUserId: owner,
-        enforcePermissions: true
-      });
-      await ownerManager.initialize(notebookPath, doc, owner);
-
-      // Transfer ownership
-      await ownerManager.transferOwnership(notebookPath, otherUser);
-
-      // Verify the new owner
-      const newOwner = (await mockPermissionsService.getDocumentPermissions(notebookPath)).owner;
-      expect(newOwner).toBe(otherUser);
-
-      // Verify the new owner has Owner role
-      const role = await ownerManager.getUserRole(notebookPath, otherUser);
-      expect(role).toBe(UserRole.Owner);
-    });
-
-    it('should prevent non-owners from transferring ownership', async () => {
-      // Set current user to editor
-      const editorManager = new PermissionsManager({
-        permissionsService: mockPermissionsService,
-        currentUserId: 'editor',
-        enforcePermissions: true
-      });
-      await editorManager.initialize(notebookPath, doc, owner);
-      await permissionsManager.setUserRole(notebookPath, 'editor', UserRole.Editor);
-
-      // Attempt to transfer ownership
-      await expect(editorManager.transferOwnership(
-        notebookPath, otherUser
-      )).rejects.toThrow('Only the owner can transfer ownership');
-    });
-  });
-
-  describe('JupyterHub integration', () => {
-    it('should use the provided JupyterHub URL', () => {
-      // Create a permissions manager with a specific Hub URL
-      const hubUrl = 'https://hub.example.org';
-      const hubManager = new PermissionsManager({
-        hubUrl,
-        currentUserId: currentUser
-      });
-      
-      // This is a bit of a hack to test a private property
-      // In a real application, we would test the integration through behavior
-      expect((hubManager as any)._hubUrl).toBe(hubUrl);
-    });
-
-    it('should handle permission synchronization with JupyterHub users', async () => {
-      // This test simulates the integration with JupyterHub by using the
-      // permissions service as a proxy for the Hub's user management
-      
-      // Set up user permissions on the "Hub"
-      await mockPermissionsService.setUserPermissions(notebookPath, 'hub-user', {
-        read: true,
-        write: true,
-        comment: true,
-        manage: false
-      });
-
-      // Sync permissions from the "Hub"
-      await permissionsManager.syncPermissions(notebookPath);
-
-      // Verify the permissions were synced
-      const role = await permissionsManager.getUserRole(notebookPath, 'hub-user');
-      expect(role).toBe(UserRole.Editor);
-    });
-  });
-
-  describe('UI adaptation', () => {
-    // These tests verify that the permissions system provides the necessary
-    // information for the UI to adapt based on user permissions
     
-    it('should provide user role information for UI adaptation', async () => {
-      // Set up users with different roles
-      await permissionsManager.setUserRole(notebookPath, 'viewer', UserRole.Viewer);
-      await permissionsManager.setUserRole(notebookPath, 'editor', UserRole.Editor);
+    it('should auto-assign owner role when no owners exist', () => {
+      const user = createMockUser('1', 'User 1');
+      const initialPermissions: IPermissionEntry[] = [];
       
-      // Get all users with access
-      const users = await permissionsManager.getNotebookUsers(notebookPath);
+      const permissionsManager = createPermissionsManager(user, initialPermissions);
       
-      // Verify the user roles
-      expect(users.get('viewer')).toBe(UserRole.Viewer);
-      expect(users.get('editor')).toBe(UserRole.Editor);
+      expect(permissionsManager.currentRole).toBe(PermissionRole.Owner);
+      expect(permissionsManager.getPermissions()).toHaveLength(1);
     });
-
-    it('should provide cell permission information for UI adaptation', async () => {
-      const cellId1 = 'cell-1';
-      const cellId2 = 'cell-2';
+  });
+  
+  describe('role-based access control', () => {
+    let owner: IPermissionUser;
+    let editor: IPermissionUser;
+    let commenter: IPermissionUser;
+    let viewer: IPermissionUser;
+    let ownerManager: IPermissionsManager;
+    let editorManager: IPermissionsManager;
+    let commenterManager: IPermissionsManager;
+    let viewerManager: IPermissionsManager;
+    
+    beforeEach(() => {
+      owner = createMockUser('1', 'Owner');
+      editor = createMockUser('2', 'Editor');
+      commenter = createMockUser('3', 'Commenter');
+      viewer = createMockUser('4', 'Viewer');
       
-      // Set custom permissions for cells
-      await permissionsManager.setCellPermission(
-        notebookPath, cellId1, 'viewer', PermissionLevel.Write
-      );
-      await permissionsManager.setCellInheritance(notebookPath, cellId1, false);
+      // Create permissions managers for each user
+      ownerManager = createPermissionsManager(owner);
       
-      await permissionsManager.setCellPermission(
-        notebookPath, cellId2, 'editor', PermissionLevel.Read
-      );
-      await permissionsManager.setCellInheritance(notebookPath, cellId2, false);
+      // Set up initial permissions
+      ownerManager.setUserRole(editor.id, PermissionRole.Editor);
+      ownerManager.setUserRole(commenter.id, PermissionRole.Commenter);
+      ownerManager.setUserRole(viewer.id, PermissionRole.Viewer);
       
-      // Get cells with custom permissions
-      const cells = await permissionsManager.getCellsWithCustomPermissions(notebookPath);
+      // Create managers for other users with the same Yjs document
+      const ownerYdoc = (ownerManager as PermissionsManager)['_ydoc'];
       
-      // Verify the cell permissions
-      expect(cells.has(cellId1)).toBe(true);
-      expect(cells.has(cellId2)).toBe(true);
+      editorManager = new PermissionsManager({
+        ydoc: ownerYdoc,
+        currentUser: editor,
+        notebookId: 'test-notebook',
+        autoAssignOwner: false,
+        enableCellPermissions: true
+      });
       
-      const cell1Perms = cells.get(cellId1);
-      expect(cell1Perms?.inheritFromNotebook).toBe(false);
-      expect(cell1Perms?.userPermissions.get('viewer')).toBe(PermissionLevel.Write);
+      commenterManager = new PermissionsManager({
+        ydoc: ownerYdoc,
+        currentUser: commenter,
+        notebookId: 'test-notebook',
+        autoAssignOwner: false,
+        enableCellPermissions: true
+      });
       
-      const cell2Perms = cells.get(cellId2);
-      expect(cell2Perms?.inheritFromNotebook).toBe(false);
-      expect(cell2Perms?.userPermissions.get('editor')).toBe(PermissionLevel.Read);
+      viewerManager = new PermissionsManager({
+        ydoc: ownerYdoc,
+        currentUser: viewer,
+        notebookId: 'test-notebook',
+        autoAssignOwner: false,
+        enableCellPermissions: true
+      });
     });
-
-    it('should provide permission check methods for UI components', async () => {
-      // Set up a user with Editor role
-      await permissionsManager.setUserRole(notebookPath, 'ui-user', UserRole.Editor);
+    
+    it('should correctly identify user roles', () => {
+      expect(ownerManager.currentRole).toBe(PermissionRole.Owner);
+      expect(editorManager.currentRole).toBe(PermissionRole.Editor);
+      expect(commenterManager.currentRole).toBe(PermissionRole.Commenter);
+      expect(viewerManager.currentRole).toBe(PermissionRole.Viewer);
+    });
+    
+    it('should allow owners to perform all actions', async () => {
+      // Test all permission actions
+      for (const action of Object.values(PermissionAction)) {
+        const result = await ownerManager.checkPermission(action);
+        expect(result.allowed).toBe(true);
+      }
+    });
+    
+    it('should allow editors to edit, execute, comment, and view', async () => {
+      // Actions editors should be allowed to perform
+      const allowedActions = [
+        PermissionAction.View,
+        PermissionAction.Edit,
+        PermissionAction.Execute,
+        PermissionAction.Comment,
+        PermissionAction.Lock
+      ];
       
-      // These methods would be used by UI components to determine what to show
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'ui-user', IPermissionsService.Permission.Read
-      )).toBe(true);
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'ui-user', IPermissionsService.Permission.Write
-      )).toBe(true);
-      expect(await permissionsManager.hasNotebookPermission(
-        notebookPath, 'ui-user', IPermissionsService.Permission.Manage
-      )).toBe(false);
+      // Actions editors should not be allowed to perform
+      const disallowedActions = [
+        PermissionAction.ManagePermissions,
+        PermissionAction.Delete
+      ];
+      
+      for (const action of allowedActions) {
+        const result = await editorManager.checkPermission(action);
+        expect(result.allowed).toBe(true);
+      }
+      
+      for (const action of disallowedActions) {
+        const result = await editorManager.checkPermission(action);
+        expect(result.allowed).toBe(false);
+      }
+    });
+    
+    it('should allow commenters to comment and view', async () => {
+      // Actions commenters should be allowed to perform
+      const allowedActions = [
+        PermissionAction.View,
+        PermissionAction.Comment
+      ];
+      
+      // Actions commenters should not be allowed to perform
+      const disallowedActions = [
+        PermissionAction.Edit,
+        PermissionAction.Execute,
+        PermissionAction.Lock,
+        PermissionAction.ManagePermissions,
+        PermissionAction.Delete
+      ];
+      
+      for (const action of allowedActions) {
+        const result = await commenterManager.checkPermission(action);
+        expect(result.allowed).toBe(true);
+      }
+      
+      for (const action of disallowedActions) {
+        const result = await commenterManager.checkPermission(action);
+        expect(result.allowed).toBe(false);
+      }
+    });
+    
+    it('should allow viewers to only view content', async () => {
+      // Actions viewers should be allowed to perform
+      const allowedActions = [
+        PermissionAction.View
+      ];
+      
+      // Actions viewers should not be allowed to perform
+      const disallowedActions = [
+        PermissionAction.Edit,
+        PermissionAction.Execute,
+        PermissionAction.Comment,
+        PermissionAction.Lock,
+        PermissionAction.ManagePermissions,
+        PermissionAction.Delete
+      ];
+      
+      for (const action of allowedActions) {
+        const result = await viewerManager.checkPermission(action);
+        expect(result.allowed).toBe(true);
+      }
+      
+      for (const action of disallowedActions) {
+        const result = await viewerManager.checkPermission(action);
+        expect(result.allowed).toBe(false);
+      }
+    });
+    
+    it('should provide appropriate error messages for disallowed actions', async () => {
+      const result = await viewerManager.checkPermission(PermissionAction.Edit);
+      
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toBeDefined();
+      expect(result.reason).toContain('does not have');
+    });
+    
+    it('should treat admin users as owners regardless of assigned role', async () => {
+      // Create an admin user with viewer role
+      const admin = createMockUser('5', 'Admin', true);
+      ownerManager.setUserRole(admin.id, PermissionRole.Viewer);
+      
+      // Create a permissions manager for the admin user
+      const ownerYdoc = (ownerManager as PermissionsManager)['_ydoc'];
+      const adminManager = new PermissionsManager({
+        ydoc: ownerYdoc,
+        currentUser: admin,
+        notebookId: 'test-notebook',
+        autoAssignOwner: false,
+        enableCellPermissions: true
+      });
+      
+      // Admin should be able to perform owner actions despite having viewer role
+      const result = await adminManager.checkPermission(PermissionAction.ManagePermissions);
+      expect(result.allowed).toBe(true);
+      expect(result.role).toBe(PermissionRole.Owner);
+    });
+  });
+  
+  describe('cell-level permissions', () => {
+    let owner: IPermissionUser;
+    let editor: IPermissionUser;
+    let ownerManager: IPermissionsManager;
+    let editorManager: IPermissionsManager;
+    const cellId = 'test-cell-1';
+    
+    beforeEach(() => {
+      owner = createMockUser('1', 'Owner');
+      editor = createMockUser('2', 'Editor');
+      
+      // Create permissions managers for each user
+      ownerManager = createPermissionsManager(owner);
+      
+      // Set up initial permissions
+      ownerManager.setUserRole(editor.id, PermissionRole.Editor);
+      
+      // Create manager for editor with the same Yjs document
+      const ownerYdoc = (ownerManager as PermissionsManager)['_ydoc'];
+      
+      editorManager = new PermissionsManager({
+        ydoc: ownerYdoc,
+        currentUser: editor,
+        notebookId: 'test-notebook',
+        autoAssignOwner: false,
+        enableCellPermissions: true
+      });
+    });
+    
+    it('should allow setting cell-specific permissions', async () => {
+      // Owner sets viewer permission for editor on a specific cell
+      const result = await ownerManager.setCellRole(editor.id, cellId, PermissionRole.Viewer);
+      expect(result).toBe(true);
+      
+      // Get cell permissions
+      const cellPermissions = ownerManager.getCellPermissions(cellId);
+      expect(cellPermissions).toHaveLength(1);
+      expect(cellPermissions[0].user.id).toBe(editor.id);
+      expect(cellPermissions[0].role).toBe(PermissionRole.Viewer);
+    });
+    
+    it('should enforce cell-specific permissions over notebook permissions', async () => {
+      // Editor normally has edit permission for the notebook
+      const notebookEditResult = await editorManager.checkPermission(PermissionAction.Edit);
+      expect(notebookEditResult.allowed).toBe(true);
+      
+      // Owner sets viewer permission for editor on a specific cell
+      await ownerManager.setCellRole(editor.id, cellId, PermissionRole.Viewer);
+      
+      // Editor should not be able to edit that specific cell
+      const cellEditResult = await editorManager.checkPermission(PermissionAction.Edit, cellId);
+      expect(cellEditResult.allowed).toBe(false);
+      
+      // But editor should still be able to edit other cells
+      const otherCellEditResult = await editorManager.checkPermission(PermissionAction.Edit, 'other-cell');
+      expect(otherCellEditResult.allowed).toBe(true);
+    });
+    
+    it('should allow removing cell-specific permissions', async () => {
+      // Set cell permission
+      await ownerManager.setCellRole(editor.id, cellId, PermissionRole.Viewer);
+      
+      // Verify it was set
+      const cellPermissions = ownerManager.getCellPermissions(cellId);
+      expect(cellPermissions).toHaveLength(1);
+      
+      // Remove the permission
+      const removeResult = await ownerManager.removeCellPermissions(editor.id, cellId);
+      expect(removeResult).toBe(true);
+      
+      // Verify it was removed
+      const updatedCellPermissions = ownerManager.getCellPermissions(cellId);
+      expect(updatedCellPermissions).toHaveLength(0);
+      
+      // Editor should now be able to edit the cell again
+      const cellEditResult = await editorManager.checkPermission(PermissionAction.Edit, cellId);
+      expect(cellEditResult.allowed).toBe(true);
+    });
+    
+    it('should not allow non-owners to set cell permissions', async () => {
+      // Editor tries to set cell permission for themselves
+      const result = await editorManager.setCellRole(editor.id, cellId, PermissionRole.Owner);
+      expect(result).toBe(false);
+      
+      // No cell permissions should be set
+      const cellPermissions = ownerManager.getCellPermissions(cellId);
+      expect(cellPermissions).toHaveLength(0);
+    });
+  });
+  
+  describe('temporary permissions', () => {
+    let owner: IPermissionUser;
+    let viewer: IPermissionUser;
+    let ownerManager: IPermissionsManager;
+    let viewerManager: IPermissionsManager;
+    
+    beforeEach(() => {
+      jest.useFakeTimers();
+      
+      owner = createMockUser('1', 'Owner');
+      viewer = createMockUser('2', 'Viewer');
+      
+      // Create permissions managers for each user
+      ownerManager = createPermissionsManager(owner);
+      
+      // Set up initial permissions
+      ownerManager.setUserRole(viewer.id, PermissionRole.Viewer);
+      
+      // Create manager for viewer with the same Yjs document
+      const ownerYdoc = (ownerManager as PermissionsManager)['_ydoc'];
+      
+      viewerManager = new PermissionsManager({
+        ydoc: ownerYdoc,
+        currentUser: viewer,
+        notebookId: 'test-notebook',
+        autoAssignOwner: false,
+        enableCellPermissions: true
+      });
+    });
+    
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+    
+    it('should set temporary notebook-level permissions that expire', async () => {
+      // Initially viewer cannot edit
+      const initialEditResult = await viewerManager.checkPermission(PermissionAction.Edit);
+      expect(initialEditResult.allowed).toBe(false);
+      
+      // Owner grants temporary editor permission to viewer for 5 seconds
+      const tempResult = await ownerManager.setTemporaryPermission(
+        viewer.id,
+        PermissionRole.Editor,
+        5000, // 5 seconds
+        PermissionScope.Notebook
+      );
+      expect(tempResult).toBe(true);
+      
+      // Viewer should now be able to edit
+      const editResult = await viewerManager.checkPermission(PermissionAction.Edit);
+      expect(editResult.allowed).toBe(true);
+      
+      // Advance time past expiration
+      jest.advanceTimersByTime(6000); // 6 seconds
+      
+      // Sync permissions to clean up expired permissions
+      await viewerManager.syncPermissions();
+      
+      // Viewer should no longer be able to edit
+      const finalEditResult = await viewerManager.checkPermission(PermissionAction.Edit);
+      expect(finalEditResult.allowed).toBe(false);
+    });
+    
+    it('should set temporary cell-level permissions that expire', async () => {
+      const cellId = 'test-cell-1';
+      
+      // Initially viewer cannot edit any cell
+      const initialEditResult = await viewerManager.checkPermission(PermissionAction.Edit, cellId);
+      expect(initialEditResult.allowed).toBe(false);
+      
+      // Owner grants temporary editor permission to viewer for a specific cell for 5 seconds
+      const tempResult = await ownerManager.setTemporaryPermission(
+        viewer.id,
+        PermissionRole.Editor,
+        5000, // 5 seconds
+        PermissionScope.Cell,
+        cellId
+      );
+      expect(tempResult).toBe(true);
+      
+      // Viewer should now be able to edit that cell
+      const editResult = await viewerManager.checkPermission(PermissionAction.Edit, cellId);
+      expect(editResult.allowed).toBe(true);
+      
+      // But not other cells
+      const otherCellEditResult = await viewerManager.checkPermission(PermissionAction.Edit, 'other-cell');
+      expect(otherCellEditResult.allowed).toBe(false);
+      
+      // Advance time past expiration
+      jest.advanceTimersByTime(6000); // 6 seconds
+      
+      // Sync permissions to clean up expired permissions
+      await viewerManager.syncPermissions();
+      
+      // Viewer should no longer be able to edit the cell
+      const finalEditResult = await viewerManager.checkPermission(PermissionAction.Edit, cellId);
+      expect(finalEditResult.allowed).toBe(false);
+    });
+  });
+  
+  describe('permission changes and propagation', () => {
+    let user1: IPermissionUser;
+    let user2: IPermissionUser;
+    let manager1: IPermissionsManager;
+    let manager2: IPermissionsManager;
+    
+    beforeEach(() => {
+      user1 = createMockUser('1', 'User 1');
+      user2 = createMockUser('2', 'User 2');
+      
+      // Create permissions managers for each user
+      manager1 = createPermissionsManager(user1);
+      
+      // Create a second manager with its own Yjs document
+      manager2 = createPermissionsManager(user2);
+      
+      // Connect the Yjs documents
+      const doc1 = (manager1 as PermissionsManager)['_ydoc'];
+      const doc2 = (manager2 as PermissionsManager)['_ydoc'];
+      connectYjsDocs(doc1, doc2);
+    });
+    
+    it('should propagate permission changes to all connected clients', async () => {
+      // User 1 sets User 2 as an editor
+      await manager1.setUserRole(user2.id, PermissionRole.Editor);
+      
+      // User 2's manager should see the change
+      const user2Permissions = manager2.getUserPermissions(user2.id);
+      expect(user2Permissions).toHaveLength(1);
+      expect(user2Permissions[0].role).toBe(PermissionRole.Editor);
+      
+      // User 2's current role should be updated
+      expect(manager2.currentRole).toBe(PermissionRole.Editor);
+    });
+    
+    it('should emit permissionsChanged signal when permissions change', async () => {
+      // Set up a spy for the permissionsChanged signal
+      const permissionsChangedSpy = jest.fn();
+      manager1.permissionsChanged.connect(permissionsChangedSpy);
+      
+      // User 1 sets User 2 as an editor
+      await manager1.setUserRole(user2.id, PermissionRole.Editor);
+      
+      // The signal should be emitted
+      expect(permissionsChangedSpy).toHaveBeenCalled();
+      const eventArg = permissionsChangedSpy.mock.calls[0][1];
+      expect(eventArg.type).toBe('added');
+      expect(eventArg.entry.user.id).toBe(user2.id);
+      expect(eventArg.entry.role).toBe(PermissionRole.Editor);
+    });
+    
+    it('should emit permissionsChanged signal when permissions are updated', async () => {
+      // First set User 2 as an editor
+      await manager1.setUserRole(user2.id, PermissionRole.Editor);
+      
+      // Set up a spy for the permissionsChanged signal
+      const permissionsChangedSpy = jest.fn();
+      manager1.permissionsChanged.connect(permissionsChangedSpy);
+      
+      // Update User 2 to be a commenter
+      await manager1.setUserRole(user2.id, PermissionRole.Commenter);
+      
+      // The signal should be emitted
+      expect(permissionsChangedSpy).toHaveBeenCalled();
+      const eventArg = permissionsChangedSpy.mock.calls[0][1];
+      expect(eventArg.type).toBe('updated');
+      expect(eventArg.entry.user.id).toBe(user2.id);
+      expect(eventArg.entry.role).toBe(PermissionRole.Commenter);
+      expect(eventArg.previousRole).toBe(PermissionRole.Editor);
+    });
+    
+    it('should emit permissionsChanged signal when permissions are removed', async () => {
+      // First set User 2 as an editor
+      await manager1.setUserRole(user2.id, PermissionRole.Editor);
+      
+      // Set up a spy for the permissionsChanged signal
+      const permissionsChangedSpy = jest.fn();
+      manager1.permissionsChanged.connect(permissionsChangedSpy);
+      
+      // Remove User 2's permissions
+      await manager1.removeUserPermissions(user2.id);
+      
+      // The signal should be emitted
+      expect(permissionsChangedSpy).toHaveBeenCalled();
+      const eventArg = permissionsChangedSpy.mock.calls[0][1];
+      expect(eventArg.type).toBe('removed');
+      expect(eventArg.entry.user.id).toBe(user2.id);
+    });
+  });
+  
+  describe('JupyterHub integration', () => {
+    let owner: IPermissionUser;
+    let hubUser: IPermissionUser;
+    let permissionsManager: IPermissionsManager;
+    
+    beforeEach(() => {
+      owner = createMockUser('1', 'Owner');
+      hubUser = createMockUser('hub-user', 'Hub User');
+      
+      // Mock fetch for JupyterHub API
+      global.fetch = jest.fn().mockImplementation((url) => {
+        if (url.includes('/users/hub-user')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({
+              name: 'hub-user',
+              display_name: 'Hub User from API',
+              avatar_url: 'https://example.com/hub-avatar.png',
+              email: 'hub-user@example.com',
+              admin: true
+            })
+          });
+        }
+        return Promise.resolve({
+          ok: false,
+          status: 404
+        });
+      });
+      
+      // Create permissions manager with JupyterHub API URL
+      permissionsManager = createPermissionsManager(owner, undefined, 'https://example.com/hub/api');
+    });
+    
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+    
+    it('should fetch user information from JupyterHub API', async () => {
+      // Set role for a user not yet in the system
+      await permissionsManager.setUserRole(hubUser.id, PermissionRole.Editor);
+      
+      // Verify fetch was called
+      expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/users/hub-user'));
+      
+      // Get the user permissions
+      const userPermissions = permissionsManager.getUserPermissions(hubUser.id);
+      expect(userPermissions).toHaveLength(1);
+      
+      // Verify the user info was updated from the API
+      expect(userPermissions[0].user.displayName).toBe('Hub User from API');
+      expect(userPermissions[0].user.avatarUrl).toBe('https://example.com/hub-avatar.png');
+      expect(userPermissions[0].user.email).toBe('hub-user@example.com');
+      expect(userPermissions[0].user.isAdmin).toBe(true);
+    });
+    
+    it('should handle errors when fetching from JupyterHub API', async () => {
+      // Mock console.warn
+      const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
+      
+      // Mock fetch to throw an error
+      global.fetch = jest.fn().mockRejectedValue(new Error('Network error'));
+      
+      // Set role for a user not yet in the system
+      await permissionsManager.setUserRole('error-user', PermissionRole.Editor);
+      
+      // Verify fetch was called
+      expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/users/error-user'));
+      
+      // Verify warning was logged
+      expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to fetch user information'), expect.any(Error));
+      
+      // Get the user permissions
+      const userPermissions = permissionsManager.getUserPermissions('error-user');
+      expect(userPermissions).toHaveLength(1);
+      
+      // Verify minimal user info was created
+      expect(userPermissions[0].user.id).toBe('error-user');
+      expect(userPermissions[0].user.displayName).toBe('error-user');
+      
+      // Clean up
+      consoleWarnSpy.mockRestore();
+    });
+    
+    it('should recognize JupyterHub admin users and grant them owner privileges', async () => {
+      // Set hub user as a viewer
+      await permissionsManager.setUserRole(hubUser.id, PermissionRole.Viewer);
+      
+      // Create a permissions manager for the hub user
+      const hubUserManager = new PermissionsManager({
+        ydoc: (permissionsManager as PermissionsManager)['_ydoc'],
+        currentUser: {
+          id: hubUser.id,
+          displayName: 'Hub User from API',
+          avatarUrl: 'https://example.com/hub-avatar.png',
+          email: 'hub-user@example.com',
+          isAdmin: true
+        },
+        notebookId: 'test-notebook',
+        autoAssignOwner: false
+      });
+      
+      // Hub user should be able to perform owner actions despite being a viewer
+      const result = await hubUserManager.checkPermission(PermissionAction.ManagePermissions);
+      expect(result.allowed).toBe(true);
+      expect(result.role).toBe(PermissionRole.Owner);
+    });
+  });
+  
+  describe('UI adaptation based on permissions', () => {
+    let owner: IPermissionUser;
+    let editor: IPermissionUser;
+    let commenter: IPermissionUser;
+    let viewer: IPermissionUser;
+    let ownerManager: IPermissionsManager;
+    let editorManager: IPermissionsManager;
+    let commenterManager: IPermissionsManager;
+    let viewerManager: IPermissionsManager;
+    
+    beforeEach(() => {
+      owner = createMockUser('1', 'Owner');
+      editor = createMockUser('2', 'Editor');
+      commenter = createMockUser('3', 'Commenter');
+      viewer = createMockUser('4', 'Viewer');
+      
+      // Create permissions managers for each user
+      ownerManager = createPermissionsManager(owner);
+      
+      // Set up initial permissions
+      ownerManager.setUserRole(editor.id, PermissionRole.Editor);
+      ownerManager.setUserRole(commenter.id, PermissionRole.Commenter);
+      ownerManager.setUserRole(viewer.id, PermissionRole.Viewer);
+      
+      // Create managers for other users with the same Yjs document
+      const ownerYdoc = (ownerManager as PermissionsManager)['_ydoc'];
+      
+      editorManager = new PermissionsManager({
+        ydoc: ownerYdoc,
+        currentUser: editor,
+        notebookId: 'test-notebook',
+        autoAssignOwner: false
+      });
+      
+      commenterManager = new PermissionsManager({
+        ydoc: ownerYdoc,
+        currentUser: commenter,
+        notebookId: 'test-notebook',
+        autoAssignOwner: false
+      });
+      
+      viewerManager = new PermissionsManager({
+        ydoc: ownerYdoc,
+        currentUser: viewer,
+        notebookId: 'test-notebook',
+        autoAssignOwner: false
+      });
+    });
+    
+    it('should provide permission check results for UI adaptation', async () => {
+      // Define UI elements and their required permissions
+      const uiElements = [
+        { id: 'edit-button', action: PermissionAction.Edit },
+        { id: 'execute-button', action: PermissionAction.Execute },
+        { id: 'comment-button', action: PermissionAction.Comment },
+        { id: 'share-button', action: PermissionAction.ManagePermissions }
+      ];
+      
+      // Check visibility for owner
+      const ownerVisibility = await Promise.all(
+        uiElements.map(async (element) => {
+          const result = await ownerManager.checkPermission(element.action);
+          return { id: element.id, visible: result.allowed };
+        })
+      );
+      
+      // All elements should be visible to owner
+      expect(ownerVisibility.every(e => e.visible)).toBe(true);
+      
+      // Check visibility for viewer
+      const viewerVisibility = await Promise.all(
+        uiElements.map(async (element) => {
+          const result = await viewerManager.checkPermission(element.action);
+          return { id: element.id, visible: result.allowed };
+        })
+      );
+      
+      // Only view-related elements should be visible to viewer
+      expect(viewerVisibility.find(e => e.id === 'edit-button')?.visible).toBe(false);
+      expect(viewerVisibility.find(e => e.id === 'execute-button')?.visible).toBe(false);
+      expect(viewerVisibility.find(e => e.id === 'comment-button')?.visible).toBe(false);
+      expect(viewerVisibility.find(e => e.id === 'share-button')?.visible).toBe(false);
+    });
+    
+    it('should provide user role information for UI customization', () => {
+      // Get all users and their roles for UI display
+      const users = ownerManager.getUsers();
+      const userRoles = users.map(user => {
+        const permissions = ownerManager.getUserPermissions(user.id);
+        const notebookPermission = permissions.find(p => p.scope === PermissionScope.Notebook);
+        return {
+          id: user.id,
+          displayName: user.displayName,
+          role: notebookPermission?.role || 'none'
+        };
+      });
+      
+      // Verify all users and their roles are included
+      expect(userRoles).toHaveLength(4); // owner, editor, commenter, viewer
+      expect(userRoles.find(u => u.id === owner.id)?.role).toBe(PermissionRole.Owner);
+      expect(userRoles.find(u => u.id === editor.id)?.role).toBe(PermissionRole.Editor);
+      expect(userRoles.find(u => u.id === commenter.id)?.role).toBe(PermissionRole.Commenter);
+      expect(userRoles.find(u => u.id === viewer.id)?.role).toBe(PermissionRole.Viewer);
+    });
+    
+    it('should provide cell-specific permission information for UI adaptation', async () => {
+      const cellId = 'test-cell-1';
+      
+      // Owner sets viewer permission for editor on a specific cell
+      await ownerManager.setCellRole(editor.id, cellId, PermissionRole.Viewer);
+      
+      // Check if editor can edit this specific cell
+      const canEdit = await editorManager.checkPermission(PermissionAction.Edit, cellId);
+      expect(canEdit.allowed).toBe(false);
+      
+      // UI should adapt based on this result
+      // For example, disable edit controls for this cell
+      const editControlsEnabled = canEdit.allowed;
+      expect(editControlsEnabled).toBe(false);
+      
+      // But editor should still be able to edit other cells
+      const canEditOtherCell = await editorManager.checkPermission(PermissionAction.Edit, 'other-cell');
+      expect(canEditOtherCell.allowed).toBe(true);
+    });
+  });
+  
+  describe('error handling and edge cases', () => {
+    let owner: IPermissionUser;
+    let permissionsManager: IPermissionsManager;
+    
+    beforeEach(() => {
+      owner = createMockUser('1', 'Owner');
+      permissionsManager = createPermissionsManager(owner);
+    });
+    
+    it('should handle non-existent users gracefully', async () => {
+      const nonExistentUserId = 'non-existent-user';
+      
+      // Check permissions for non-existent user
+      const userPermissions = permissionsManager.getUserPermissions(nonExistentUserId);
+      expect(userPermissions).toHaveLength(0);
+      
+      // Check if non-existent user can perform an action
+      const result = await permissionsManager.checkUserPermission(nonExistentUserId, PermissionAction.View);
+      expect(result.allowed).toBe(true); // Default role is Viewer, which can view
+      expect(result.role).toBe(PermissionRole.Viewer);
+    });
+    
+    it('should handle permission removal for non-existent users', async () => {
+      const nonExistentUserId = 'non-existent-user';
+      
+      // Try to remove permissions for non-existent user
+      const result = await permissionsManager.removeUserPermissions(nonExistentUserId);
+      expect(result).toBe(true); // Should succeed since there's nothing to remove
+    });
+    
+    it('should handle cell permission removal for non-existent cells', async () => {
+      const nonExistentCellId = 'non-existent-cell';
+      
+      // Try to remove cell permissions for non-existent cell
+      const result = await permissionsManager.removeCellPermissions(owner.id, nonExistentCellId);
+      expect(result).toBe(true); // Should succeed since there's nothing to remove
+    });
+    
+    it('should handle disabled cell permissions', async () => {
+      // Create a permissions manager with cell permissions disabled
+      const noCellPermissionsManager = new PermissionsManager({
+        ydoc: new Y.Doc(),
+        currentUser: owner,
+        notebookId: 'test-notebook',
+        enableCellPermissions: false
+      });
+      
+      // Try to set cell permissions
+      const setCellResult = await noCellPermissionsManager.setCellRole('user-id', 'cell-id', PermissionRole.Editor);
+      expect(setCellResult).toBe(false);
+      
+      // Try to remove cell permissions
+      const removeCellResult = await noCellPermissionsManager.removeCellPermissions('user-id', 'cell-id');
+      expect(removeCellResult).toBe(false);
+    });
+  });
+  
+  describe('dispose', () => {
+    it('should clean up resources when disposed', () => {
+      const user = createMockUser('1', 'User 1');
+      const permissionsManager = createPermissionsManager(user);
+      
+      // Set up spies for signals
+      const statusChangedSpy = jest.spyOn(permissionsManager.statusChanged, 'disconnect');
+      const permissionsChangedSpy = jest.spyOn(permissionsManager.permissionsChanged, 'disconnect');
+      
+      // Dispose the permissions manager
+      permissionsManager.dispose();
+      
+      // Verify signals were disconnected
+      expect(statusChangedSpy).toHaveBeenCalled();
+      expect(permissionsChangedSpy).toHaveBeenCalled();
+      
+      // Verify the manager is disposed
+      expect((permissionsManager as any)._isDisposed).toBe(true);
     });
   });
 });
