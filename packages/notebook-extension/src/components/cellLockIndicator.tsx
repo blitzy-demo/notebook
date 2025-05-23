@@ -1,327 +1,387 @@
-import { ReactWidget } from '@jupyterlab/apputils';
-
-import { Cell } from '@jupyterlab/cells';
-
-import { ILockService } from '@jupyterlab/notebook/lib/collab/locks';
-
-import { Notebook } from '@jupyterlab/notebook';
-
-import { ITranslator } from '@jupyterlab/translation';
-
-import React, { useEffect, useState, useCallback } from 'react';
-
 /**
- * Interface for the lock information
+ * Cell lock indicator component for collaborative notebooks
  */
-interface ILockInfo {
-  /** The ID of the cell that is locked */
-  cellId: string;
-  /** The ID of the user who holds the lock */
-  userId: string;
-  /** The display name of the user who holds the lock */
-  userName: string;
-  /** The time when the lock was acquired */
-  acquiredTime: Date;
-  /** Whether the lock is held by the current user */
-  isOwnedByCurrentUser: boolean;
-  /** Optional avatar URL of the user who holds the lock */
-  avatarUrl?: string;
-}
+
+import React, { useState, useEffect, useCallback } from 'react';
+import { ReactWidget } from '@jupyterlab/apputils';
+import { Cell } from '@jupyterlab/cells';
+import { ILockManager, ILockInfo, LockManagerStatus } from '@jupyterlab/notebook/lib/collab/locks';
+import { ITranslator, nullTranslator } from '@jupyterlab/translation';
+import { Time } from '@jupyterlab/coreutils';
 
 /**
  * Props for the CellLockIndicator component
  */
-interface ICellLockIndicatorProps {
-  /** The cell to display lock status for */
-  cell: Cell;
-  /** The notebook containing the cell */
-  notebook: Notebook;
-  /** The lock service to use for tracking lock states */
-  lockService: ILockService;
-  /** The translator service */
-  translator: ITranslator;
+export interface ICellLockIndicatorProps {
+  /**
+   * The cell ID to track lock status for
+   */
+  cellId: string;
+
+  /**
+   * The lock manager service
+   */
+  lockManager: ILockManager;
+
+  /**
+   * The current user ID
+   */
+  userId: string;
+
+  /**
+   * Optional translator
+   */
+  translator?: ITranslator;
+
+  /**
+   * Optional callback when lock is acquired
+   */
+  onLockAcquired?: (lockInfo: ILockInfo) => void;
+
+  /**
+   * Optional callback when lock is released
+   */
+  onLockReleased?: (lockInfo: ILockInfo) => void;
 }
 
 /**
- * A React component to display the lock status of a cell.
- * 
- * @param props The component props
+ * Lock status types
  */
-const CellLockIndicator = ({
-  cell,
-  notebook,
-  lockService,
-  translator
-}: ICellLockIndicatorProps): JSX.Element => {
-  const trans = translator.load('notebook');
-  const [lockInfo, setLockInfo] = useState<ILockInfo | null>(null);
-  const [isLocked, setIsLocked] = useState<boolean>(false);
-  
-  // Check if the cell is locked and update the lock info
-  const checkLockStatus = useCallback(() => {
-    const cellId = cell.model.id;
-    const lockStatus = lockService.getLockStatus(cellId);
-    
-    if (lockStatus.isLocked) {
-      setIsLocked(true);
-      setLockInfo({
-        cellId,
-        userId: lockStatus.userId,
-        userName: lockStatus.userName,
-        acquiredTime: lockStatus.acquiredTime,
-        isOwnedByCurrentUser: lockStatus.isOwnedByCurrentUser,
-        avatarUrl: lockStatus.avatarUrl
-      });
-      
-      // Add a CSS class to the cell element to indicate it's locked
-      const cellElement = notebook.widgets.find(widget => widget.model.id === cellId);
-      if (cellElement) {
-        if (lockStatus.isOwnedByCurrentUser) {
-          cellElement.addClass('jp-Cell-lockedByMe');
-          cellElement.removeClass('jp-Cell-lockedByOther');
-        } else {
-          cellElement.addClass('jp-Cell-lockedByOther');
-          cellElement.removeClass('jp-Cell-lockedByMe');
-        }
-      }
-    } else {
-      setIsLocked(false);
-      setLockInfo(null);
-      
-      // Remove lock-related CSS classes from the cell element
-      const cellElement = notebook.widgets.find(widget => widget.model.id === cellId);
-      if (cellElement) {
-        cellElement.removeClass('jp-Cell-lockedByMe');
-        cellElement.removeClass('jp-Cell-lockedByOther');
-      }
-    }
-  };
+enum LockStatus {
+  /**
+   * Cell is not locked
+   */
+  Unlocked = 'unlocked',
 
-  // Handle acquiring a lock on the cell
-  const acquireLock = async () => {
+  /**
+   * Cell is locked by the current user
+   */
+  LockedByMe = 'locked-by-me',
+
+  /**
+   * Cell is locked by another user
+   */
+  LockedByOther = 'locked-by-other',
+
+  /**
+   * Lock manager is not available
+   */
+  Unavailable = 'unavailable'
+}
+
+/**
+ * A React component for displaying cell lock status and controls
+ */
+export const CellLockIndicator: React.FC<ICellLockIndicatorProps> = ({
+  cellId,
+  lockManager,
+  userId,
+  translator = nullTranslator,
+  onLockAcquired,
+  onLockReleased
+}) => {
+  const trans = translator.load('notebook');
+  
+  // State for lock status and info
+  const [lockStatus, setLockStatus] = useState<LockStatus>(LockStatus.Unlocked);
+  const [lockInfo, setLockInfo] = useState<ILockInfo | null>(null);
+  const [isAcquiringLock, setIsAcquiringLock] = useState(false);
+  const [managerStatus, setManagerStatus] = useState<LockManagerStatus>(lockManager.status);
+  const [timeRemaining, setTimeRemaining] = useState<string>('');
+  const [isStateChanging, setIsStateChanging] = useState(false);
+
+  // Update lock status based on current state
+  const updateLockStatus = useCallback(() => {
+    if (managerStatus !== LockManagerStatus.Ready && managerStatus !== LockManagerStatus.Degraded) {
+      setLockStatus(LockStatus.Unavailable);
+      setLockInfo(null);
+      return;
+    }
+
+    const currentLock = lockManager.getLock(cellId);
+    if (!currentLock) {
+      setLockStatus(LockStatus.Unlocked);
+      setLockInfo(null);
+      return;
+    }
+
+    if (currentLock.userId === userId) {
+      setLockStatus(LockStatus.LockedByMe);
+    } else {
+      setLockStatus(LockStatus.LockedByOther);
+    }
+    
+    setLockInfo(currentLock);
+  }, [cellId, lockManager, userId, managerStatus]);
+
+  // Update time remaining for locks
+  const updateTimeRemaining = useCallback(() => {
+    if (!lockInfo || lockStatus !== LockStatus.LockedByMe) {
+      setTimeRemaining('');
+      return;
+    }
+
+    const now = Date.now();
+    const remaining = Math.max(0, lockInfo.expiresAt - now);
+    
+    if (remaining <= 0) {
+      setTimeRemaining(trans.__('Expired'));
+      return;
+    }
+
+    // Format as MM:SS if more than a minute, otherwise as SS seconds
+    const seconds = Math.floor(remaining / 1000);
+    if (seconds >= 60) {
+      const minutes = Math.floor(seconds / 60);
+      const remainingSeconds = seconds % 60;
+      setTimeRemaining(`${minutes}:${remainingSeconds.toString().padStart(2, '0')}`);
+    } else {
+      setTimeRemaining(`${seconds}s`);
+    }
+  }, [lockInfo, lockStatus, trans]);
+
+  // Handle acquiring a lock
+  const handleAcquireLock = async () => {
+    if (lockStatus !== LockStatus.Unlocked || isAcquiringLock) {
+      return;
+    }
+
+    setIsAcquiringLock(true);
+    setIsStateChanging(true);
     try {
-      // Show a visual indicator that we're trying to acquire the lock
-      const cellElement = notebook.widgets.find(widget => widget.model.id === cell.model.id);
-      if (cellElement) {
-        cellElement.addClass('jp-Cell-lockPending');
-      }
-      
-      await lockService.acquireLock(cell.model.id);
-      checkLockStatus();
-      
-      // Remove the pending indicator
-      if (cellElement) {
-        cellElement.removeClass('jp-Cell-lockPending');
+      const result = await lockManager.acquireLock(cellId);
+      if (result.success && result.lock) {
+        setLockStatus(LockStatus.LockedByMe);
+        setLockInfo(result.lock);
+        if (onLockAcquired) {
+          onLockAcquired(result.lock);
+        }
       }
     } catch (error) {
       console.error('Failed to acquire lock:', error);
-      
-      // Remove the pending indicator on error
-      const cellElement = notebook.widgets.find(widget => widget.model.id === cell.model.id);
-      if (cellElement) {
-        cellElement.removeClass('jp-Cell-lockPending');
-      }
+    } finally {
+      setIsAcquiringLock(false);
+      // Reset state changing flag after animation duration
+      setTimeout(() => setIsStateChanging(false), 300);
     }
   };
 
-  // Handle releasing a lock on the cell
-  const releaseLock = async () => {
+  // Handle releasing a lock
+  const handleReleaseLock = async () => {
+    if (lockStatus !== LockStatus.LockedByMe || !lockInfo) {
+      return;
+    }
+
+    setIsStateChanging(true);
     try {
-      // Show a visual indicator that we're trying to release the lock
-      const cellElement = notebook.widgets.find(widget => widget.model.id === cell.model.id);
-      if (cellElement) {
-        cellElement.addClass('jp-Cell-lockReleasing');
-      }
-      
-      await lockService.releaseLock(cell.model.id);
-      checkLockStatus();
-      
-      // Remove the releasing indicator
-      if (cellElement) {
-        cellElement.removeClass('jp-Cell-lockReleasing');
+      const released = await lockManager.releaseLock(cellId);
+      if (released) {
+        const lockInfoCopy = { ...lockInfo };
+        setLockStatus(LockStatus.Unlocked);
+        setLockInfo(null);
+        if (onLockReleased) {
+          onLockReleased(lockInfoCopy);
+        }
       }
     } catch (error) {
       console.error('Failed to release lock:', error);
-      
-      // Remove the releasing indicator on error
-      const cellElement = notebook.widgets.find(widget => widget.model.id === cell.model.id);
-      if (cellElement) {
-        cellElement.removeClass('jp-Cell-lockReleasing');
-      }
+    } finally {
+      // Reset state changing flag after animation duration
+      setTimeout(() => setIsStateChanging(false), 300);
     }
   };
 
-  // Format the time since lock acquisition
-  const formatTimeSince = useCallback((date: Date): string => {
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffSec = Math.floor(diffMs / 1000);
-    const diffMin = Math.floor(diffSec / 60);
-    const diffHour = Math.floor(diffMin / 60);
-
-    if (diffHour > 0) {
-      return trans.__('%1 hours ago', diffHour);
-    } else if (diffMin > 0) {
-      return trans.__('%1 minutes ago', diffMin);
-    } else {
-      return trans.__('%1 seconds ago', diffSec);
-    }
-  }, [trans]);
-
-  // Set up event listeners and handle cleanup
+  // Set up event listeners for lock changes
   useEffect(() => {
-    // Check the initial lock status
-    checkLockStatus();
+    // Initial status check
+    updateLockStatus();
 
-    // Subscribe to lock changes for this cell
-    const onLockChanged = (cellId: string) => {
-      if (cellId === cell.model.id) {
-        checkLockStatus();
+    // Set up lock event handlers
+    const onLockAcquiredHandler = (info: ILockInfo) => {
+      if (info.cellId === cellId) {
+        setIsStateChanging(true);
+        updateLockStatus();
+        // Reset state changing flag after animation duration
+        setTimeout(() => setIsStateChanging(false), 300);
       }
     };
 
-    // Subscribe to cell activation changes to update lock status
-    const onActiveCellChanged = (_: any, args: { newValue: Cell | null, oldValue: Cell | null }) => {
-      if (args.newValue && args.newValue.model.id === cell.model.id) {
-        // If this cell becomes active, check if we can acquire a lock automatically
-        if (!isLocked) {
-          lockService.acquireLock(cell.model.id).catch(error => {
-            console.error('Failed to auto-acquire lock:', error);
-          });
-        }
-      } else if (args.oldValue && args.oldValue.model.id === cell.model.id) {
-        // If this cell is no longer active and we own the lock, consider releasing it
-        if (isLocked && lockInfo?.isOwnedByCurrentUser) {
-          // Optional: auto-release lock when moving away from cell
-          // Uncomment the following lines to enable auto-release
-          /*
-          lockService.releaseLock(cell.model.id).catch(error => {
-            console.error('Failed to auto-release lock:', error);
-          });
-          */
-        }
+    const onLockReleasedHandler = (info: ILockInfo) => {
+      if (info.cellId === cellId) {
+        setIsStateChanging(true);
+        updateLockStatus();
+        // Reset state changing flag after animation duration
+        setTimeout(() => setIsStateChanging(false), 300);
       }
     };
 
-    lockService.lockChanged.connect(onLockChanged);
-    notebook.activeCellChanged.connect(onActiveCellChanged);
+    const onStatusChangedHandler = (status: LockManagerStatus) => {
+      setManagerStatus(status);
+    };
 
-    // Clean up the subscriptions when the component unmounts
+    // Connect to signals
+    const acquiredSlot = lockManager.lockAcquired.connect(onLockAcquiredHandler);
+    const releasedSlot = lockManager.lockReleased.connect(onLockReleasedHandler);
+    const statusSlot = lockManager.statusChanged.connect(onStatusChangedHandler);
+
+    // Set up timer for updating time remaining
+    const timer = setInterval(() => {
+      updateTimeRemaining();
+    }, 1000);
+
+    // Clean up event listeners
     return () => {
-      lockService.lockChanged.disconnect(onLockChanged);
-      notebook.activeCellChanged.disconnect(onActiveCellChanged);
-      
-      // Remove any lock-related CSS classes when unmounting
-      const cellElement = notebook.widgets.find(widget => widget.model.id === cell.model.id);
-      if (cellElement) {
-        cellElement.removeClass('jp-Cell-lockedByMe');
-        cellElement.removeClass('jp-Cell-lockedByOther');
-      }
+      lockManager.lockAcquired.disconnect(acquiredSlot);
+      lockManager.lockReleased.disconnect(releasedSlot);
+      lockManager.statusChanged.disconnect(statusSlot);
+      clearInterval(timer);
     };
-  }, [cell.model.id, isLocked, lockInfo, checkLockStatus, notebook]);
+  }, [cellId, lockManager, updateLockStatus, updateTimeRemaining]);
 
-  // Determine if this cell is the active cell in the notebook
-  const isActiveCell = notebook.activeCell?.model.id === cell.model.id;
+  // Get user initials for the lock owner badge
+  const getUserInitials = (name: string): string => {
+    if (!name) return '';
+    
+    const parts = name.trim().split(/\s+/);
+    if (parts.length === 1) {
+      return parts[0].substring(0, 2).toUpperCase();
+    } else {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+  };
 
-  // If the cell is not locked, show the lock button
-  if (!isLocked) {
-    return (
-      <button
-        className={`jp-CellLock-acquire ${isActiveCell ? 'jp-CellLock-active' : ''}`}
-        onClick={acquireLock}
-        title={trans.__('Lock this cell for editing')}
-        aria-label={trans.__('Lock this cell for editing')}
-      >
-        <span className="jp-CellLock-icon jp-CellLock-unlocked" />
-        {isActiveCell && (
-          <span className="jp-CellLock-text">{trans.__('Lock')}</span>
-        )}
-      </button>
-    );
+  // Render different UI based on lock status
+  let lockIconClass: string;
+  let tooltipText: string;
+  let buttonAction: (() => void) | undefined;
+  let buttonLabel: string;
+  let statusClass: string;
+
+  switch (lockStatus) {
+    case LockStatus.Unlocked:
+      lockIconClass = 'jp-cell-unlocked';
+      tooltipText = trans.__('Cell is available for editing');
+      buttonAction = handleAcquireLock;
+      buttonLabel = trans.__('Lock');
+      statusClass = 'jp-cell-unlocked';
+      break;
+
+    case LockStatus.LockedByMe:
+      lockIconClass = 'jp-cell-locked jp-cell-locked-by-me';
+      tooltipText = timeRemaining 
+        ? trans.__('You have locked this cell (%1 remaining)', timeRemaining)
+        : trans.__('You have locked this cell');
+      buttonAction = handleReleaseLock;
+      buttonLabel = trans.__('Unlock');
+      statusClass = 'jp-cell-locked-by-me';
+      break;
+
+    case LockStatus.LockedByOther:
+      lockIconClass = 'jp-cell-locked jp-cell-locked-by-other';
+      tooltipText = lockInfo 
+        ? trans.__('Locked by %1 at %2', lockInfo.userName, Time.formatHuman(new Date(lockInfo.timestamp)))
+        : trans.__('Locked by another user');
+      buttonAction = undefined; // No action available
+      buttonLabel = trans.__('Locked');
+      statusClass = 'jp-cell-locked-by-other';
+      break;
+
+    case LockStatus.Unavailable:
+      lockIconClass = 'jp-cell-unlocked';
+      tooltipText = trans.__('Lock service unavailable');
+      buttonAction = undefined; // No action available
+      buttonLabel = trans.__('Unavailable');
+      statusClass = 'jp-cell-unavailable';
+      break;
   }
 
-  // If the cell is locked by the current user, show the unlock button
-  if (lockInfo?.isOwnedByCurrentUser) {
-    return (
-      <button
-        className={`jp-CellLock-release ${isActiveCell ? 'jp-CellLock-active' : ''}`}
-        onClick={releaseLock}
-        title={trans.__('Release your lock on this cell')}
-        aria-label={trans.__('Release your lock on this cell')}
-      >
-        <span className="jp-CellLock-icon jp-CellLock-lockedByMe" />
-        <span className="jp-CellLock-text">
-          {isActiveCell ? trans.__('Unlock') : trans.__('Locked by me')}
-        </span>
-        {isActiveCell && (
-          <span className="jp-CellLock-time">
-            {formatTimeSince(lockInfo?.acquiredTime || new Date())}
-          </span>
-        )}
-      </button>
-    );
-  }
+  // Add animation class if state is changing
+  const animationClass = isStateChanging ? 'jp-cell-lock-state-changing' : '';
 
-  // If the cell is locked by another user, show who has the lock
   return (
     <div 
-      className={`jp-CellLock-indicator ${isActiveCell ? 'jp-CellLock-active' : ''}`}
-      title={trans.__('Locked by %1 (%2)', lockInfo?.userName || '', formatTimeSince(lockInfo?.acquiredTime || new Date()))}
-      aria-label={trans.__('Locked by %1 (%2)', lockInfo?.userName || '', formatTimeSince(lockInfo?.acquiredTime || new Date()))}
+      className={`jp-cell-lock-indicator ${lockIconClass} ${animationClass}`} 
+      title={tooltipText}
+      data-user-initials={lockInfo && lockStatus === LockStatus.LockedByOther ? getUserInitials(lockInfo.userName) : ''}
     >
-      {lockInfo?.avatarUrl ? (
-        <img 
-          src={lockInfo.avatarUrl} 
-          alt={lockInfo.userName}
-          className="jp-CellLock-avatar"
-        />
-      ) : (
-        <span className="jp-CellLock-icon jp-CellLock-lockedByOther" />
-      )}
-      <span className="jp-CellLock-text">
-        {trans.__('Locked by %1', lockInfo?.userName || '')}
-      </span>
-      {isActiveCell && (
-        <span className="jp-CellLock-time">
-          {formatTimeSince(lockInfo?.acquiredTime || new Date())}
-        </span>
+      {/* Lock icon is rendered via CSS */}
+      {buttonAction && (
+        <button 
+          className="jp-cell-lock-button" 
+          onClick={buttonAction}
+          disabled={isAcquiringLock}
+          aria-label={buttonLabel}
+        >
+          {isAcquiringLock ? trans.__('...') : buttonLabel}
+        </button>
       )}
     </div>
   );
 };
 
 /**
- * A namespace for CellLockIndicatorComponent static methods.
- * This component provides visual indicators and controls for the cell-level locking system
- * in collaborative notebooks. It displays lock status badges on cells, shows which user
- * currently holds a lock, and provides UI controls to acquire or release locks.
+ * A namespace for CellLockIndicatorWidget
  */
-export namespace CellLockIndicatorComponent {
+export namespace CellLockIndicatorWidget {
   /**
-   * Create a new CellLockIndicatorComponent
-   *
-   * @param cell The cell to display lock status for
-   * @param lockService The lock service to use for tracking lock states
-   * @param translator The translator service
+   * Options for creating a CellLockIndicatorWidget
    */
-  export const create = ({
-    cell,
-    notebook,
-    lockService,
-    translator,
-  }: {
+  export interface IOptions {
+    /**
+     * The cell to track lock status for
+     */
     cell: Cell;
-    notebook: Notebook;
-    lockService: ILockService;
-    translator: ITranslator;
-  }): ReactWidget => {
-    return ReactWidget.create(
-      <CellLockIndicator 
-        cell={cell} 
-        notebook={notebook}
-        lockService={lockService} 
-        translator={translator} 
+
+    /**
+     * The lock manager service
+     */
+    lockManager: ILockManager;
+
+    /**
+     * The current user ID
+     */
+    userId: string;
+
+    /**
+     * Optional translator
+     */
+    translator?: ITranslator;
+  }
+
+  /**
+   * Create a new CellLockIndicatorWidget
+   * 
+   * @param options - The widget options
+   * @returns A new CellLockIndicatorWidget instance
+   */
+  export function create(options: IOptions): ReactWidget {
+    const { cell, lockManager, userId, translator = nullTranslator } = options;
+    
+    // Create a widget that will be disposed when the cell is disposed
+    const widget = ReactWidget.create(
+      <CellLockIndicator
+        cellId={cell.model.id}
+        lockManager={lockManager}
+        userId={userId}
+        translator={translator}
+        onLockAcquired={(lockInfo) => {
+          // Add a CSS class to the cell when locked by current user
+          if (lockInfo.userId === userId) {
+            cell.addClass('jp-mod-locked-by-me');
+          } else {
+            cell.addClass('jp-mod-locked-by-other');
+          }
+        }}
+        onLockReleased={() => {
+          // Remove lock-related CSS classes
+          cell.removeClass('jp-mod-locked-by-me');
+          cell.removeClass('jp-mod-locked-by-other');
+        }}
       />
     );
-  };
+
+    widget.addClass('jp-CellLockIndicatorWidget');
+    
+    return widget;
+  }
 }
