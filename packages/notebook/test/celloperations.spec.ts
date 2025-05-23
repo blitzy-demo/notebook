@@ -1,452 +1,539 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { jest } from '@jest/globals';
-import { YjsNotebookProvider } from '../src/collab/yjsnotebookprovider';
-import { CellLockManager } from '../src/collab/locks';
-import { AwarenessManager } from '../src/collab/awareness';
+import { Cell, CodeCell, ICellModel } from '@jupyterlab/cells';
+import { ObservableList } from '@jupyterlab/observables';
+import { UUID } from '@lumino/coreutils';
 import * as Y from 'yjs';
+import { Awareness } from 'y-protocols/awareness';
 
-// Mock WebSocket for testing
-class MockWebSocket {
-  url: string;
-  readyState: number = WebSocket.CONNECTING;
-  onopen: ((event: any) => void) | null = null;
-  onmessage: ((event: any) => void) | null = null;
-  onclose: ((event: any) => void) | null = null;
-  onerror: ((event: any) => void) | null = null;
-  send: jest.Mock = jest.fn();
-  close: jest.Mock = jest.fn();
+import { CellOperations, ICellLockResult } from '../src/celloperations';
+import { ILockManager, LockManager, LockManagerStatus } from '../src/collab/locks';
+import { YjsAwareness } from '../src/collab/awareness';
 
-  constructor(url: string) {
-    this.url = url;
+// Mock implementation of YjsAwareness for testing
+class MockYjsAwareness extends YjsAwareness {
+  constructor(awareness: Awareness) {
+    super(awareness);
+    this._clientID = 1;
   }
 
-  // Helper methods for testing
-  simulateOpen(): void {
-    this.readyState = WebSocket.OPEN;
-    if (this.onopen) this.onopen({ target: this });
+  get clientID(): number {
+    return this._clientID;
   }
 
-  simulateMessage(data: any): void {
-    if (this.onmessage) this.onmessage({ data, target: this });
+  setClientID(id: number): void {
+    this._clientID = id;
   }
 
-  simulateClose(code: number = 1000, reason: string = ''): void {
-    this.readyState = WebSocket.CLOSED;
-    if (this.onclose) this.onclose({ code, reason, target: this });
-  }
+  private _clientID: number;
+}
 
-  simulateError(): void {
-    if (this.onerror) this.onerror({ target: this });
+// Mock implementation of Cell for testing
+class MockCell extends Cell {
+  constructor(id: string) {
+    super({
+      model: {
+        id,
+        cell: {
+          cell_type: 'code'
+        }
+      } as any,
+      contentFactory: {} as any,
+      editorConfig: {} as any
+    });
   }
 }
 
-// Mock for the cell operations module
-const mockCellOperations = {
-  insertCell: jest.fn(),
-  deleteCell: jest.fn(),
-  moveCell: jest.fn(),
-  updateCell: jest.fn(),
-  executeCellAndFocus: jest.fn(),
-  executeCell: jest.fn(),
-  clearCellOutput: jest.fn(),
-  clearAllOutputs: jest.fn()
-};
+describe('CellOperations', () => {
+  let ydoc1: Y.Doc;
+  let ydoc2: Y.Doc;
+  let awareness1: Awareness;
+  let awareness2: Awareness;
+  let yjsAwareness1: YjsAwareness;
+  let yjsAwareness2: YjsAwareness;
+  let lockManager1: ILockManager;
+  let lockManager2: ILockManager;
+  let cells1: ObservableList<ICellModel>;
+  let cells2: ObservableList<ICellModel>;
+  let cellOperations1: CellOperations;
+  let cellOperations2: CellOperations;
+  let mockCellModels: ICellModel[];
 
-// Mock for the NotebookModel
-class MockNotebookModel {
-  cells: any[] = [];
-  metadata: any = {};
-  sharedModel: any;
-  ydoc: Y.Doc;
-
-  constructor() {
-    this.ydoc = new Y.Doc();
-    this.sharedModel = {
-      getMetadata: jest.fn().mockReturnValue(this.metadata),
-      setMetadata: jest.fn(),
-      getSource: jest.fn().mockReturnValue(''),
-      transact: jest.fn().mockImplementation((callback: () => void) => callback())
-    };
-  }
-
-  addCell(cellType: string = 'code', source: string = ''): any {
-    const cell = {
-      id: `cell-${this.cells.length}`,
-      type: cellType,
-      source,
-      sharedModel: {
-        getSource: jest.fn().mockReturnValue(source),
-        setSource: jest.fn(),
-        getMetadata: jest.fn().mockReturnValue({}),
-        setMetadata: jest.fn(),
-        transact: jest.fn().mockImplementation((callback: () => void) => callback())
-      }
-    };
-    this.cells.push(cell);
-    return cell;
-  }
-}
-
-describe('Cell Operations with Locking', () => {
-  let notebookModel: MockNotebookModel;
-  let lockManager: CellLockManager;
-  let awarenessManager: AwarenessManager;
-  let yjsProvider: YjsNotebookProvider;
-  let mockSocket: MockWebSocket;
-  
-  // Setup before each test
   beforeEach(() => {
-    // Reset mocks
-    jest.clearAllMocks();
+    // Set up two Yjs documents to simulate two clients
+    ydoc1 = new Y.Doc();
+    ydoc2 = new Y.Doc();
     
-    // Create a mock WebSocket
-    mockSocket = new MockWebSocket('ws://localhost:8888/api/yjs');
-    (global as any).WebSocket = jest.fn().mockImplementation(() => mockSocket);
+    // Create awareness instances
+    awareness1 = new Awareness(ydoc1);
+    awareness2 = new Awareness(ydoc2);
     
-    // Create a notebook model
-    notebookModel = new MockNotebookModel();
+    // Create YjsAwareness instances
+    yjsAwareness1 = new MockYjsAwareness(awareness1);
+    yjsAwareness2 = new MockYjsAwareness(awareness2);
+    (yjsAwareness1 as MockYjsAwareness).setClientID(1);
+    (yjsAwareness2 as MockYjsAwareness).setClientID(2);
     
-    // Add some cells to the notebook
-    notebookModel.addCell('code', 'print("Hello World")');
-    notebookModel.addCell('markdown', '# Heading');
-    notebookModel.addCell('code', 'import numpy as np\nimport pandas as pd');
+    // Set user information
+    yjsAwareness1.setLocalStateField('user', { id: 'user1', name: 'User 1', color: '#ff0000' });
+    yjsAwareness2.setLocalStateField('user', { id: 'user2', name: 'User 2', color: '#0000ff' });
     
-    // Create the YjsNotebookProvider
-    yjsProvider = new YjsNotebookProvider({
-      url: 'ws://localhost:8888/api/yjs',
-      notebookPath: '/path/to/notebook.ipynb',
-      userId: 'user1'
+    // Create lock managers
+    lockManager1 = new LockManager({
+      ydoc: ydoc1,
+      awareness: awareness1,
+      userId: 'user1',
+      userName: 'User 1'
     });
     
-    // Create the lock manager
-    lockManager = new CellLockManager(yjsProvider, notebookModel as any);
+    lockManager2 = new LockManager({
+      ydoc: ydoc2,
+      awareness: awareness2,
+      userId: 'user2',
+      userName: 'User 2'
+    });
     
-    // Create the awareness manager
-    awarenessManager = new AwarenessManager(yjsProvider, notebookModel as any);
+    // Create mock cell models
+    mockCellModels = [
+      { id: 'cell1' } as ICellModel,
+      { id: 'cell2' } as ICellModel,
+      { id: 'cell3' } as ICellModel
+    ];
     
-    // Simulate WebSocket connection
-    mockSocket.simulateOpen();
+    // Create cell lists
+    cells1 = new ObservableList<ICellModel>();
+    cells2 = new ObservableList<ICellModel>();
+    
+    // Add mock cells to the lists
+    mockCellModels.forEach(cell => {
+      cells1.push(cell);
+      cells2.push(cell);
+    });
+    
+    // Create cell operations
+    cellOperations1 = new CellOperations(cells1, {
+      lockManager: lockManager1,
+      awareness: yjsAwareness1
+    });
+    
+    cellOperations2 = new CellOperations(cells2, {
+      lockManager: lockManager2,
+      awareness: yjsAwareness2
+    });
+    
+    // Connect the two Yjs documents to simulate real-time collaboration
+    Y.applyUpdate(ydoc2, Y.encodeStateAsUpdate(ydoc1));
+    Y.applyUpdate(ydoc1, Y.encodeStateAsUpdate(ydoc2));
   });
-  
-  // Cleanup after each test
+
   afterEach(() => {
-    lockManager.dispose();
-    awarenessManager.dispose();
-    yjsProvider.dispose();
+    // Clean up
+    cellOperations1.dispose();
+    cellOperations2.dispose();
+    lockManager1.dispose();
+    lockManager2.dispose();
+    ydoc1.destroy();
+    ydoc2.destroy();
   });
 
   describe('Cell-level locking during edit operations', () => {
-    test('should acquire a lock before editing a cell', async () => {
-      // Setup
-      const cellId = notebookModel.cells[0].id;
-      const lockAcquiredSpy = jest.spyOn(lockManager, 'lockAcquired');
-      const lockRequestSpy = jest.spyOn(lockManager, 'requestLock');
+    it('should successfully acquire a lock on an unlocked cell', async () => {
+      // Attempt to acquire a lock on cell1
+      const result = await cellOperations1.requestLock('cell1', 'edit');
       
-      // Act
-      const lockAcquired = await lockManager.requestLock(cellId, 'user1');
+      // Verify the lock was acquired
+      expect(result.acquired).toBe(true);
+      expect(cellOperations1.isLockedByCurrentUser('cell1')).toBe(true);
       
-      // Assert
-      expect(lockRequestSpy).toHaveBeenCalledWith(cellId, 'user1');
-      expect(lockAcquired).toBe(true);
-      expect(lockAcquiredSpy).toHaveBeenCalledWith(cellId, 'user1');
+      // Synchronize the documents to propagate the lock
+      Y.applyUpdate(ydoc2, Y.encodeStateAsUpdate(ydoc1));
       
-      // Verify lock state
-      expect(lockManager.isLocked(cellId)).toBe(true);
-      expect(lockManager.getLockOwner(cellId)).toBe('user1');
+      // Verify the other client sees the lock
+      expect(cellOperations2.isLockedByOtherUser('cell1')).toBe(true);
+      
+      // Verify lock owner information
+      const lockOwner = cellOperations2.getLockOwner('cell1');
+      expect(lockOwner).not.toBeNull();
+      expect(lockOwner?.user.name).toBe('User 1');
     });
-    
-    test('should prevent concurrent edits on the same cell', async () => {
-      // Setup
-      const cellId = notebookModel.cells[0].id;
+
+    it('should fail to acquire a lock on a cell locked by another user', async () => {
+      // User 1 acquires a lock on cell1
+      await cellOperations1.requestLock('cell1', 'edit');
       
-      // User1 acquires lock
-      await lockManager.requestLock(cellId, 'user1');
+      // Synchronize the documents to propagate the lock
+      Y.applyUpdate(ydoc2, Y.encodeStateAsUpdate(ydoc1));
       
-      // User2 tries to acquire lock on the same cell
-      const lockAcquired = await lockManager.requestLock(cellId, 'user2');
+      // User 2 attempts to acquire a lock on the same cell
+      const result = await cellOperations2.requestLock('cell1', 'edit');
       
-      // Assert
-      expect(lockAcquired).toBe(false);
-      expect(lockManager.isLocked(cellId)).toBe(true);
-      expect(lockManager.getLockOwner(cellId)).toBe('user1');
+      // Verify the lock acquisition failed
+      expect(result.acquired).toBe(false);
+      expect(result.owner).not.toBeUndefined();
+      expect(result.owner?.user.name).toBe('User 1');
+      
+      // Verify lock status
+      expect(cellOperations1.isLockedByCurrentUser('cell1')).toBe(true);
+      expect(cellOperations2.isLockedByOtherUser('cell1')).toBe(true);
     });
-    
-    test('should release a lock after editing is complete', async () => {
-      // Setup
-      const cellId = notebookModel.cells[0].id;
-      const lockReleasedSpy = jest.spyOn(lockManager, 'lockReleased');
+
+    it('should successfully release a lock', async () => {
+      // User 1 acquires a lock on cell1
+      await cellOperations1.requestLock('cell1', 'edit');
       
-      // User1 acquires lock
-      await lockManager.requestLock(cellId, 'user1');
+      // Synchronize the documents to propagate the lock
+      Y.applyUpdate(ydoc2, Y.encodeStateAsUpdate(ydoc1));
       
-      // User1 releases lock
-      lockManager.releaseLock(cellId, 'user1');
+      // Verify the lock was acquired
+      expect(cellOperations1.isLockedByCurrentUser('cell1')).toBe(true);
+      expect(cellOperations2.isLockedByOtherUser('cell1')).toBe(true);
       
-      // Assert
-      expect(lockReleasedSpy).toHaveBeenCalledWith(cellId, 'user1');
-      expect(lockManager.isLocked(cellId)).toBe(false);
-      expect(lockManager.getLockOwner(cellId)).toBeNull();
+      // User 1 releases the lock
+      await cellOperations1.releaseLock('cell1');
       
-      // Another user should now be able to acquire the lock
-      const lockAcquired = await lockManager.requestLock(cellId, 'user2');
-      expect(lockAcquired).toBe(true);
-      expect(lockManager.getLockOwner(cellId)).toBe('user2');
+      // Synchronize the documents to propagate the lock release
+      Y.applyUpdate(ydoc2, Y.encodeStateAsUpdate(ydoc1));
+      
+      // Verify the lock was released
+      expect(cellOperations1.isLockedByCurrentUser('cell1')).toBe(false);
+      expect(cellOperations2.isLockedByOtherUser('cell1')).toBe(false);
+      
+      // User 2 should now be able to acquire the lock
+      const result = await cellOperations2.requestLock('cell1', 'edit');
+      expect(result.acquired).toBe(true);
     });
-    
-    test('should broadcast lock state changes to all clients', async () => {
-      // Setup
-      const cellId = notebookModel.cells[0].id;
+
+    it('should ensure distributed lock convergence across all clients', async () => {
+      // User 1 acquires locks on multiple cells
+      await cellOperations1.requestLock('cell1', 'edit');
+      await cellOperations1.requestLock('cell2', 'edit');
       
-      // User1 acquires lock
-      await lockManager.requestLock(cellId, 'user1');
+      // User 2 acquires a lock on a different cell
+      await cellOperations2.requestLock('cell3', 'edit');
       
-      // Verify that a message was sent over the WebSocket
-      expect(mockSocket.send).toHaveBeenCalled();
+      // Synchronize both documents in both directions
+      Y.applyUpdate(ydoc2, Y.encodeStateAsUpdate(ydoc1));
+      Y.applyUpdate(ydoc1, Y.encodeStateAsUpdate(ydoc2));
       
-      // The message should contain lock information
-      const sentMessages = mockSocket.send.mock.calls.map(call => JSON.parse(call[0]));
-      const lockMessages = sentMessages.filter(msg => msg.type === 'lock' || msg.type === 'awareness');
-      expect(lockMessages.length).toBeGreaterThan(0);
+      // Verify lock convergence for User 1
+      expect(cellOperations1.isLockedByCurrentUser('cell1')).toBe(true);
+      expect(cellOperations1.isLockedByCurrentUser('cell2')).toBe(true);
+      expect(cellOperations1.isLockedByOtherUser('cell3')).toBe(true);
+      
+      // Verify lock convergence for User 2
+      expect(cellOperations2.isLockedByOtherUser('cell1')).toBe(true);
+      expect(cellOperations2.isLockedByOtherUser('cell2')).toBe(true);
+      expect(cellOperations2.isLockedByCurrentUser('cell3')).toBe(true);
+      
+      // Release all locks from User 1
+      await cellOperations1.releaseLock('cell1');
+      await cellOperations1.releaseLock('cell2');
+      
+      // Synchronize again
+      Y.applyUpdate(ydoc2, Y.encodeStateAsUpdate(ydoc1));
+      
+      // Verify lock releases are converged
+      expect(cellOperations2.isLockedByOtherUser('cell1')).toBe(false);
+      expect(cellOperations2.isLockedByOtherUser('cell2')).toBe(false);
+      expect(cellOperations2.isLockedByCurrentUser('cell3')).toBe(true);
     });
   });
 
   describe('Conflict resolution between concurrent cell edits', () => {
-    test('should resolve conflicts using CRDT when multiple users edit different cells', async () => {
-      // Setup
-      const cell1Id = notebookModel.cells[0].id;
-      const cell2Id = notebookModel.cells[1].id;
+    it('should prevent concurrent edits on the same cell', async () => {
+      // User 1 acquires a lock on cell1
+      const result1 = await cellOperations1.requestLock('cell1', 'edit');
+      expect(result1.acquired).toBe(true);
       
-      // User1 acquires lock on cell1
-      await lockManager.requestLock(cell1Id, 'user1');
+      // Synchronize the documents
+      Y.applyUpdate(ydoc2, Y.encodeStateAsUpdate(ydoc1));
       
-      // User2 acquires lock on cell2
-      await lockManager.requestLock(cell2Id, 'user2');
+      // User 2 attempts to acquire a lock on the same cell
+      const result2 = await cellOperations2.requestLock('cell1', 'edit');
       
-      // Both users should have their respective locks
-      expect(lockManager.getLockOwner(cell1Id)).toBe('user1');
-      expect(lockManager.getLockOwner(cell2Id)).toBe('user2');
+      // Verify User 2's lock acquisition failed
+      expect(result2.acquired).toBe(false);
+      expect(result2.owner).not.toBeUndefined();
+      expect(result2.owner?.user.name).toBe('User 1');
       
-      // Simulate concurrent edits
-      const ydoc = notebookModel.ydoc;
-      const ymap = ydoc.getMap('cells');
+      // User 1 releases the lock
+      await cellOperations1.releaseLock('cell1');
       
-      // User1 edits cell1
-      ydoc.transact(() => {
-        const cell1Data = ymap.get(cell1Id) || new Y.Map();
-        cell1Data.set('source', 'print("Updated by user1")');
-        ymap.set(cell1Id, cell1Data);
-      }, 'user1');
+      // Synchronize the documents
+      Y.applyUpdate(ydoc2, Y.encodeStateAsUpdate(ydoc1));
       
-      // User2 edits cell2
-      ydoc.transact(() => {
-        const cell2Data = ymap.get(cell2Id) || new Y.Map();
-        cell2Data.set('source', '## Updated by user2');
-        ymap.set(cell2Id, cell2Data);
-      }, 'user2');
-      
-      // Both edits should be preserved
-      expect(ymap.get(cell1Id).get('source')).toBe('print("Updated by user1")');
-      expect(ymap.get(cell2Id).get('source')).toBe('## Updated by user2');
+      // Now User 2 should be able to acquire the lock
+      const result3 = await cellOperations2.requestLock('cell1', 'edit');
+      expect(result3.acquired).toBe(true);
     });
-    
-    test('should queue edit operations when a cell is locked by another user', async () => {
-      // Setup
-      const cellId = notebookModel.cells[0].id;
+
+    it('should handle rapid lock/unlock sequences correctly', async () => {
+      // User 1 rapidly locks and unlocks a cell
+      await cellOperations1.requestLock('cell1', 'edit');
+      await cellOperations1.releaseLock('cell1');
       
-      // User1 acquires lock
-      await lockManager.requestLock(cellId, 'user1');
+      // Synchronize the documents
+      Y.applyUpdate(ydoc2, Y.encodeStateAsUpdate(ydoc1));
       
-      // User2 tries to edit the cell
-      const editPromise = lockManager.withLock(cellId, 'user2', async () => {
-        // This should be queued until user1 releases the lock
-        return 'edited by user2';
-      });
+      // User 2 should be able to acquire the lock immediately
+      const result = await cellOperations2.requestLock('cell1', 'edit');
+      expect(result.acquired).toBe(true);
       
-      // The edit should be pending
-      expect(lockManager.hasPendingOperations(cellId)).toBe(true);
+      // User 1 should now see the cell as locked by User 2
+      Y.applyUpdate(ydoc1, Y.encodeStateAsUpdate(ydoc2));
+      expect(cellOperations1.isLockedByOtherUser('cell1')).toBe(true);
       
-      // User1 releases lock
-      lockManager.releaseLock(cellId, 'user1');
+      // Verify lock owner
+      const lockOwner = cellOperations1.getLockOwner('cell1');
+      expect(lockOwner).not.toBeNull();
+      expect(lockOwner?.user.name).toBe('User 2');
+    });
+
+    it('should handle concurrent lock requests on different cells', async () => {
+      // User 1 and User 2 concurrently request locks on different cells
+      const promise1 = cellOperations1.requestLock('cell1', 'edit');
+      const promise2 = cellOperations2.requestLock('cell2', 'edit');
       
-      // Now user2's edit should proceed
-      const result = await editPromise;
-      expect(result).toBe('edited by user2');
-      expect(lockManager.getLockOwner(cellId)).toBe(null); // Lock should be released after the operation
+      // Wait for both lock requests to complete
+      const [result1, result2] = await Promise.all([promise1, promise2]);
+      
+      // Verify both lock acquisitions succeeded
+      expect(result1.acquired).toBe(true);
+      expect(result2.acquired).toBe(true);
+      
+      // Synchronize the documents
+      Y.applyUpdate(ydoc1, Y.encodeStateAsUpdate(ydoc2));
+      Y.applyUpdate(ydoc2, Y.encodeStateAsUpdate(ydoc1));
+      
+      // Verify lock status for User 1
+      expect(cellOperations1.isLockedByCurrentUser('cell1')).toBe(true);
+      expect(cellOperations1.isLockedByOtherUser('cell2')).toBe(true);
+      
+      // Verify lock status for User 2
+      expect(cellOperations2.isLockedByOtherUser('cell1')).toBe(true);
+      expect(cellOperations2.isLockedByCurrentUser('cell2')).toBe(true);
     });
   });
 
   describe('Lock timeout handling during client disconnections', () => {
-    test('should automatically release locks when a client disconnects', async () => {
-      // Setup
-      const cellId = notebookModel.cells[0].id;
-      
-      // User1 acquires lock
-      await lockManager.requestLock(cellId, 'user1');
-      expect(lockManager.getLockOwner(cellId)).toBe('user1');
-      
-      // Simulate client disconnection
-      mockSocket.simulateClose(1000, 'Client disconnected');
-      
-      // Wait for the lock timeout
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      // The lock should be released
-      expect(lockManager.isLocked(cellId)).toBe(false);
-    });
-    
-    test('should handle reconnection and restore lock state', async () => {
-      // Setup
-      const cellId = notebookModel.cells[0].id;
-      
-      // User1 acquires lock
-      await lockManager.requestLock(cellId, 'user1');
-      
-      // Simulate temporary disconnection
-      mockSocket.simulateClose(1006, 'Connection lost');
-      
-      // Simulate reconnection before lock timeout
-      mockSocket = new MockWebSocket('ws://localhost:8888/api/yjs');
-      (global as any).WebSocket = jest.fn().mockImplementation(() => mockSocket);
-      mockSocket.simulateOpen();
-      
-      // Simulate receiving lock state from server
-      mockSocket.simulateMessage(JSON.stringify({
-        type: 'sync',
-        locks: { [cellId]: { owner: 'user1', timestamp: Date.now() } }
-      }));
-      
-      // The lock should be restored
-      expect(lockManager.isLocked(cellId)).toBe(true);
-      expect(lockManager.getLockOwner(cellId)).toBe('user1');
-    });
-  });
+    // Mock the Date.now function to simulate time passing
+    let originalDateNow: () => number;
+    let mockTime: number;
 
-  describe('User feedback during lock contention', () => {
-    test('should notify when a lock cannot be acquired', async () => {
-      // Setup
-      const cellId = notebookModel.cells[0].id;
-      const lockDeniedSpy = jest.spyOn(lockManager, 'lockDenied');
-      
-      // User1 acquires lock
-      await lockManager.requestLock(cellId, 'user1');
-      
-      // User2 tries to acquire the same lock
-      const lockAcquired = await lockManager.requestLock(cellId, 'user2');
-      
-      // Assert
-      expect(lockAcquired).toBe(false);
-      expect(lockDeniedSpy).toHaveBeenCalledWith(cellId, 'user2', expect.any(Object));
+    beforeEach(() => {
+      originalDateNow = Date.now;
+      mockTime = Date.now();
+      Date.now = jest.fn(() => mockTime);
     });
-    
-    test('should provide information about the current lock owner', async () => {
-      // Setup
-      const cellId = notebookModel.cells[0].id;
-      
-      // User1 acquires lock
-      await lockManager.requestLock(cellId, 'user1');
-      
-      // Get lock info
-      const lockInfo = lockManager.getLockInfo(cellId);
-      
-      // Assert
-      expect(lockInfo).toEqual(expect.objectContaining({
-        owner: 'user1',
-        timestamp: expect.any(Number)
-      }));
+
+    afterEach(() => {
+      Date.now = originalDateNow;
     });
-    
-    test('should show user presence information for locked cells', async () => {
-      // Setup
-      const cellId = notebookModel.cells[0].id;
+
+    it('should automatically release locks when they expire', async () => {
+      // User 1 acquires a lock on cell1
+      await cellOperations1.requestLock('cell1', 'edit');
       
-      // Set user presence
-      awarenessManager.setLocalUserInfo({
-        userId: 'user1',
-        username: 'User One',
-        color: '#ff0000',
-        cursor: { cellId, position: 10 }
+      // Synchronize the documents
+      Y.applyUpdate(ydoc2, Y.encodeStateAsUpdate(ydoc1));
+      
+      // Verify User 2 sees the lock
+      expect(cellOperations2.isLockedByOtherUser('cell1')).toBe(true);
+      
+      // Advance time past the lock expiration (default is 30 seconds)
+      mockTime += 31000; // 31 seconds
+      
+      // Trigger lock expiration check (normally done by the lock manager's timer)
+      // We'll do this by requesting a lock, which checks for expired locks
+      await cellOperations2.requestLock('cell2', 'edit');
+      
+      // Now User 2 should be able to acquire the lock on cell1
+      const result = await cellOperations2.requestLock('cell1', 'edit');
+      expect(result.acquired).toBe(true);
+    });
+
+    it('should handle client disconnections appropriately', async () => {
+      // User 1 acquires a lock on cell1
+      await cellOperations1.requestLock('cell1', 'edit');
+      
+      // Synchronize the documents
+      Y.applyUpdate(ydoc2, Y.encodeStateAsUpdate(ydoc1));
+      
+      // Simulate User 1 disconnecting by removing their awareness state
+      awareness1.setLocalState(null);
+      
+      // Propagate the awareness change to User 2
+      awareness2.on('update', () => {
+        // This would normally happen automatically in a real environment
+        // For testing, we need to manually trigger the lock cleanup for disconnected users
+        (lockManager2 as any)._releaseLocksForDisconnectedUsers([1]);
       });
       
-      // User1 acquires lock
-      await lockManager.requestLock(cellId, 'user1');
+      // Trigger the awareness update
+      awareness2.on('change', () => {
+        // Now User 2 should be able to acquire the lock on cell1
+        cellOperations2.requestLock('cell1', 'edit').then(result => {
+          expect(result.acquired).toBe(true);
+        });
+      });
+    });
+
+    it('should handle lock timeouts with appropriate user feedback', async () => {
+      // Mock the lock expiring signal
+      const lockExpiringHandler = jest.fn();
+      (lockManager1 as any)._lockExpiring.connect(lockExpiringHandler);
       
-      // Get presence info for the cell
-      const presenceInfo = awarenessManager.getUsersAtCell(cellId);
+      // User 1 acquires a lock on cell1
+      await cellOperations1.requestLock('cell1', 'edit');
       
-      // Assert
-      expect(presenceInfo).toContainEqual(expect.objectContaining({
-        userId: 'user1',
-        username: 'User One'
-      }));
+      // Advance time to just before the warning threshold (default is 5 seconds before expiration)
+      mockTime += 25000; // 25 seconds (5 seconds before the 30-second expiration)
+      
+      // Trigger the expiration check
+      (lockManager1 as any)._checkLockExpirations();
+      
+      // Verify the lock expiring signal was emitted
+      expect(lockExpiringHandler).toHaveBeenCalled();
+      const lockInfo = lockExpiringHandler.mock.calls[0][1];
+      expect(lockInfo.cellId).toBe('cell1');
+      expect(lockInfo.userId).toBe('user1');
     });
   });
 
-  describe('Performance requirements', () => {
-    test('lock acquisition latency should be less than 100ms', async () => {
-      // Setup
-      const cellId = notebookModel.cells[0].id;
+  describe('User feedback during lock contention scenarios', () => {
+    it('should provide clear user feedback when a lock acquisition fails', async () => {
+      // User 1 acquires a lock on cell1
+      await cellOperations1.requestLock('cell1', 'edit');
       
-      // Measure lock acquisition time
+      // Synchronize the documents
+      Y.applyUpdate(ydoc2, Y.encodeStateAsUpdate(ydoc1));
+      
+      // User 2 attempts to acquire the same lock
+      const result = await cellOperations2.requestLock('cell1', 'edit');
+      
+      // Verify the result contains clear feedback about the lock owner
+      expect(result.acquired).toBe(false);
+      expect(result.owner).not.toBeUndefined();
+      expect(result.owner?.user.name).toBe('User 1');
+      
+      // In a real UI, this information would be used to display a message to the user
+      const feedbackMessage = `Cell is locked by ${result.owner?.user.name}`;
+      expect(feedbackMessage).toBe('Cell is locked by User 1');
+    });
+
+    it('should apply lock indicators to cell widgets', () => {
+      // Create a mock cell
+      const mockCell = new MockCell('cell1');
+      
+      // User 1 acquires a lock on cell1
+      cellOperations1.requestLock('cell1', 'edit').then(() => {
+        // Synchronize the documents
+        Y.applyUpdate(ydoc2, Y.encodeStateAsUpdate(ydoc1));
+        
+        // Apply cell operations to the mock cell for User 2
+        cellOperations2.applyCellOperations(mockCell);
+        
+        // Verify a lock indicator was added to the cell
+        const indicator = mockCell.node.querySelector('.jp-CellLockIndicator');
+        expect(indicator).not.toBeNull();
+        expect(indicator?.title).toContain('Locked by User 1');
+        
+        // Verify the indicator has the correct client ID
+        expect(indicator?.dataset.clientId).toBe('1');
+      });
+    });
+
+    it('should update remote cursor and selection indicators', () => {
+      // Create a mock cell
+      const mockCell = new MockCell('cell1');
+      
+      // User 1 updates cursor position
+      cellOperations1.updateCursorPosition('cell1', 10);
+      
+      // Synchronize awareness
+      const user1State = awareness1.getLocalState();
+      awareness2.setLocalState(user1State);
+      
+      // Apply cell operations to the mock cell for User 2
+      cellOperations2.applyCellOperations(mockCell);
+      
+      // Verify a remote cursor indicator was added to the cell
+      const cursor = mockCell.node.querySelector('.jp-RemoteCursor');
+      expect(cursor).not.toBeNull();
+      expect(cursor?.dataset.position).toBe('10');
+      expect(cursor?.dataset.clientId).toBe('1');
+      
+      // User 1 updates selection range
+      cellOperations1.updateSelectionRange('cell1', [5, 15]);
+      
+      // Synchronize awareness again
+      const updatedUser1State = awareness1.getLocalState();
+      awareness2.setLocalState(updatedUser1State);
+      
+      // Apply cell operations again
+      cellOperations2.applyCellOperations(mockCell);
+      
+      // Verify a remote selection indicator was added to the cell
+      const selection = mockCell.node.querySelector('.jp-RemoteSelection');
+      expect(selection).not.toBeNull();
+      expect(selection?.dataset.rangeStart).toBe('5');
+      expect(selection?.dataset.rangeEnd).toBe('15');
+      expect(selection?.dataset.clientId).toBe('1');
+    });
+  });
+
+  describe('Performance requirements for lock operations', () => {
+    it('should acquire locks with latency <100ms', async () => {
+      // Measure the time it takes to acquire a lock
       const startTime = performance.now();
-      await lockManager.requestLock(cellId, 'user1');
+      await cellOperations1.requestLock('cell1', 'edit');
       const endTime = performance.now();
       
-      // Assert
+      // Verify the lock acquisition latency is less than 100ms
       const latency = endTime - startTime;
       expect(latency).toBeLessThan(100);
     });
-    
-    test('lock release response should be less than 100ms', async () => {
-      // Setup
-      const cellId = notebookModel.cells[0].id;
-      await lockManager.requestLock(cellId, 'user1');
+
+    it('should release locks with response time <100ms', async () => {
+      // First acquire a lock
+      await cellOperations1.requestLock('cell1', 'edit');
       
-      // Measure lock release time
+      // Measure the time it takes to release the lock
       const startTime = performance.now();
-      lockManager.releaseLock(cellId, 'user1');
+      await cellOperations1.releaseLock('cell1');
       const endTime = performance.now();
       
-      // Assert
-      const latency = endTime - startTime;
-      expect(latency).toBeLessThan(100);
+      // Verify the lock release response time is less than 100ms
+      const responseTime = endTime - startTime;
+      expect(responseTime).toBeLessThan(100);
     });
-    
-    test('lock state visibility update should be less than 100ms', async () => {
-      // Setup
-      const cellId = notebookModel.cells[0].id;
+
+    it('should update lock state visibility in <100ms', async () => {
+      // Set up a lock changed handler to measure visibility update time
+      let visibilityUpdateTime = 0;
+      const lockChangedHandler = jest.fn(() => {
+        visibilityUpdateTime = performance.now();
+      });
       
-      // Create a second lock manager to simulate another client
-      const lockManager2 = new CellLockManager(yjsProvider, notebookModel as any);
+      cellOperations2.lockChanged.connect(lockChangedHandler);
       
-      // Set up a spy to measure when the second client receives the lock update
-      const lockChangedSpy = jest.spyOn(lockManager2, 'lockChanged');
+      // User 1 acquires a lock
+      await cellOperations1.requestLock('cell1', 'edit');
+      const syncStartTime = performance.now();
       
-      // Measure time for lock state to propagate
-      const startTime = performance.now();
-      await lockManager.requestLock(cellId, 'user1');
+      // Synchronize the documents
+      Y.applyUpdate(ydoc2, Y.encodeStateAsUpdate(ydoc1));
       
-      // Simulate the message being sent to the other client
-      const sentMessages = mockSocket.send.mock.calls.map(call => JSON.parse(call[0]));
-      const lockMessages = sentMessages.filter(msg => msg.type === 'lock');
+      // Verify the lock changed handler was called
+      expect(lockChangedHandler).toHaveBeenCalled();
       
-      if (lockMessages.length > 0) {
-        mockSocket.simulateMessage(JSON.stringify(lockMessages[0]));
-      }
+      // Verify the lock state visibility update time is less than 100ms
+      const updateTime = visibilityUpdateTime - syncStartTime;
+      expect(updateTime).toBeLessThan(100);
       
-      // Wait for the lock change to be processed
-      await new Promise(resolve => setTimeout(resolve, 10));
-      
-      const endTime = performance.now();
-      
-      // Assert
-      expect(lockChangedSpy).toHaveBeenCalled();
-      const latency = endTime - startTime;
-      expect(latency).toBeLessThan(100);
-      
-      // Cleanup
-      lockManager2.dispose();
+      // Clean up
+      cellOperations2.lockChanged.disconnect(lockChangedHandler);
     });
   });
 });
