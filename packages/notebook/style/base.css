@@ -4,406 +4,287 @@
 |----------------------------------------------------------------------------*/
 
 /**
- * Base styling for the Jupyter Notebook component.
- * This file defines core layout, spacing, and visual appearance of notebook elements.
- * It supports both single-user and collaborative editing modes.
+ * Base styling for the notebook component
+ * This file defines the core styling for the notebook component, including layout,
+ * spacing, and visual appearance of notebook elements.
  */
 
-/* Notebook container */
+:root {
+  /* Notebook dimensions and spacing */
+  --jp-notebook-padding: 10px;
+  --jp-notebook-cell-spacing: 12px;
+  --jp-notebook-cell-padding: 5px;
+  --jp-notebook-border-width: 1px;
+  --jp-notebook-toolbar-height: 28px;
+  --jp-notebook-toolbar-margin-bottom: 8px;
+  --jp-notebook-padding-offset: 20px; /* Offset for scrollbar width */
+  
+  /* Collaboration-specific variables */
+  --jp-notebook-collab-indicator-width: 3px;
+  --jp-notebook-collab-presence-height: 36px;
+  
+  /* User colors for collaboration features */
+  --jp-collab-user-color-1: #4285F4; /* Blue */
+  --jp-collab-user-color-2: #EA4335; /* Red */
+  --jp-collab-user-color-3: #FBBC05; /* Yellow */
+  --jp-collab-user-color-4: #34A853; /* Green */
+  --jp-collab-user-color-5: #8958E8; /* Purple */
+  --jp-collab-avatar-transition: 0.2s ease;
+}
+
+/* Main notebook container */
 .jp-Notebook {
   padding: var(--jp-notebook-padding);
   outline: none;
   overflow: auto;
   background: var(--jp-layout-color0);
-  max-width: var(--jp-notebook-max-width);
-  margin: 0 auto; /* Center the notebook when max-width is applied */
-}
-
-/* Cell container */
-.jp-Notebook-cell {
-  margin-top: var(--jp-cell-padding);
-  margin-bottom: var(--jp-cell-padding);
-  padding: 0px;
   position: relative;
 }
 
-/* Cell divider for visual separation */
-.jp-Notebook .jp-Notebook-cell:not(:first-child)::before {
-  content: ' ';
-  height: 100%;
-  position: absolute;
-  top: 0;
-  width: 11px;
+/* Notebook cell container */
+.jp-Notebook-cell {
+  margin-bottom: var(--jp-notebook-cell-spacing);
+  position: relative;
+  border: var(--jp-notebook-border-width) solid transparent;
+  border-radius: var(--jp-border-radius);
+  background: var(--jp-layout-color0);
+  overflow: visible;
 }
 
-/* Cell selection styling */
-.jp-Notebook .jp-Cell.jp-mod-selected {
-  background: var(--jp-notebook-multiselected-color);
+/* Cell focus and selection styling */
+.jp-Notebook-cell.jp-mod-active {
+  border: var(--jp-notebook-border-width) solid var(--jp-brand-color1);
+  box-shadow: var(--jp-elevation-z2);
 }
 
-.jp-Notebook .jp-Cell.jp-mod-active.jp-mod-selected:not(.jp-mod-multiSelected) {
-  background: var(--jp-notebook-active-selected-color);
+.jp-Notebook-cell.jp-mod-selected {
+  background: var(--jp-brand-color3);
 }
 
-/* Cell borders and focus indicators */
-.jp-Notebook .jp-Cell:not(.jp-mod-active) .jp-InputPrompt {
-  opacity: var(--jp-cell-prompt-not-active-opacity);
-  color: var(--jp-cell-prompt-not-active-font-color);
+.jp-Notebook-cell.jp-mod-selected.jp-mod-active {
+  background: var(--jp-brand-color3);
+  border: var(--jp-notebook-border-width) solid var(--jp-brand-color1);
 }
 
-.jp-Notebook .jp-Cell:not(.jp-mod-active) .jp-OutputPrompt {
-  opacity: var(--jp-cell-prompt-not-active-opacity);
-  color: var(--jp-cell-prompt-not-active-font-color);
+/* Cell content area */
+.jp-Cell-content {
+  padding: var(--jp-notebook-cell-padding);
+  display: flex;
+  flex-direction: column;
 }
 
-/* Command vs Edit mode indicators */
-.jp-Notebook .jp-Cell.jp-mod-active.jp-mod-selected .jp-InputArea-editor.jp-mod-has-primary-selection {
-  border-color: var(--jp-cell-editor-active-border-color);
-  border-width: var(--jp-cell-editor-active-border-width);
+/* Cell input area */
+.jp-Cell-inputArea {
+  display: flex;
+  flex-direction: row;
 }
 
-.jp-Notebook .jp-Cell.jp-mod-active .jp-InputArea-editor {
-  background-color: var(--jp-cell-editor-active-background);
+/* Cell input wrapper */
+.jp-Cell-inputWrapper {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
 }
 
-/* Cell toolbar positioning */
+/* Cell output area */
+.jp-Cell-outputArea {
+  margin-top: 5px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Cell output wrapper */
+.jp-Cell-outputWrapper {
+  flex: 1 1 auto;
+  overflow: auto;
+}
+
+/* Cell prompt area (execution count) */
+.jp-Cell-prompt {
+  flex: 0 0 var(--jp-cell-prompt-width);
+  color: var(--jp-cell-inprompt-font-color);
+  font-family: var(--jp-cell-prompt-font-family);
+  padding: var(--jp-code-padding);
+  letter-spacing: var(--jp-cell-prompt-letter-spacing);
+  line-height: var(--jp-code-line-height);
+  font-size: var(--jp-code-font-size);
+  border-right: var(--jp-notebook-border-width) solid transparent;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Input prompt */
+.jp-InputPrompt {
+  flex: 0 0 var(--jp-cell-prompt-width);
+  color: var(--jp-cell-inprompt-font-color);
+  font-family: var(--jp-cell-prompt-font-family);
+  padding: var(--jp-code-padding);
+  letter-spacing: var(--jp-cell-prompt-letter-spacing);
+  line-height: var(--jp-code-line-height);
+  font-size: var(--jp-code-font-size);
+  border-right: var(--jp-notebook-border-width) solid transparent;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Output prompt */
+.jp-OutputPrompt {
+  flex: 0 0 var(--jp-cell-prompt-width);
+  color: var(--jp-cell-outprompt-font-color);
+  font-family: var(--jp-cell-prompt-font-family);
+  padding: var(--jp-code-padding);
+  letter-spacing: var(--jp-cell-prompt-letter-spacing);
+  line-height: var(--jp-code-line-height);
+  font-size: var(--jp-code-font-size);
+  border-right: var(--jp-notebook-border-width) solid transparent;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Notebook toolbar */
+.jp-NotebookPanel-toolbar {
+  padding: 2px;
+  height: var(--jp-notebook-toolbar-height);
+  background-color: var(--jp-toolbar-background);
+  box-shadow: var(--jp-toolbar-box-shadow);
+  z-index: 1;
+  display: flex;
+  flex-direction: row;
+  border-bottom: var(--jp-border-width) solid var(--jp-toolbar-border-color);
+  margin-bottom: var(--jp-notebook-toolbar-margin-bottom);
+}
+
+/* Cell toolbar */
 .jp-cell-toolbar {
   position: absolute;
-  top: 0px;
-  right: 0px;
-  height: var(--jp-cell-toolbar-height);
-  padding: 0px 0px 0px 0px;
+  top: 0;
+  right: 0;
+  height: 24px;
+  padding: 0 4px;
   display: flex;
   flex-direction: row;
   align-items: center;
   z-index: 10;
+  background-color: var(--jp-layout-color1);
+  border-radius: 0 var(--jp-border-radius) 0 0;
+  opacity: 0;
+  transition: opacity 0.3s ease;
 }
 
-/* Notebook footer for adding cells */
+/* Show cell toolbar on hover */
+.jp-Notebook-cell:hover .jp-cell-toolbar,
+.jp-Notebook-cell.jp-mod-active .jp-cell-toolbar {
+  opacity: 1;
+}
+
+/* Notebook footer (add cell button) */
 .jp-Notebook-footer {
-  height: var(--jp-notebook-footer-height);
-  background: var(--jp-layout-color1);
+  height: 36px;
+  display: flex;
+  justify-content: center;
+  margin-top: var(--jp-notebook-cell-spacing);
+  position: relative; /* Needed for collaboration bar positioning */
+}
+
+/* Add cell button */
+.jp-Notebook-addCellButton {
+  border: var(--jp-border-width) solid var(--jp-border-color1);
+  background-color: var(--jp-layout-color1);
+  border-radius: var(--jp-border-radius);
+  padding: 4px 8px;
+  cursor: pointer;
+  color: var(--jp-ui-font-color1);
+  font-size: var(--jp-ui-font-size1);
+  transition: background-color 0.1s ease;
+}
+
+.jp-Notebook-addCellButton:hover {
+  background-color: var(--jp-layout-color2);
+}
+
+/* Notebook in collaborative mode */
+.jp-Notebook.jp-mod-collaborative {
+  /* Ensure space for collaboration UI elements */
+  padding-right: calc(var(--jp-notebook-padding) * 2);
+}
+
+/* Cell with collaborative indicators */
+.jp-Notebook-cell.jp-mod-collaborative-editing {
+  /* Highlight cell being edited by others */
+  border-left: var(--jp-notebook-collab-indicator-width) solid var(--jp-collab-user-color-1);
+}
+
+/* Cell with collaborative lock */
+.jp-Notebook-cell.jp-mod-collaborative-locked {
+  /* Visual indicator for locked cells */
+  background-color: var(--jp-layout-color1);
+  opacity: 0.9;
+}
+
+/* Cell with collaborative user presence */
+.jp-Notebook-cell.jp-mod-has-collaborators {
+  /* Add subtle highlight to show active collaborators */
+  box-shadow: 0 0 0 1px var(--jp-border-color1);
+}
+
+/* Cell with collaborative comments */
+.jp-Notebook-cell.jp-mod-has-comments {
+  /* Visual indicator for cells with comments */
+  border-right: var(--jp-notebook-collab-indicator-width) solid var(--jp-warn-color1);
+}
+
+/* Cell with collaborative history changes */
+.jp-Notebook-cell.jp-mod-has-history {
+  /* Visual indicator for cells with recent changes */
+  border-bottom: var(--jp-notebook-collab-indicator-width) solid var(--jp-info-color1);
+}
+
+/* Notebook with collaboration presence bar */
+.jp-Notebook.jp-mod-collaborative .jp-Notebook-footer {
+  margin-bottom: var(--jp-notebook-collab-presence-height);
+}
+
+/* Collaboration presence container */
+.jp-CollaborationPresence {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: var(--jp-notebook-collab-presence-height);
+  z-index: 1000;
+  background-color: var(--jp-layout-color1);
   border-top: var(--jp-border-width) solid var(--jp-border-color2);
   box-shadow: var(--jp-elevation-z1);
-  display: flex;
-  flex-direction: row;
-  justify-content: center;
-  align-items: center;
 }
 
-/* Notebook panel */
-.jp-NotebookPanel {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-/* Notebook panel toolbar */
-.jp-NotebookPanel-toolbar {
-  padding: 2px;
-  display: flex;
-  flex-direction: row;
-  background-color: var(--jp-layout-color1);
-  border-bottom: var(--jp-border-width) solid var(--jp-border-color2);
-  box-shadow: var(--jp-elevation-z1);
-  z-index: 1;
-}
-
-/* Collaboration status in toolbar */
-.jp-NotebookPanel-toolbar .jp-collaboration-status {
-  display: flex;
-  align-items: center;
-  font-size: var(--jp-ui-font-size1);
-  color: var(--jp-ui-font-color1);
-  margin-left: auto;
-  padding: 0 8px;
-}
-
-.jp-NotebookPanel-toolbar .jp-collaboration-status-icon {
-  width: 16px;
-  height: 16px;
-  margin-right: 4px;
-}
-
-.jp-NotebookPanel-toolbar .jp-collaboration-status.jp-mod-connected {
-  color: var(--jp-collab-presence-active);
-}
-
-.jp-NotebookPanel-toolbar .jp-collaboration-status.jp-mod-connecting {
-  color: var(--jp-warn-color0);
-}
-
-.jp-NotebookPanel-toolbar .jp-collaboration-status.jp-mod-disconnected {
-  color: var(--jp-error-color0);
-}
-
-/* Windowed panel for notebook */
+/* Windowed panel for improved performance with large notebooks */
 .jp-WindowedPanel-outer {
+  position: relative;
+  overflow: auto;
   width: 100%;
-  padding-top: var(--jp-notebook-padding);
-  padding-right: var(--jp-notebook-padding);
-  padding-bottom: var(--jp-notebook-padding);
-  padding-left: var(--jp-notebook-padding);
+  height: 100%;
 }
 
 .jp-WindowedPanel-inner {
   position: relative;
-  width: 100%;
-}
-
-.jp-WindowedPanel-window {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
+  min-height: 100%;
 }
 
 .jp-WindowedPanel-viewport {
-  overflow: visible;
+  position: relative;
 }
 
-/* Collaboration-specific styles */
-
-/* Cell-level locking indicators */
-.jp-Notebook .jp-Cell .jp-cell-lock-indicator {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
-  padding: 4px;
-  opacity: 0.6;
-  transition: opacity var(--jp-collab-lock-transition);
-  cursor: pointer;
-}
-
-.jp-Notebook .jp-Cell .jp-cell-lock-indicator.jp-mod-locked {
-  opacity: 1;
-}
-
-.jp-Notebook .jp-Cell .jp-cell-lock-indicator.jp-mod-locked-by-me {
-  color: var(--jp-collab-user-color-1);
-}
-
-.jp-Notebook .jp-Cell .jp-cell-lock-indicator.jp-mod-locked-by-other {
-  color: var(--jp-collab-user-color-2);
-}
-
-/* User presence indicators in cells */
-.jp-Notebook .jp-Cell .jp-cell-presence-container {
-  position: absolute;
-  left: -40px;
-  top: 8px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.jp-Notebook .jp-Cell .jp-cell-presence-avatar {
-  width: var(--jp-collab-avatar-size);
-  height: var(--jp-collab-avatar-size);
-  border-radius: 50%;
-  margin-bottom: 4px;
-  border: 2px solid transparent;
-  transition: all var(--jp-collab-avatar-transition);
-  cursor: pointer;
-  background-color: var(--jp-layout-color1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(var(--jp-collab-avatar-size) * 0.5);
-  font-weight: bold;
-  color: var(--jp-ui-font-color1);
-  overflow: hidden;
-}
-
-.jp-Notebook .jp-Cell .jp-cell-presence-avatar.jp-mod-active {
-  opacity: 1;
-}
-
-.jp-Notebook .jp-Cell .jp-cell-presence-avatar.jp-mod-idle {
-  opacity: 0.7;
-}
-
-/* Stacked avatars for multiple users */
-.jp-Notebook .jp-Cell .jp-cell-presence-container.jp-mod-multiple {
-  display: flex;
-  flex-direction: column;
-}
-
-.jp-Notebook .jp-Cell .jp-cell-presence-container.jp-mod-multiple .jp-cell-presence-avatar:not(:first-child) {
-  margin-top: -10px;
-  margin-left: 10px;
-}
-
-.jp-Notebook .jp-Cell .jp-cell-presence-container .jp-cell-presence-more {
-  width: var(--jp-collab-avatar-size);
-  height: 16px;
-  border-radius: 8px;
-  background-color: var(--jp-layout-color3);
-  color: var(--jp-ui-font-color1);
-  font-size: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 4px;
-}
-
-/* Comment indicators */
-.jp-Notebook .jp-Cell .jp-cell-comment-indicator {
-  position: absolute;
-  right: -20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 16px;
-  min-width: 16px;
-  padding: 0 4px;
-  border-radius: 8px;
-  background-color: var(--jp-collab-comment-badge-color);
-  color: white;
-  font-size: 10px;
-  font-weight: bold;
-  transition: all var(--jp-collab-comment-transition);
-  cursor: pointer;
-  z-index: 10;
-}
-
-.jp-Notebook .jp-Cell .jp-cell-comment-indicator.jp-mod-resolved {
-  background-color: var(--jp-collab-presence-active);
-}
-
-/* Pulse animation for new comments */
-.jp-Notebook .jp-Cell .jp-cell-comment-indicator.jp-mod-new {
-  animation: jp-pulse-comment var(--jp-collab-highlight-pulse-duration) ease-in-out;
-}
-
-@keyframes jp-pulse-comment {
-  0% {
-    box-shadow: 0 0 0 0 rgba(33, 150, 243, 0.4);
-  }
-  70% {
-    box-shadow: 0 0 0 6px rgba(33, 150, 243, 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(33, 150, 243, 0);
-  }
-}
-
-/* Comment indicator positioning for different cell types */
-.jp-Notebook .jp-MarkdownCell .jp-cell-comment-indicator {
-  top: 4px;
-}
-
-.jp-Notebook .jp-CodeCell .jp-cell-comment-indicator {
-  top: 8px;
-}
-
-/* Collaborative cursor and selection highlighting */
-.jp-Notebook .jp-Cell .jp-collab-cursor {
-  position: absolute;
-  width: 2px;
-  height: 1.2em;
-  background-color: var(--jp-collab-cursor-color);
-  transition: all var(--jp-collab-cursor-transition);
-  z-index: 5;
-  pointer-events: none;
-}
-
-.jp-Notebook .jp-Cell .jp-collab-cursor::after {
-  content: attr(data-user-name);
-  position: absolute;
-  top: -14px;
-  left: 0;
-  font-size: 10px;
-  white-space: nowrap;
-  padding: 0 4px;
-  color: white;
-  background-color: var(--jp-collab-cursor-color);
-  border-radius: 2px;
-  z-index: 6;
-}
-
-.jp-Notebook .jp-Cell .jp-collab-selection {
-  position: absolute;
-  background-color: var(--jp-collab-selection-highlight);
-  opacity: 0.5;
-  pointer-events: none;
-  z-index: 4;
-}
-
-/* Cursor animation for active typing */
-.jp-Notebook .jp-Cell .jp-collab-cursor.jp-mod-active-typing {
-  animation: jp-cursor-blink 1s steps(2, start) infinite;
-}
-
-@keyframes jp-cursor-blink {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0;
-  }
-}
-
-/* User-specific cursor colors */
-.jp-Notebook .jp-Cell .jp-collab-cursor.jp-mod-user-1 {
-  background-color: var(--jp-collab-user-color-1);
-}
-
-.jp-Notebook .jp-Cell .jp-collab-cursor.jp-mod-user-1::after {
-  background-color: var(--jp-collab-user-color-1);
-}
-
-.jp-Notebook .jp-Cell .jp-collab-cursor.jp-mod-user-2 {
-  background-color: var(--jp-collab-user-color-2);
-}
-
-.jp-Notebook .jp-Cell .jp-collab-cursor.jp-mod-user-2::after {
-  background-color: var(--jp-collab-user-color-2);
-}
-
-.jp-Notebook .jp-Cell .jp-collab-cursor.jp-mod-user-3 {
-  background-color: var(--jp-collab-user-color-3);
-}
-
-.jp-Notebook .jp-Cell .jp-collab-cursor.jp-mod-user-3::after {
-  background-color: var(--jp-collab-user-color-3);
-}
-
-.jp-Notebook .jp-Cell .jp-collab-cursor.jp-mod-user-4 {
-  background-color: var(--jp-collab-user-color-4);
-}
-
-.jp-Notebook .jp-Cell .jp-collab-cursor.jp-mod-user-4::after {
-  background-color: var(--jp-collab-user-color-4);
-}
-
-.jp-Notebook .jp-Cell .jp-collab-cursor.jp-mod-user-5 {
-  background-color: var(--jp-collab-user-color-5);
-}
-
-.jp-Notebook .jp-Cell .jp-collab-cursor.jp-mod-user-5::after {
-  background-color: var(--jp-collab-user-color-5);
-}
-
-/* Collaboration mode specific adjustments */
-.jp-Notebook.jp-mod-collaborative .jp-Cell {
-  margin-left: 40px; /* Make space for presence indicators */
-}
-
-.jp-Notebook.jp-mod-collaborative .jp-Notebook-cell {
-  transition: background-color 0.2s ease;
-}
-
-.jp-Notebook.jp-mod-collaborative .jp-Notebook-cell.jp-mod-being-edited {
-  background-color: var(--jp-layout-color2);
-}
-
-/* Collaboration bar integration */
-.jp-NotebookPanel.jp-mod-collaborative .jp-Notebook {
-  margin-top: 36px; /* Space for collaboration bar */
+/* Notebook scrolling past end */
+.jp-Notebook.jp-mod-scrollPastEnd .jp-WindowedPanel-outer::after {
+  content: '';
+  display: block;
+  min-height: 50vh;
 }
 
 /* Responsive adjustments */
@@ -412,38 +293,40 @@
     padding: calc(var(--jp-notebook-padding) / 2);
   }
   
-  .jp-WindowedPanel-outer {
-    padding: calc(var(--jp-notebook-padding) / 2);
+  .jp-Notebook-cell {
+    margin-bottom: calc(var(--jp-notebook-cell-spacing) / 2);
   }
   
-  .jp-Notebook .jp-Cell .jp-cell-presence-container {
-    left: -30px;
+  .jp-Cell-prompt {
+    flex: 0 0 calc(var(--jp-cell-prompt-width) * 0.8);
+    font-size: calc(var(--jp-code-font-size) * 0.9);
   }
   
-  .jp-Notebook .jp-Cell .jp-cell-presence-avatar {
-    width: calc(var(--jp-collab-avatar-size) * 0.8);
-    height: calc(var(--jp-collab-avatar-size) * 0.8);
-    font-size: calc(var(--jp-collab-avatar-size) * 0.4);
+  .jp-InputPrompt,
+  .jp-OutputPrompt {
+    flex: 0 0 calc(var(--jp-cell-prompt-width) * 0.8);
+    font-size: calc(var(--jp-code-font-size) * 0.9);
   }
   
-  .jp-NotebookPanel-toolbar {
-    padding: 1px;
+  .jp-cell-toolbar {
+    height: 20px;
+    padding: 0 2px;
   }
   
-  /* Adjust collaboration elements for mobile */
-  .jp-Notebook.jp-mod-collaborative .jp-Cell {
-    margin-left: 30px; /* Reduced space for presence indicators on mobile */
+  /* Adjust collaborative mode spacing for mobile */
+  .jp-Notebook.jp-mod-collaborative {
+    padding-right: var(--jp-notebook-padding);
   }
   
-  .jp-Notebook .jp-Cell .jp-cell-comment-indicator {
-    right: -10px;
-    height: 14px;
-    min-width: 14px;
-    font-size: 8px;
+  /* Adjust collaboration presence for mobile */
+  .jp-CollaborationPresence {
+    height: calc(var(--jp-notebook-collab-presence-height) * 0.8);
   }
   
-  .jp-Notebook .jp-Cell .jp-collab-cursor::after {
-    font-size: 8px;
-    top: -12px;
+  /* Compact collaboration indicators on mobile */
+  .jp-Notebook-cell.jp-mod-collaborative-editing,
+  .jp-Notebook-cell.jp-mod-has-comments,
+  .jp-Notebook-cell.jp-mod-has-history {
+    border-width: 2px;
   }
 }
