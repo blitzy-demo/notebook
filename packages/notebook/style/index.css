@@ -1,0 +1,13 @@
+/*-----------------------------------------------------------------------------
+| Copyright (c) Jupyter Development Team.
+| Distributed under the terms of the Modified BSD License.
+|----------------------------------------------------------------------------*/
+
+/* Import CSS custom properties (variables) first so they're available to other stylesheets */
+@import url('./variables.css');
+
+/* Import core notebook styling */
+@import url('./base.css');
+
+/* Import collaboration-specific styling */
+@import url('./collaboration.css');
