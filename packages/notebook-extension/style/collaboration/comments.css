@@ -1,0 +1,370 @@
+/*-----------------------------------------------------------------------------
+| Copyright (c) Jupyter Development Team.
+|
+| Distributed under the terms of the Modified BSD License.
+|----------------------------------------------------------------------------*/
+
+/**
+ * Comment and review system styles for collaborative notebooks
+ * 
+ * This file defines styles for the comment badges, threads, and comment panel
+ * used in the collaborative notebook feature.
+ */
+
+/* Comment badge - the indicator in the right margin */
+.jp-Comment-badge {
+  position: absolute;
+  right: 8px;
+  height: 16px;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  cursor: pointer;
+  transition: all var(--jp-collab-comment-transition);
+  z-index: 10;
+  box-sizing: border-box;
+}
+
+/* Unresolved comment badge - blue by default */
+.jp-Comment-badge.jp-mod-unresolved {
+  background-color: var(--jp-collab-comment-badge-color);
+}
+
+/* Resolved comment badge - green by default */
+.jp-Comment-badge.jp-mod-resolved {
+  background-color: var(--jp-collab-presence-active);
+}
+
+/* Selected comment badge - adds glow effect */
+.jp-Comment-badge.jp-mod-selected {
+  box-shadow: 0 0 0 2px var(--jp-collab-user-color-1);
+}
+
+/* Hover state for comment badge */
+.jp-Comment-badge:hover {
+  transform: scale(1.1);
+}
+
+/* Focus state for keyboard navigation */
+.jp-Comment-badge:focus-visible {
+  outline: 2px solid var(--jp-brand-color2);
+  outline-offset: 1px;
+}
+
+/* Animation for new comment badges */
+@keyframes jp-Comment-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(33, 150, 243, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(33, 150, 243, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(33, 150, 243, 0);
+  }
+}
+
+.jp-Comment-badge.jp-mod-new {
+  animation: jp-Comment-pulse var(--jp-collab-highlight-pulse-duration) 1;
+}
+
+/* Comment thread container */
+.jp-CommentThread {
+  position: absolute;
+  right: 32px;
+  background-color: var(--jp-layout-color1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  box-shadow: var(--jp-elevation-z4);
+  max-width: 300px;
+  max-height: 400px;
+  overflow-y: auto;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Comment thread header */
+.jp-CommentThread-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--jp-border-color1);
+  background-color: var(--jp-layout-color2);
+}
+
+/* Comment thread title */
+.jp-CommentThread-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--jp-ui-font-color0);
+}
+
+/* Comment thread actions container */
+.jp-CommentThread-actions {
+  display: flex;
+  gap: 4px;
+}
+
+/* Individual comment in thread */
+.jp-Comment {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--jp-border-color1);
+}
+
+/* Comment header with user info */
+.jp-Comment-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+/* Comment user avatar */
+.jp-Comment-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  margin-right: 8px;
+  background-color: var(--jp-collab-user-color-1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* Comment user name */
+.jp-Comment-username {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--jp-ui-font-color0);
+}
+
+/* Comment timestamp */
+.jp-Comment-timestamp {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--jp-ui-font-color2);
+}
+
+/* Comment content */
+.jp-Comment-content {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--jp-ui-font-color1);
+  word-break: break-word;
+  margin-left: 28px;
+}
+
+/* Comment footer with actions */
+.jp-Comment-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 4px;
+  margin-left: 28px;
+  gap: 8px;
+}
+
+/* Comment resolution checkbox */
+.jp-Comment-resolve {
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  color: var(--jp-ui-font-color2);
+  cursor: pointer;
+}
+
+.jp-Comment-resolve input[type="checkbox"] {
+  margin-right: 4px;
+}
+
+/* Comment reply button */
+.jp-Comment-reply {
+  font-size: 11px;
+  color: var(--jp-brand-color1);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.jp-Comment-reply:hover {
+  text-decoration: underline;
+}
+
+/* Comment input area */
+.jp-CommentThread-input {
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Comment textarea */
+.jp-CommentThread-textarea {
+  resize: none;
+  min-height: 60px;
+  padding: 8px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  background-color: var(--jp-layout-color0);
+  color: var(--jp-ui-font-color0);
+  font-size: 12px;
+  font-family: var(--jp-ui-font-family);
+  margin-bottom: 8px;
+}
+
+.jp-CommentThread-textarea:focus {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: -1px;
+}
+
+/* Comment submit button */
+.jp-CommentThread-submit {
+  align-self: flex-end;
+  background-color: var(--jp-brand-color1);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.jp-CommentThread-submit:hover {
+  background-color: var(--jp-brand-color0);
+}
+
+.jp-CommentThread-submit:disabled {
+  background-color: var(--jp-layout-color3);
+  cursor: not-allowed;
+}
+
+/* Comment panel (sidebar view) */
+.jp-CommentPanel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background-color: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+}
+
+/* Comment panel header */
+.jp-CommentPanel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--jp-border-color1);
+  background-color: var(--jp-layout-color2);
+}
+
+/* Comment panel title */
+.jp-CommentPanel-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--jp-ui-font-color0);
+}
+
+/* Comment panel filter dropdown */
+.jp-CommentPanel-filter {
+  font-size: 12px;
+  padding: 2px 4px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  background-color: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+}
+
+/* Comment panel content area */
+.jp-CommentPanel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+/* Comment panel item (collapsed view of a comment) */
+.jp-CommentPanel-item {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--jp-border-color1);
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.jp-CommentPanel-item:hover {
+  background-color: var(--jp-layout-color2);
+}
+
+.jp-CommentPanel-item.jp-mod-selected {
+  background-color: var(--jp-layout-color3);
+}
+
+/* Comment panel item header */
+.jp-CommentPanel-itemHeader {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+/* Comment panel item cell reference */
+.jp-CommentPanel-itemCell {
+  font-size: 11px;
+  color: var(--jp-ui-font-color2);
+  margin-bottom: 4px;
+}
+
+/* Comment panel item preview */
+.jp-CommentPanel-itemPreview {
+  font-size: 12px;
+  color: var(--jp-ui-font-color1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Comment panel empty state */
+.jp-CommentPanel-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 20px;
+  color: var(--jp-ui-font-color2);
+  text-align: center;
+}
+
+.jp-CommentPanel-emptyIcon {
+  font-size: 24px;
+  margin-bottom: 8px;
+}
+
+.jp-CommentPanel-emptyText {
+  font-size: 13px;
+}
+
+/* Accessibility support */
+.jp-Comment-badge[aria-label] {
+  position: relative;
+}
+
+/* Responsive adjustments for mobile */
+@media only screen and (max-width: 760px) {
+  .jp-CommentThread {
+    max-width: 250px;
+    right: 16px;
+  }
+  
+  .jp-Comment-badge {
+    right: 4px;
+  }
+}
