@@ -37,7 +37,409 @@ import { Poll } from '@lumino/polling';
 
 import { Widget } from '@lumino/widgets';
 
+// Import collaboration UI components
+import { UserPresence } from './components/userPresence';
+import { CellLockIndicator } from './components/cellLockIndicator';
+import { HistoryViewer } from './components/historyViewer';
+import { PermissionsDialog } from './components/permissionsDialog';
+import { CommentSystem } from './components/commentSystem';
+import { CollaborationBar } from './components/collaborationBar';
+
+// Import collaboration service interfaces
+import {
+  IAwarenessService,
+  ILockService,
+  IHistoryService,
+  IPermissionsService,
+  ICommentService,
+  ICollaborationService
+} from '@jupyter-notebook/application';
+
 import { TrustedComponent } from './trusted';
+
+/**
+ * A plugin to add the collaboration bar to the notebook interface.
+ */
+const collaborationBarPlugin: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:collaboration-bar',
+  description: 'A plugin that adds a collaboration status and activity bar to the notebook interface.',
+  autoStart: true,
+  requires: [INotebookShell, INotebookTracker, ICollaborationService],
+  optional: [ITranslator],
+  activate: (
+    app: JupyterFrontEnd,
+    shell: INotebookShell,
+    tracker: INotebookTracker,
+    collaborationService: ICollaborationService,
+    translator: ITranslator | null
+  ) => {
+    const trans = (translator ?? nullTranslator).load('notebook');
+    
+    // Create the collaboration bar component
+    const collaborationBar = new CollaborationBar({
+      collaborationService,
+      translator: translator ?? nullTranslator
+    });
+    
+    // Add the collaboration bar to the shell
+    shell.add(collaborationBar, 'CollabBar', { rank: 1000 });
+    
+    // Add command to toggle the collaboration bar
+    app.commands.addCommand(CommandIDs.toggleCollaborationBar, {
+      label: trans.__('Toggle Collaboration Bar'),
+      execute: () => {
+        const isVisible = collaborationBar.isVisible;
+        collaborationBar.setHidden(isVisible);
+        return isVisible ? 'hide' : 'show';
+      },
+      isToggled: () => collaborationBar.isVisible
+    });
+    
+    // Update the collaboration bar when the current notebook changes
+    tracker.currentChanged.connect(() => {
+      const current = tracker.currentWidget;
+      if (current) {
+        collaborationBar.update();
+      }
+    });
+  }
+};
+
+/**
+ * A plugin to add user presence and awareness indicators to the notebook.
+ */
+const userPresencePlugin: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:user-presence',
+  description: 'A plugin that adds user presence and cursor position indicators to the notebook.',
+  autoStart: true,
+  requires: [INotebookTracker, IAwarenessService],
+  optional: [IToolbarWidgetRegistry, ITranslator],
+  activate: (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    awarenessService: IAwarenessService,
+    toolbarRegistry: IToolbarWidgetRegistry | null,
+    translator: ITranslator | null
+  ) => {
+    const trans = (translator ?? nullTranslator).load('notebook');
+    
+    // Add user presence indicators to each notebook panel
+    tracker.widgetAdded.connect((sender, panel) => {
+      // Create user presence component for this notebook
+      const userPresence = new UserPresence({
+        notebookPanel: panel,
+        awarenessService,
+        translator: translator ?? nullTranslator
+      });
+      
+      // Attach to the notebook panel
+      panel.content.node.appendChild(userPresence.node);
+      
+      // Register cleanup on panel dispose
+      panel.disposed.connect(() => {
+        userPresence.dispose();
+      });
+    });
+    
+    // Add user list to toolbar if toolbar registry is available
+    if (toolbarRegistry) {
+      toolbarRegistry.addFactory('Notebook', 'userPresence', (toolbar) => {
+        const widget = new Widget();
+        widget.addClass('jp-UserPresenceToolbar');
+        widget.node.textContent = trans.__('Collaborators');
+        return widget;
+      });
+    }
+  }
+};
+
+/**
+ * A plugin to add cell-level locking capabilities to the notebook.
+ */
+const cellLockPlugin: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:cell-lock',
+  description: 'A plugin that adds cell-level locking capabilities to prevent concurrent editing conflicts.',
+  autoStart: true,
+  requires: [INotebookTracker, ILockService],
+  optional: [ICommandPalette, ITranslator],
+  activate: (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    lockService: ILockService,
+    palette: ICommandPalette | null,
+    translator: ITranslator | null
+  ) => {
+    const trans = (translator ?? nullTranslator).load('notebook');
+    
+    // Add lock indicators to each notebook panel
+    tracker.widgetAdded.connect((sender, panel) => {
+      // Create cell lock indicators for this notebook
+      panel.content.widgets.forEach(cell => {
+        const lockIndicator = new CellLockIndicator({
+          cell,
+          lockService,
+          translator: translator ?? nullTranslator
+        });
+        
+        cell.node.appendChild(lockIndicator.node);
+      });
+      
+      // Handle new cells being added
+      panel.model?.cells.changed.connect((sender, args) => {
+        if (args.type === 'add') {
+          args.newValues.forEach((model, index) => {
+            const cell = panel.content.widgets[args.newIndex + index];
+            const lockIndicator = new CellLockIndicator({
+              cell,
+              lockService,
+              translator: translator ?? nullTranslator
+            });
+            
+            cell.node.appendChild(lockIndicator.node);
+          });
+        }
+      });
+    });
+    
+    // Add command to toggle cell lock
+    app.commands.addCommand(CommandIDs.toggleCellLock, {
+      label: trans.__('Toggle Cell Lock'),
+      execute: async () => {
+        const current = tracker.currentWidget;
+        if (!current) {
+          return;
+        }
+        
+        const activeCell = current.content.activeCell;
+        if (!activeCell) {
+          return;
+        }
+        
+        const cellId = activeCell.model.id;
+        const isLocked = await lockService.isLocked(cellId);
+        
+        if (isLocked) {
+          await lockService.releaseLock(cellId);
+          return 'unlocked';
+        } else {
+          await lockService.acquireLock(cellId);
+          return 'locked';
+        }
+      },
+      isEnabled: () => !!tracker.currentWidget?.content.activeCell
+    });
+    
+    // Add to command palette if available
+    if (palette) {
+      palette.addItem({
+        command: CommandIDs.toggleCellLock,
+        category: 'Notebook Collaboration'
+      });
+    }
+  }
+};
+
+/**
+ * A plugin to add version history and diff viewing capabilities to the notebook.
+ */
+const historyViewerPlugin: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:history-viewer',
+  description: 'A plugin that adds version history and diff viewing capabilities to the notebook.',
+  autoStart: true,
+  requires: [INotebookShell, INotebookTracker, IHistoryService],
+  optional: [ICommandPalette, ITranslator],
+  activate: (
+    app: JupyterFrontEnd,
+    shell: INotebookShell,
+    tracker: INotebookTracker,
+    historyService: IHistoryService,
+    palette: ICommandPalette | null,
+    translator: ITranslator | null
+  ) => {
+    const trans = (translator ?? nullTranslator).load('notebook');
+    
+    // Create the history viewer component
+    const historyViewer = new HistoryViewer({
+      historyService,
+      translator: translator ?? nullTranslator
+    });
+    
+    // Add command to open history viewer
+    app.commands.addCommand(CommandIDs.openHistoryViewer, {
+      label: trans.__('Open Version History'),
+      execute: () => {
+        const current = tracker.currentWidget;
+        if (!current) {
+          return;
+        }
+        
+        // Update history viewer with current notebook
+        historyViewer.setNotebook(current);
+        
+        // Add to right sidebar if not already there
+        if (!historyViewer.isAttached) {
+          shell.add(historyViewer, 'right', { rank: 700 });
+        }
+        
+        // Activate the widget
+        shell.activateById(historyViewer.id);
+      },
+      isEnabled: () => !!tracker.currentWidget
+    });
+    
+    // Add to command palette if available
+    if (palette) {
+      palette.addItem({
+        command: CommandIDs.openHistoryViewer,
+        category: 'Notebook Collaboration'
+      });
+    }
+  }
+};
+
+/**
+ * A plugin to add permissions management to the notebook.
+ */
+const permissionsPlugin: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:permissions',
+  description: 'A plugin that adds permissions management capabilities to the notebook.',
+  autoStart: true,
+  requires: [INotebookTracker, IPermissionsService],
+  optional: [ICommandPalette, ITranslator],
+  activate: (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    permissionsService: IPermissionsService,
+    palette: ICommandPalette | null,
+    translator: ITranslator | null
+  ) => {
+    const trans = (translator ?? nullTranslator).load('notebook');
+    
+    // Create the permissions dialog component
+    const permissionsDialog = new PermissionsDialog({
+      permissionsService,
+      translator: translator ?? nullTranslator
+    });
+    
+    // Add command to open permissions dialog
+    app.commands.addCommand(CommandIDs.openPermissionsDialog, {
+      label: trans.__('Manage Notebook Permissions'),
+      execute: () => {
+        const current = tracker.currentWidget;
+        if (!current) {
+          return;
+        }
+        
+        // Update permissions dialog with current notebook
+        permissionsDialog.setNotebook(current);
+        
+        // Show the dialog
+        permissionsDialog.show();
+      },
+      isEnabled: () => !!tracker.currentWidget
+    });
+    
+    // Add to command palette if available
+    if (palette) {
+      palette.addItem({
+        command: CommandIDs.openPermissionsDialog,
+        category: 'Notebook Collaboration'
+      });
+    }
+  }
+};
+
+/**
+ * A plugin to add commenting and review capabilities to the notebook.
+ */
+const commentSystemPlugin: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:comment-system',
+  description: 'A plugin that adds commenting and review capabilities to the notebook.',
+  autoStart: true,
+  requires: [INotebookTracker, ICommentService],
+  optional: [ICommandPalette, ITranslator],
+  activate: (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    commentService: ICommentService,
+    palette: ICommandPalette | null,
+    translator: ITranslator | null
+  ) => {
+    const trans = (translator ?? nullTranslator).load('notebook');
+    
+    // Add comment system to each notebook panel
+    tracker.widgetAdded.connect((sender, panel) => {
+      // Create comment system for this notebook
+      const commentSystem = new CommentSystem({
+        notebookPanel: panel,
+        commentService,
+        translator: translator ?? nullTranslator
+      });
+      
+      // Attach to the notebook panel
+      panel.node.appendChild(commentSystem.node);
+      
+      // Register cleanup on panel dispose
+      panel.disposed.connect(() => {
+        commentSystem.dispose();
+      });
+    });
+    
+    // Add command to add a comment to the selected cell
+    app.commands.addCommand(CommandIDs.addCellComment, {
+      label: trans.__('Add Comment to Cell'),
+      execute: () => {
+        const current = tracker.currentWidget;
+        if (!current) {
+          return;
+        }
+        
+        const activeCell = current.content.activeCell;
+        if (!activeCell) {
+          return;
+        }
+        
+        // Open comment creation interface for the active cell
+        commentService.createComment(activeCell.model.id);
+      },
+      isEnabled: () => !!tracker.currentWidget?.content.activeCell
+    });
+    
+    // Add to command palette if available
+    if (palette) {
+      palette.addItem({
+        command: CommandIDs.addCellComment,
+        category: 'Notebook Collaboration'
+      });
+    }
+  }
+};
+
+/**
+ * Export the plugins as default.
+ */
+const plugins: JupyterFrontEndPlugin<any>[] = [
+  checkpoints,
+  closeTab,
+  openTreeTab,
+  editNotebookMetadata,
+  fullWidthNotebook,
+  kernelLogo,
+  kernelStatus,
+  notebookToolsWidget,
+  scrollOutput,
+  tabIcon,
+  trusted,
+  // Collaboration plugins
+  collaborationBarPlugin,
+  userPresencePlugin,
+  cellLockPlugin,
+  historyViewerPlugin,
+  permissionsPlugin,
+  commentSystemPlugin
+];
+
+export default plugins;
 
 /**
  * The class for kernel status errors.
@@ -82,616 +484,29 @@ namespace CommandIDs {
    * A command to toggle full width of the notebook
    */
   export const toggleFullWidth = 'notebook:toggle-full-width';
+
+  /**
+   * A command to toggle the collaboration bar
+   */
+  export const toggleCollaborationBar = 'notebook:toggle-collaboration-bar';
+
+  /**
+   * A command to open the permissions dialog
+   */
+  export const openPermissionsDialog = 'notebook:open-permissions-dialog';
+
+  /**
+   * A command to open the history viewer
+   */
+  export const openHistoryViewer = 'notebook:open-history-viewer';
+
+  /**
+   * A command to toggle cell locking
+   */
+  export const toggleCellLock = 'notebook:toggle-cell-lock';
+
+  /**
+   * A command to add a comment to the selected cell
+   */
+  export const addCellComment = 'notebook:add-cell-comment';
 }
-
-/**
- * A plugin for the checkpoint indicator
- */
-const checkpoints: JupyterFrontEndPlugin<void> = {
-  id: '@jupyter-notebook/notebook-extension:checkpoints',
-  description: 'A plugin for the checkpoint indicator.',
-  autoStart: true,
-  requires: [IDocumentManager, ITranslator],
-  optional: [INotebookShell, IToolbarWidgetRegistry],
-  activate: (
-    app: JupyterFrontEnd,
-    docManager: IDocumentManager,
-    translator: ITranslator,
-    notebookShell: INotebookShell | null,
-    toolbarRegistry: IToolbarWidgetRegistry | null
-  ) => {
-    const { shell } = app;
-    const trans = translator.load('notebook');
-    const node = document.createElement('div');
-
-    if (toolbarRegistry) {
-      toolbarRegistry.addFactory('TopBar', 'checkpoint', (toolbar) => {
-        const widget = new Widget({ node });
-        widget.id = DOMUtils.createDomID();
-        widget.addClass('jp-NotebookCheckpoint');
-        return widget;
-      });
-    }
-
-    const onChange = async () => {
-      const current = shell.currentWidget;
-      if (!current) {
-        return;
-      }
-      const context = docManager.contextForWidget(current);
-
-      context?.fileChanged.disconnect(onChange);
-      context?.fileChanged.connect(onChange);
-
-      const checkpoints = await context?.listCheckpoints();
-      if (!checkpoints || !checkpoints.length) {
-        return;
-      }
-      const checkpoint = checkpoints[checkpoints.length - 1];
-      node.textContent = trans.__(
-        'Last Checkpoint: %1',
-        Time.formatHuman(new Date(checkpoint.last_modified))
-      );
-    };
-
-    if (notebookShell) {
-      notebookShell.currentChanged.connect(onChange);
-    }
-
-    new Poll({
-      auto: true,
-      factory: () => onChange(),
-      frequency: {
-        interval: 2000,
-        backoff: false,
-      },
-      standby: 'when-hidden',
-    });
-  },
-};
-
-/**
- * Add a command to close the browser tab when clicking on "Close and Shut Down"
- */
-const closeTab: JupyterFrontEndPlugin<void> = {
-  id: '@jupyter-notebook/notebook-extension:close-tab',
-  description:
-    'Add a command to close the browser tab when clicking on "Close and Shut Down".',
-  autoStart: true,
-  requires: [IMainMenu],
-  optional: [ITranslator],
-  activate: (
-    app: JupyterFrontEnd,
-    menu: IMainMenu,
-    translator: ITranslator | null
-  ) => {
-    const { commands } = app;
-    translator = translator ?? nullTranslator;
-    const trans = translator.load('notebook');
-
-    const id = 'notebook:close-and-halt';
-    commands.addCommand(id, {
-      label: trans.__('Close and Shut Down Notebook'),
-      execute: async () => {
-        // Shut the kernel down, without confirmation
-        await commands.execute('notebook:shutdown-kernel', { activate: false });
-        window.close();
-      },
-    });
-    menu.fileMenu.closeAndCleaners.add({
-      id,
-      // use a small rank to it takes precedence over the default
-      // shut down action for the notebook
-      rank: 0,
-    });
-  },
-};
-
-/**
- * Add a command to open the tree view from the notebook view
- */
-const openTreeTab: JupyterFrontEndPlugin<void> = {
-  id: '@jupyter-notebook/notebook-extension:open-tree-tab',
-  description:
-    'Add a command to open a browser tab on the tree view when clicking "Open...".',
-  autoStart: true,
-  optional: [ITranslator],
-  activate: (app: JupyterFrontEnd, translator: ITranslator | null) => {
-    const { commands } = app;
-    translator = translator ?? nullTranslator;
-    const trans = translator.load('notebook');
-
-    const id = 'notebook:open-tree-tab';
-    commands.addCommand(id, {
-      label: trans.__('Open…'),
-      execute: async () => {
-        const url = URLExt.join(PageConfig.getBaseUrl(), 'tree');
-        window.open(url);
-      },
-    });
-  },
-};
-
-/**
- * A plugin to set the notebook to full width.
- */
-const fullWidthNotebook: JupyterFrontEndPlugin<void> = {
-  id: '@jupyter-notebook/notebook-extension:full-width-notebook',
-  description: 'A plugin to set the notebook to full width.',
-  autoStart: true,
-  requires: [INotebookTracker],
-  optional: [ICommandPalette, ISettingRegistry, ITranslator],
-  activate: (
-    app: JupyterFrontEnd,
-    tracker: INotebookTracker,
-    palette: ICommandPalette | null,
-    settingRegistry: ISettingRegistry | null,
-    translator: ITranslator | null
-  ) => {
-    const trans = (translator ?? nullTranslator).load('notebook');
-
-    let fullWidth = false;
-
-    const toggleFullWidth = () => {
-      const current = tracker.currentWidget;
-      fullWidth = !fullWidth;
-      if (!current) {
-        return;
-      }
-      const content = current;
-      content.toggleClass(FULL_WIDTH_NOTEBOOK_CLASS, fullWidth);
-    };
-
-    let notebookSettings: ISettingRegistry.ISettings;
-
-    if (settingRegistry) {
-      const loadSettings = settingRegistry.load(fullWidthNotebook.id);
-
-      const updateSettings = (settings: ISettingRegistry.ISettings): void => {
-        const newFullWidth = settings.get('fullWidthNotebook')
-          .composite as boolean;
-        if (newFullWidth !== fullWidth) {
-          toggleFullWidth();
-        }
-      };
-
-      Promise.all([loadSettings, app.restored])
-        .then(([settings]) => {
-          notebookSettings = settings;
-          updateSettings(settings);
-          settings.changed.connect((settings) => {
-            updateSettings(settings);
-          });
-        })
-        .catch((reason: Error) => {
-          console.error(reason.message);
-        });
-    }
-
-    app.commands.addCommand(CommandIDs.toggleFullWidth, {
-      label: trans.__('Enable Full Width Notebook'),
-      execute: () => {
-        toggleFullWidth();
-        if (notebookSettings) {
-          notebookSettings.set('fullWidthNotebook', fullWidth);
-        }
-      },
-      isEnabled: () => tracker.currentWidget !== null,
-      isToggled: () => fullWidth,
-    });
-
-    if (palette) {
-      palette.addItem({
-        command: CommandIDs.toggleFullWidth,
-        category: 'Notebook Operations',
-      });
-    }
-  },
-};
-
-/**
- * The kernel logo plugin.
- */
-const kernelLogo: JupyterFrontEndPlugin<void> = {
-  id: '@jupyter-notebook/notebook-extension:kernel-logo',
-  description: 'The kernel logo plugin.',
-  autoStart: true,
-  requires: [INotebookShell],
-  optional: [IToolbarWidgetRegistry],
-  activate: (
-    app: JupyterFrontEnd,
-    shell: INotebookShell,
-    toolbarRegistry: IToolbarWidgetRegistry | null
-  ) => {
-    const { serviceManager } = app;
-
-    const node = document.createElement('div');
-    const img = document.createElement('img');
-
-    const onChange = async () => {
-      const current = shell.currentWidget;
-      if (!(current instanceof NotebookPanel)) {
-        return;
-      }
-
-      if (!node.hasChildNodes()) {
-        node.appendChild(img);
-      }
-
-      await current.sessionContext.ready;
-      current.sessionContext.kernelChanged.disconnect(onChange);
-      current.sessionContext.kernelChanged.connect(onChange);
-
-      const name = current.sessionContext.session?.kernel?.name ?? '';
-      const spec = serviceManager.kernelspecs?.specs?.kernelspecs[name];
-      if (!spec) {
-        node.childNodes[0].remove();
-        return;
-      }
-
-      const kernelIconUrl = spec.resources['logo-64x64'];
-      if (!kernelIconUrl) {
-        node.childNodes[0].remove();
-        return;
-      }
-
-      img.src = kernelIconUrl;
-      img.title = spec.display_name;
-    };
-
-    if (toolbarRegistry) {
-      toolbarRegistry.addFactory('TopBar', 'kernelLogo', (toolbar) => {
-        const widget = new Widget({ node });
-        widget.addClass('jp-NotebookKernelLogo');
-        return widget;
-      });
-    }
-
-    app.started.then(() => {
-      shell.currentChanged.connect(onChange);
-    });
-  },
-};
-
-/**
- * A plugin to display the kernel status;
- */
-const kernelStatus: JupyterFrontEndPlugin<void> = {
-  id: '@jupyter-notebook/notebook-extension:kernel-status',
-  description: 'A plugin to display the kernel status.',
-  autoStart: true,
-  requires: [INotebookShell, ITranslator],
-  activate: (
-    app: JupyterFrontEnd,
-    shell: INotebookShell,
-    translator: ITranslator
-  ) => {
-    const trans = translator.load('notebook');
-    const widget = new Widget();
-    widget.addClass('jp-NotebookKernelStatus');
-    app.shell.add(widget, 'menu', { rank: 10_010 });
-
-    const removeClasses = () => {
-      widget.removeClass(KERNEL_STATUS_ERROR_CLASS);
-      widget.removeClass(KERNEL_STATUS_WARN_CLASS);
-      widget.removeClass(KERNEL_STATUS_INFO_CLASS);
-      widget.removeClass(KERNEL_STATUS_FADE_OUT_CLASS);
-    };
-
-    const onStatusChanged = (sessionContext: ISessionContext) => {
-      const status = sessionContext.kernelDisplayStatus;
-      let text = `Kernel ${Text.titleCase(status)}`;
-      removeClasses();
-      switch (status) {
-        case 'busy':
-        case 'idle':
-          text = '';
-          widget.addClass(KERNEL_STATUS_FADE_OUT_CLASS);
-          break;
-        case 'dead':
-        case 'terminating':
-          widget.addClass(KERNEL_STATUS_ERROR_CLASS);
-          break;
-        case 'unknown':
-          widget.addClass(KERNEL_STATUS_WARN_CLASS);
-          break;
-        default:
-          widget.addClass(KERNEL_STATUS_INFO_CLASS);
-          widget.addClass(KERNEL_STATUS_FADE_OUT_CLASS);
-          break;
-      }
-      widget.node.textContent = trans.__(text);
-    };
-
-    const onChange = async () => {
-      const current = shell.currentWidget;
-      if (!(current instanceof NotebookPanel)) {
-        return;
-      }
-      const sessionContext = current.sessionContext;
-      sessionContext.statusChanged.connect(onStatusChanged);
-    };
-
-    shell.currentChanged.connect(onChange);
-  },
-};
-
-/**
- * A plugin to enable scrolling for outputs by default.
- * Mimic the logic from the classic notebook, as found here:
- * https://github.com/jupyter/notebook/blob/a9a31c096eeffe1bff4e9164c6a0442e0e13cdb3/notebook/static/notebook/js/outputarea.js#L96-L120
- */
-const scrollOutput: JupyterFrontEndPlugin<void> = {
-  id: '@jupyter-notebook/notebook-extension:scroll-output',
-  description: 'A plugin to enable scrolling for outputs by default.',
-  autoStart: true,
-  requires: [INotebookTracker],
-  optional: [ISettingRegistry],
-  activate: async (
-    app: JupyterFrontEnd,
-    tracker: INotebookTracker,
-    settingRegistry: ISettingRegistry | null
-  ) => {
-    const autoScrollThreshold = 100;
-    let autoScrollOutputs = true;
-
-    // decide whether to scroll the output of the cell based on some heuristics
-    const autoScroll = (cell: CodeCell) => {
-      if (!autoScrollOutputs) {
-        // bail if disabled via the settings
-        cell.removeClass(SCROLLED_OUTPUTS_CLASS);
-        return;
-      }
-      const { outputArea } = cell;
-      // respect cells with an explicit scrolled state
-      const scrolled = cell.model.getMetadata('scrolled');
-      if (scrolled !== undefined) {
-        return;
-      }
-      const { node } = outputArea;
-      const height = node.scrollHeight;
-      const fontSize = parseFloat(node.style.fontSize.replace('px', ''));
-      const lineHeight = (fontSize || 14) * 1.3;
-      // do not set via cell.outputScrolled = true, as this would
-      // otherwise synchronize the scrolled state to the notebook metadata
-      const scroll = height > lineHeight * autoScrollThreshold;
-      cell.toggleClass(SCROLLED_OUTPUTS_CLASS, scroll);
-    };
-
-    const handlers: { [id: string]: () => void } = {};
-
-    const setAutoScroll = (cell: Cell) => {
-      if (cell.model.type === 'code') {
-        const codeCell = cell as CodeCell;
-        const id = codeCell.model.id;
-        autoScroll(codeCell);
-        if (handlers[id]) {
-          codeCell.outputArea.model.changed.disconnect(handlers[id]);
-        }
-        handlers[id] = () => autoScroll(codeCell);
-        codeCell.outputArea.model.changed.connect(handlers[id]);
-      }
-    };
-
-    tracker.widgetAdded.connect((sender, notebook) => {
-      // when the notebook widget is created, process all the cells
-      notebook.sessionContext.ready.then(() => {
-        notebook.content.widgets.forEach(setAutoScroll);
-      });
-
-      notebook.model?.cells.changed.connect((sender, args) => {
-        notebook.content.widgets.forEach(setAutoScroll);
-      });
-    });
-
-    if (settingRegistry) {
-      const loadSettings = settingRegistry.load(scrollOutput.id);
-      const updateSettings = (settings: ISettingRegistry.ISettings): void => {
-        autoScrollOutputs = settings.get('autoScrollOutputs')
-          .composite as boolean;
-      };
-
-      Promise.all([loadSettings, app.restored])
-        .then(([settings]) => {
-          updateSettings(settings);
-          settings.changed.connect((settings) => {
-            updateSettings(settings);
-          });
-        })
-        .catch((reason: Error) => {
-          console.error(reason.message);
-        });
-    }
-  },
-};
-
-/**
- * A plugin to add the NotebookTools to the side panel;
- */
-const notebookToolsWidget: JupyterFrontEndPlugin<void> = {
-  id: '@jupyter-notebook/notebook-extension:notebook-tools',
-  description: 'A plugin to add the NotebookTools to the side panel.',
-  autoStart: true,
-  requires: [INotebookShell],
-  optional: [INotebookTools],
-  activate: (
-    app: JupyterFrontEnd,
-    shell: INotebookShell,
-    notebookTools: INotebookTools | null
-  ) => {
-    const onChange = async () => {
-      const current = shell.currentWidget;
-      if (!(current instanceof NotebookPanel)) {
-        return;
-      }
-
-      // Add the notebook tools in right area.
-      if (notebookTools) {
-        shell.add(notebookTools, 'right', { type: 'Property Inspector' });
-      }
-    };
-    shell.currentChanged.connect(onChange);
-  },
-};
-
-/**
- * A plugin to update the tab icon based on the kernel status.
- */
-const tabIcon: JupyterFrontEndPlugin<void> = {
-  id: '@jupyter-notebook/notebook-extension:tab-icon',
-  description: 'A plugin to update the tab icon based on the kernel status.',
-  autoStart: true,
-  requires: [INotebookTracker],
-  activate: (app: JupyterFrontEnd, tracker: INotebookTracker) => {
-    // the favicons are provided by Jupyter Server
-    const baseURL = PageConfig.getBaseUrl();
-    const notebookIcon = URLExt.join(
-      baseURL,
-      'static/favicons/favicon-notebook.ico'
-    );
-    const busyIcon = URLExt.join(baseURL, 'static/favicons/favicon-busy-1.ico');
-
-    const updateBrowserFavicon = (
-      status: ISessionContext.KernelDisplayStatus
-    ) => {
-      const link = document.querySelector(
-        "link[rel*='icon']"
-      ) as HTMLLinkElement;
-      switch (status) {
-        case 'busy':
-          link.href = busyIcon;
-          break;
-        case 'idle':
-          link.href = notebookIcon;
-          break;
-      }
-    };
-
-    const onChange = async () => {
-      const current = tracker.currentWidget;
-      const sessionContext = current?.sessionContext;
-      if (!sessionContext) {
-        return;
-      }
-
-      sessionContext.statusChanged.connect(() => {
-        const status = sessionContext.kernelDisplayStatus;
-        updateBrowserFavicon(status);
-      });
-    };
-
-    tracker.currentChanged.connect(onChange);
-  },
-};
-
-/**
- * A plugin that adds a Trusted indicator to the menu area
- */
-const trusted: JupyterFrontEndPlugin<void> = {
-  id: '@jupyter-notebook/notebook-extension:trusted',
-  description: 'A plugin that adds a Trusted indicator to the menu area.',
-  autoStart: true,
-  requires: [INotebookShell, ITranslator],
-  activate: (
-    app: JupyterFrontEnd,
-    notebookShell: INotebookShell,
-    translator: ITranslator
-  ): void => {
-    const onChange = async () => {
-      const current = notebookShell.currentWidget;
-      if (!(current instanceof NotebookPanel)) {
-        return;
-      }
-
-      const notebook = current.content;
-      await current.context.ready;
-
-      const widget = TrustedComponent.create({ notebook, translator });
-      notebookShell.add(widget, 'menu', {
-        rank: 11_000,
-      });
-    };
-
-    notebookShell.currentChanged.connect(onChange);
-  },
-};
-
-/**
- * Add a command to open right sidebar for Editing Notebook Metadata when clicking on "Edit Notebook Metadata" under Edit menu
- */
-const editNotebookMetadata: JupyterFrontEndPlugin<void> = {
-  id: '@jupyter-notebook/notebook-extension:edit-notebook-metadata',
-  description:
-    'Add a command to open right sidebar for Editing Notebook Metadata when clicking on "Edit Notebook Metadata" under Edit menu',
-  autoStart: true,
-  optional: [ICommandPalette, ITranslator, INotebookTools],
-  activate: (
-    app: JupyterFrontEnd,
-    palette: ICommandPalette | null,
-    translator: ITranslator | null,
-    notebookTools: INotebookTools | null
-  ) => {
-    const { commands, shell } = app;
-    translator = translator ?? nullTranslator;
-    const trans = translator.load('notebook');
-
-    commands.addCommand(CommandIDs.openEditNotebookMetadata, {
-      label: trans.__('Edit Notebook Metadata'),
-      execute: async () => {
-        const command = 'application:toggle-panel';
-        const args = {
-          side: 'right',
-          title: 'Show Notebook Tools',
-          id: 'notebook-tools',
-        };
-
-        // Check if Show Notebook Tools (Right Sidebar) is open (expanded)
-        if (!commands.isToggled(command, args)) {
-          await commands.execute(command, args).then((_) => {
-            // For expanding the 'Advanced Tools' section (default: collapsed)
-            if (notebookTools) {
-              const tools = (notebookTools?.layout as any).widgets;
-              tools.forEach((tool: any) => {
-                if (
-                  tool.widget.title.label === trans.__('Advanced Tools') &&
-                  tool.collapsed
-                ) {
-                  tool.toggle();
-                }
-              });
-            }
-          });
-        }
-      },
-      isVisible: () =>
-        shell.currentWidget !== null &&
-        shell.currentWidget instanceof NotebookPanel,
-    });
-
-    if (palette) {
-      palette.addItem({
-        command: CommandIDs.openEditNotebookMetadata,
-        category: 'Notebook Operations',
-      });
-    }
-  },
-};
-
-/**
- * Export the plugins as default.
- */
-const plugins: JupyterFrontEndPlugin<any>[] = [
-  checkpoints,
-  closeTab,
-  openTreeTab,
-  editNotebookMetadata,
-  fullWidthNotebook,
-  kernelLogo,
-  kernelStatus,
-  notebookToolsWidget,
-  scrollOutput,
-  tabIcon,
-  trusted,
-];
-
-export default plugins;
