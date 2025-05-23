@@ -1,0 +1,82 @@
+/*-----------------------------------------------------------------------------
+| Copyright (c) Jupyter Development Team.
+| Distributed under the terms of the Modified BSD License.
+|----------------------------------------------------------------------------*/
+
+/*
+ * CSS variables for the notebook component
+ */
+
+:root {
+  /* Base notebook layout */
+  --jp-notebook-padding: 10px;
+  --jp-notebook-max-width: 1000px;
+  --jp-notebook-toolbar-margin-bottom: 20px;
+  --jp-notebook-padding-offset: 20px;
+  --jp-kernel-status-padding: 5px;
+  --jp-notebook-cell-spacing: 12px;
+  --jp-notebook-cell-padding: 5px;
+  --jp-notebook-border-width: 1px;
+  --jp-notebook-border-color: var(--jp-border-color1);
+  
+  /* Collaboration elements */
+  --jp-collab-avatar-size: 28px;
+  --jp-collab-avatar-border-width: 2px;
+  --jp-collab-avatar-stacking-offset: -8px;
+  --jp-collab-avatar-font-size: calc(var(--jp-collab-avatar-size) * 0.5);
+  --jp-collab-avatar-idle-opacity: 0.7;
+  
+  /* Lock icons */
+  --jp-collab-lock-icon-size: 16px;
+  --jp-collab-lock-icon-padding: 4px;
+  --jp-collab-lock-icon-color: rgba(62, 62, 62, 0.8);
+  --jp-collab-lock-icon-opacity: 0.6;
+  --jp-collab-lock-icon-opacity-hover: 1.0;
+  --jp-collab-locked-cell-overlay-opacity: 0.05;
+  
+  /* Comment badges */
+  --jp-collab-comment-badge-size: 16px;
+  --jp-collab-comment-badge-color: rgba(33, 150, 243, 0.9);
+  --jp-collab-comment-badge-resolved-color: var(--jp-success-color1);
+  --jp-collab-comment-badge-font-size: 10px;
+  --jp-collab-comment-badge-padding: 0 4px;
+  --jp-collab-comment-badge-right-margin: 4px;
+  
+  /* Comment panel */
+  --jp-collab-comment-panel-width: 300px;
+  --jp-collab-comment-thread-margin: 8px;
+  --jp-collab-comment-thread-padding: 8px;
+  --jp-collab-comment-avatar-size: 20px;
+  --jp-collab-comment-avatar-margin: 8px;
+  
+  /* Version history */
+  --jp-collab-history-panel-width: 300px;
+  --jp-collab-history-item-padding: 8px 12px;
+  --jp-collab-diff-added-color: rgba(0, 255, 0, 0.2);
+  --jp-collab-diff-removed-color: rgba(255, 0, 0, 0.2);
+  --jp-collab-diff-changed-color: rgba(255, 255, 0, 0.2);
+  
+  /* Permissions and access control */
+  --jp-collab-permissions-dialog-min-width: 400px;
+  --jp-collab-permissions-dialog-max-width: 600px;
+  --jp-collab-permissions-user-avatar-size: 24px;
+  --jp-collab-permissions-user-avatar-margin: 8px;
+  --jp-collab-permissions-role-padding: 2px 8px;
+  --jp-collab-permissions-role-border-radius: 4px;
+  --jp-collab-permissions-role-font-size: 0.8em;
+  
+  /* Collaboration bar */
+  --jp-collab-bar-padding: 4px 8px;
+  --jp-collab-status-indicator-size: 8px;
+  --jp-collab-status-indicator-margin: 4px;
+  
+  /* Animation durations and transitions */
+  --jp-collab-avatar-transition: opacity 200ms ease-in;
+  --jp-collab-lock-transition: all 300ms ease;
+  --jp-collab-comment-badge-transition: transform 150ms ease, box-shadow 150ms ease;
+  --jp-collab-comment-pulse-duration: 3s;
+  --jp-collab-status-pulse-duration: 2s;
+  
+  /* Responsive breakpoints */
+  --jp-collab-mobile-breakpoint: 760px;
+}
