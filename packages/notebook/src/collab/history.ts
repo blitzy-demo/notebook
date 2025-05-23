@@ -1,20 +1,20 @@
 /**
- * History management for collaborative notebooks
- *
- * This module implements document revision history tracking with diff capabilities 
- * and restoration points for collaborative notebooks. It provides the IHistoryManager 
- * interface for creating snapshots, comparing versions, and restoring content from 
- * previous states.
+ * Document revision history tracking with diff capabilities and restoration points for collaborative notebooks.
+ * This module provides the IHistoryManager interface for creating snapshots, comparing versions,
+ * and restoring content from previous states.
  */
 
-import { Token } from '@lumino/coreutils';
 import { ISignal, Signal } from '@lumino/signaling';
+import { IDisposable } from '@lumino/disposable';
+import { UUID } from '@lumino/coreutils';
 import * as Y from 'yjs';
+import { INotebookModel } from '../model';
+import { ICellModel } from '@jupyterlab/cells';
 
 /**
- * Interface for a history snapshot of a document
+ * Interface for a history snapshot
  */
-export interface IDocumentSnapshot {
+export interface IHistorySnapshot {
   /**
    * Unique identifier for the snapshot
    */
@@ -29,144 +29,170 @@ export interface IDocumentSnapshot {
    * User who created the snapshot
    */
   author: {
+    /**
+     * User ID
+     */
     id: string;
+
+    /**
+     * User display name
+     */
     name: string;
-    email?: string;
+
+    /**
+     * User avatar URL (optional)
+     */
+    avatarUrl?: string;
   };
 
   /**
-   * Optional description or comment for the snapshot
+   * Optional label for the snapshot
+   */
+  label?: string;
+
+  /**
+   * Optional description of the changes in this snapshot
    */
   description?: string;
 
   /**
-   * The state vector at the time of the snapshot
+   * Whether this is an automatic snapshot or user-initiated
    */
-  stateVector: Uint8Array;
+  automatic: boolean;
 
   /**
-   * The document state at the time of the snapshot
+   * Size of the snapshot in bytes
    */
-  state: Uint8Array;
+  size: number;
 
   /**
-   * Tags associated with this snapshot (e.g., 'checkpoint', 'auto-save')
+   * Tags associated with this snapshot
    */
   tags?: string[];
 
   /**
-   * Whether this snapshot is a major version
+   * Additional metadata for the snapshot
    */
-  isMajorVersion: boolean;
-
-  /**
-   * Version number (auto-incremented)
-   */
-  version: number;
+  metadata?: { [key: string]: any };
 }
 
 /**
- * Interface for a diff between two document snapshots
+ * Interface for a cell change in a diff
  */
-export interface IDocumentDiff {
+export interface ICellDiff {
   /**
-   * The source snapshot ID
+   * The cell ID
+   */
+  cellId: string;
+
+  /**
+   * The type of change
+   */
+  changeType: 'added' | 'removed' | 'modified' | 'unchanged';
+
+  /**
+   * The old cell content (if modified or removed)
+   */
+  oldContent?: string;
+
+  /**
+   * The new cell content (if modified or added)
+   */
+  newContent?: string;
+
+  /**
+   * Line-by-line diff information for modified cells
+   */
+  lineDiffs?: {
+    /**
+     * Line number in the old content
+     */
+    oldLineNumber: number;
+
+    /**
+     * Line number in the new content
+     */
+    newLineNumber: number;
+
+    /**
+     * The type of line change
+     */
+    type: 'added' | 'removed' | 'modified' | 'unchanged';
+
+    /**
+     * The line content
+     */
+    content: string;
+  }[];
+
+  /**
+   * Metadata changes
+   */
+  metadataChanges?: {
+    /**
+     * The key that changed
+     */
+    key: string;
+
+    /**
+     * The old value
+     */
+    oldValue: any;
+
+    /**
+     * The new value
+     */
+    newValue: any;
+  }[];
+}
+
+/**
+ * Interface for a notebook diff between two snapshots
+ */
+export interface INotebookDiff {
+  /**
+   * The ID of the first snapshot
    */
   fromId: string;
 
   /**
-   * The target snapshot ID
+   * The ID of the second snapshot
    */
   toId: string;
 
   /**
-   * Changes grouped by cell
+   * The timestamp of the first snapshot
    */
-  cellChanges: {
-    [cellId: string]: {
-      /**
-       * Type of change for the cell
-       */
-      type: 'added' | 'removed' | 'modified' | 'unchanged';
-
-      /**
-       * Content changes if the cell was modified
-       */
-      contentChanges?: {
-        /**
-         * Type of content change
-         */
-        type: 'added' | 'removed' | 'modified';
-
-        /**
-         * Line number where the change starts
-         */
-        lineStart: number;
-
-        /**
-         * Line number where the change ends
-         */
-        lineEnd: number;
-
-        /**
-         * Original content
-         */
-        oldContent?: string;
-
-        /**
-         * New content
-         */
-        newContent?: string;
-
-        /**
-         * User who made the change
-         */
-        author?: {
-          id: string;
-          name: string;
-        };
-      }[];
-
-      /**
-       * Metadata changes if the cell metadata was modified
-       */
-      metadataChanges?: {
-        /**
-         * Path to the changed metadata property
-         */
-        path: string;
-
-        /**
-         * Old value
-         */
-        oldValue?: any;
-
-        /**
-         * New value
-         */
-        newValue?: any;
-      }[];
-    };
-  };
+  fromTimestamp: number;
 
   /**
-   * Changes to notebook metadata
+   * The timestamp of the second snapshot
+   */
+  toTimestamp: number;
+
+  /**
+   * Array of cell diffs
+   */
+  cellDiffs: ICellDiff[];
+
+  /**
+   * Metadata changes at the notebook level
    */
   metadataChanges?: {
     /**
-     * Path to the changed metadata property
+     * The key that changed
      */
-    path: string;
+    key: string;
 
     /**
-     * Old value
+     * The old value
      */
-    oldValue?: any;
+    oldValue: any;
 
     /**
-     * New value
+     * The new value
      */
-    newValue?: any;
+    newValue: any;
   }[];
 
   /**
@@ -189,1057 +215,1479 @@ export interface IDocumentDiff {
     cellsModified: number;
 
     /**
-     * Total number of content changes
+     * Number of cells unchanged
      */
-    totalContentChanges: number;
-
-    /**
-     * Total number of metadata changes
-     */
-    totalMetadataChanges: number;
+    cellsUnchanged: number;
   };
 }
 
 /**
- * Options for creating a snapshot
+ * Interface for history restoration options
  */
-export interface ISnapshotOptions {
+export interface IRestoreOptions {
   /**
-   * Optional description for the snapshot
+   * Whether to restore the entire notebook or just selected cells
    */
-  description?: string;
+  mode: 'full' | 'selective';
 
   /**
-   * Whether this is a major version
+   * IDs of cells to restore (only used when mode is 'selective')
    */
-  isMajorVersion?: boolean;
+  cellIds?: string[];
 
   /**
-   * Tags to associate with the snapshot
+   * Whether to create a new snapshot before restoring
    */
-  tags?: string[];
+  createSnapshot?: boolean;
 
   /**
-   * Author information (defaults to current user)
+   * Whether to apply the restoration as a new edit (true) or replace the current state (false)
    */
-  author?: {
-    id: string;
-    name: string;
-    email?: string;
-  };
+  asNewEdit?: boolean;
 }
 
 /**
- * Options for retrieving history
+ * Result of a history restoration operation
  */
-export interface IHistoryOptions {
+export interface IRestoreResult {
   /**
-   * Maximum number of snapshots to retrieve
+   * Whether the restoration was successful
    */
-  limit?: number;
+  success: boolean;
 
   /**
-   * Skip this many snapshots
+   * Error message if the restoration failed
    */
-  skip?: number;
+  error?: string;
 
+  /**
+   * IDs of cells that were restored
+   */
+  restoredCells?: string[];
+
+  /**
+   * ID of the snapshot that was created before restoration (if createSnapshot was true)
+   */
+  snapshotId?: string;
+}
+
+/**
+ * Filter options for retrieving history snapshots
+ */
+export interface IHistoryFilter {
   /**
    * Filter by author ID
    */
   authorId?: string;
 
   /**
-   * Filter by tags
+   * Filter by tag
    */
-  tags?: string[];
+  tag?: string;
 
   /**
-   * Only include major versions
-   */
-  majorVersionsOnly?: boolean;
-
-  /**
-   * Start timestamp (inclusive)
+   * Filter by time range (start timestamp)
    */
   startTime?: number;
 
   /**
-   * End timestamp (inclusive)
+   * Filter by time range (end timestamp)
    */
   endTime?: number;
+
+  /**
+   * Filter by automatic vs. manual snapshots
+   */
+  automatic?: boolean;
+
+  /**
+   * Filter by text in label or description
+   */
+  searchText?: string;
+
+  /**
+   * Maximum number of snapshots to return
+   */
+  limit?: number;
+
+  /**
+   * Sort order ('asc' or 'desc' by timestamp)
+   */
+  order?: 'asc' | 'desc';
 }
 
 /**
- * Options for restoring content
+ * Status of the history manager
  */
-export interface IRestoreOptions {
+export enum HistoryManagerStatus {
   /**
-   * Whether to create a new snapshot after restoring
+   * History manager is initializing
    */
-  createSnapshot?: boolean;
+  Initializing = 'initializing',
 
   /**
-   * Description for the new snapshot if created
+   * History manager is ready and operational
    */
-  snapshotDescription?: string;
+  Ready = 'ready',
 
   /**
-   * Cell IDs to restore (if not provided, restores the entire document)
+   * History manager is in a degraded state (some functionality may be limited)
    */
-  cellIds?: string[];
+  Degraded = 'degraded',
 
   /**
-   * Whether to restore cell metadata
+   * History manager is disconnected from the collaboration server
    */
-  restoreCellMetadata?: boolean;
-
-  /**
-   * Whether to restore notebook metadata
-   */
-  restoreNotebookMetadata?: boolean;
+  Disconnected = 'disconnected'
 }
 
 /**
- * Options for configuring the history manager
+ * Interface for the history manager
  */
-export interface IHistoryManagerOptions {
+export interface IHistoryManager extends IDisposable {
   /**
-   * Maximum number of snapshots to keep
+   * The current status of the history manager
    */
-  maxSnapshots?: number;
+  readonly status: HistoryManagerStatus;
 
   /**
-   * Interval in milliseconds for automatic snapshots
-   * Set to 0 to disable automatic snapshots
+   * Signal emitted when the history manager status changes
    */
-  autoSnapshotInterval?: number;
+  readonly statusChanged: ISignal<IHistoryManager, HistoryManagerStatus>;
 
-  /**
-   * Maximum age of snapshots in milliseconds
-   * Snapshots older than this will be pruned
-   */
-  maxSnapshotAge?: number;
-
-  /**
-   * Whether to create a snapshot on document load
-   */
-  snapshotOnLoad?: boolean;
-
-  /**
-   * Whether to create a snapshot before document close
-   */
-  snapshotOnClose?: boolean;
-
-  /**
-   * Whether to create a snapshot when a user joins
-   */
-  snapshotOnUserJoin?: boolean;
-
-  /**
-   * Storage provider for persisting history
-   */
-  storageProvider?: IHistoryStorageProvider;
-}
-
-/**
- * Interface for history storage providers
- */
-export interface IHistoryStorageProvider {
-  /**
-   * Store a snapshot
-   */
-  storeSnapshot(snapshot: IDocumentSnapshot): Promise<void>;
-
-  /**
-   * Retrieve a snapshot by ID
-   */
-  getSnapshot(id: string): Promise<IDocumentSnapshot | null>;
-
-  /**
-   * Retrieve multiple snapshots based on options
-   */
-  getSnapshots(options: IHistoryOptions): Promise<IDocumentSnapshot[]>;
-
-  /**
-   * Delete a snapshot
-   */
-  deleteSnapshot(id: string): Promise<void>;
-
-  /**
-   * Delete multiple snapshots based on criteria
-   */
-  pruneSnapshots(options: {
-    maxAge?: number;
-    maxCount?: number;
-    exceptIds?: string[];
-  }): Promise<number>;
-}
-
-/**
- * Interface for history manager
- */
-export interface IHistoryManager {
   /**
    * Signal emitted when a new snapshot is created
    */
-  readonly snapshotCreated: ISignal<IHistoryManager, IDocumentSnapshot>;
+  readonly snapshotCreated: ISignal<IHistoryManager, IHistorySnapshot>;
 
   /**
-   * Signal emitted when content is restored from a snapshot
+   * Signal emitted when a snapshot is deleted
    */
-  readonly contentRestored: ISignal<
-    IHistoryManager,
-    { snapshot: IDocumentSnapshot; options: IRestoreOptions }
-  >;
+  readonly snapshotDeleted: ISignal<IHistoryManager, string>;
 
   /**
-   * Create a snapshot of the current document state
+   * Signal emitted when a snapshot is updated
    */
-  createSnapshot(options?: ISnapshotOptions): Promise<IDocumentSnapshot>;
+  readonly snapshotUpdated: ISignal<IHistoryManager, IHistorySnapshot>;
 
   /**
-   * Get the list of available snapshots
+   * Create a new snapshot of the current notebook state
+   * 
+   * @param options - Options for creating the snapshot
+   * @returns A promise that resolves to the created snapshot
    */
-  getHistory(options?: IHistoryOptions): Promise<IDocumentSnapshot[]>;
+  createSnapshot(options?: {
+    label?: string;
+    description?: string;
+    automatic?: boolean;
+    tags?: string[];
+    metadata?: { [key: string]: any };
+  }): Promise<IHistorySnapshot>;
 
   /**
-   * Get a specific snapshot by ID
+   * Get a snapshot by ID
+   * 
+   * @param id - The ID of the snapshot to retrieve
+   * @returns The snapshot, or undefined if not found
    */
-  getSnapshot(id: string): Promise<IDocumentSnapshot | null>;
+  getSnapshot(id: string): Promise<IHistorySnapshot | undefined>;
+
+  /**
+   * Get all snapshots, optionally filtered
+   * 
+   * @param filter - Filter options
+   * @returns An array of snapshots matching the filter
+   */
+  getSnapshots(filter?: IHistoryFilter): Promise<IHistorySnapshot[]>;
+
+  /**
+   * Update a snapshot's metadata
+   * 
+   * @param id - The ID of the snapshot to update
+   * @param updates - The fields to update
+   * @returns The updated snapshot, or undefined if not found
+   */
+  updateSnapshot(id: string, updates: {
+    label?: string;
+    description?: string;
+    tags?: string[];
+    metadata?: { [key: string]: any };
+  }): Promise<IHistorySnapshot | undefined>;
+
+  /**
+   * Delete a snapshot
+   * 
+   * @param id - The ID of the snapshot to delete
+   * @returns A promise that resolves to true if the snapshot was deleted, false otherwise
+   */
+  deleteSnapshot(id: string): Promise<boolean>;
 
   /**
    * Compare two snapshots and generate a diff
+   * 
+   * @param fromId - The ID of the first snapshot
+   * @param toId - The ID of the second snapshot
+   * @returns A promise that resolves to the diff between the snapshots
    */
-  getDiff(fromId: string, toId: string): Promise<IDocumentDiff>;
+  compareSnapshots(fromId: string, toId: string): Promise<INotebookDiff>;
 
   /**
-   * Restore content from a snapshot
+   * Restore the notebook to a previous snapshot
+   * 
+   * @param id - The ID of the snapshot to restore
+   * @param options - Options for the restoration
+   * @returns A promise that resolves to the result of the restoration
    */
-  restoreSnapshot(id: string, options?: IRestoreOptions): Promise<void>;
+  restoreSnapshot(id: string, options?: IRestoreOptions): Promise<IRestoreResult>;
 
   /**
-   * Restore specific cells from a snapshot
+   * Get the content of a snapshot as a notebook JSON object
+   * 
+   * @param id - The ID of the snapshot
+   * @returns A promise that resolves to the notebook JSON, or undefined if not found
    */
-  restoreCells(id: string, cellIds: string[], options?: IRestoreOptions): Promise<void>;
+  getSnapshotContent(id: string): Promise<any | undefined>;
 
   /**
-   * Update history manager configuration
+   * Export a snapshot to a file
+   * 
+   * @param id - The ID of the snapshot to export
+   * @param format - The export format ('ipynb' or 'json')
+   * @returns A promise that resolves to the exported content as a string
    */
-  updateConfig(options: Partial<IHistoryManagerOptions>): void;
+  exportSnapshot(id: string, format: 'ipynb' | 'json'): Promise<string>;
 
   /**
-   * Prune old snapshots based on retention policy
+   * Set the retention policy for automatic snapshots
+   * 
+   * @param options - Retention policy options
    */
-  pruneHistory(): Promise<number>;
+  setRetentionPolicy(options: {
+    /**
+     * Maximum number of automatic snapshots to keep
+     */
+    maxSnapshots?: number;
+
+    /**
+     * Maximum age of automatic snapshots in milliseconds
+     */
+    maxAge?: number;
+
+    /**
+     * Minimum interval between automatic snapshots in milliseconds
+     */
+    minInterval?: number;
+  }): void;
 
   /**
-   * Delete a specific snapshot
+   * Get the current retention policy
+   * 
+   * @returns The current retention policy
    */
-  deleteSnapshot(id: string): Promise<void>;
+  getRetentionPolicy(): {
+    maxSnapshots: number;
+    maxAge: number;
+    minInterval: number;
+  };
 
   /**
-   * Get the current configuration
+   * Apply the retention policy, removing snapshots that exceed the limits
+   * 
+   * @returns A promise that resolves to the number of snapshots removed
    */
-  getConfig(): IHistoryManagerOptions;
-
-  /**
-   * Dispose of the history manager and clean up resources
-   */
-  dispose(): void;
+  applyRetentionPolicy(): Promise<number>;
 }
 
 /**
- * Token for the history manager
+ * Configuration options for the history manager
  */
-export const IHistoryManager = new Token<IHistoryManager>(
-  '@jupyter-notebook/notebook:IHistoryManager'
-);
+export interface IHistoryManagerOptions {
+  /**
+   * The notebook model to track history for
+   */
+  notebookModel: INotebookModel;
+
+  /**
+   * The Yjs document
+   */
+  ydoc: Y.Doc;
+
+  /**
+   * The current user's ID
+   */
+  userId: string;
+
+  /**
+   * The current user's display name
+   */
+  userName: string;
+
+  /**
+   * The current user's avatar URL (optional)
+   */
+  userAvatarUrl?: string;
+
+  /**
+   * Initial retention policy options
+   */
+  retentionPolicy?: {
+    /**
+     * Maximum number of automatic snapshots to keep (default: 100)
+     */
+    maxSnapshots?: number;
+
+    /**
+     * Maximum age of automatic snapshots in milliseconds (default: 30 days)
+     */
+    maxAge?: number;
+
+    /**
+     * Minimum interval between automatic snapshots in milliseconds (default: 5 minutes)
+     */
+    minInterval?: number;
+  };
+
+  /**
+   * Whether to create an initial snapshot on initialization (default: true)
+   */
+  createInitialSnapshot?: boolean;
+
+  /**
+   * Whether to enable automatic snapshots (default: true)
+   */
+  enableAutoSnapshots?: boolean;
+
+  /**
+   * Interval for automatic snapshots in milliseconds (default: 5 minutes)
+   */
+  autoSnapshotInterval?: number;
+}
 
 /**
- * Implementation of the history manager
+ * Implementation of the IHistoryManager interface
  */
 export class HistoryManager implements IHistoryManager {
   /**
    * Constructor
-   *
-   * @param doc - The Yjs document to track
-   * @param options - Configuration options
+   * 
+   * @param options - Configuration options for the history manager
    */
-  constructor(private doc: Y.Doc, options?: IHistoryManagerOptions) {
-    this._config = {
-      maxSnapshots: options?.maxSnapshots ?? 100,
-      autoSnapshotInterval: options?.autoSnapshotInterval ?? 300000, // 5 minutes
-      maxSnapshotAge: options?.maxSnapshotAge ?? 30 * 24 * 60 * 60 * 1000, // 30 days
-      snapshotOnLoad: options?.snapshotOnLoad ?? true,
-      snapshotOnClose: options?.snapshotOnClose ?? true,
-      snapshotOnUserJoin: options?.snapshotOnUserJoin ?? false,
-      storageProvider: options?.storageProvider
+  constructor(options: IHistoryManagerOptions) {
+    this._notebookModel = options.notebookModel;
+    this._ydoc = options.ydoc;
+    this._userId = options.userId;
+    this._userName = options.userName;
+    this._userAvatarUrl = options.userAvatarUrl;
+    
+    // Initialize signals
+    this._statusChanged = new Signal<IHistoryManager, HistoryManagerStatus>(this);
+    this._snapshotCreated = new Signal<IHistoryManager, IHistorySnapshot>(this);
+    this._snapshotDeleted = new Signal<IHistoryManager, string>(this);
+    this._snapshotUpdated = new Signal<IHistoryManager, IHistorySnapshot>(this);
+    
+    // Set initial status
+    this._status = HistoryManagerStatus.Initializing;
+    
+    // Initialize Yjs shared data structures
+    this._ySnapshots = this._ydoc.getMap<Y.Map<any>>('history-snapshots');
+    
+    // Set up retention policy
+    this._retentionPolicy = {
+      maxSnapshots: options.retentionPolicy?.maxSnapshots ?? 100,
+      maxAge: options.retentionPolicy?.maxAge ?? 30 * 24 * 60 * 60 * 1000, // 30 days
+      minInterval: options.retentionPolicy?.minInterval ?? 5 * 60 * 1000 // 5 minutes
     };
-
-    // Set up auto-snapshot timer if enabled
-    if (this._config.autoSnapshotInterval && this._config.autoSnapshotInterval > 0) {
-      this._autoSnapshotTimer = setInterval(() => {
-        this.createSnapshot({
-          description: 'Auto-snapshot',
-          tags: ['auto'],
-          isMajorVersion: false
-        }).catch(error => {
-          console.error('Failed to create auto-snapshot:', error);
-        });
-      }, this._config.autoSnapshotInterval);
-    }
-
-    // Create initial snapshot if configured
-    if (this._config.snapshotOnLoad) {
-      this.createSnapshot({
-        description: 'Initial state',
-        tags: ['initial'],
-        isMajorVersion: true
-      }).catch(error => {
-        console.error('Failed to create initial snapshot:', error);
-      });
-    }
-
-    // Set up document update handler to track changes
-    this.doc.on('update', (update: Uint8Array, origin: any) => {
-      // Track the update for potential future snapshots
-      this._pendingChanges = true;
-      
-      // Store the origin (typically contains user info) for attribution
-      if (origin && typeof origin === 'object' && origin.user) {
-        this._lastChangeAuthor = origin.user;
-      }
-    });
+    
+    // Set up auto-snapshot settings
+    this._enableAutoSnapshots = options.enableAutoSnapshots ?? true;
+    this._autoSnapshotInterval = options.autoSnapshotInterval ?? 5 * 60 * 1000; // 5 minutes
+    
+    // Initialize the history manager
+    this._initialize(options.createInitialSnapshot ?? true);
   }
-
+  
+  /**
+   * The current status of the history manager
+   */
+  get status(): HistoryManagerStatus {
+    return this._status;
+  }
+  
+  /**
+   * Signal emitted when the history manager status changes
+   */
+  get statusChanged(): ISignal<IHistoryManager, HistoryManagerStatus> {
+    return this._statusChanged;
+  }
+  
   /**
    * Signal emitted when a new snapshot is created
    */
-  readonly snapshotCreated = new Signal<IHistoryManager, IDocumentSnapshot>(this);
-
+  get snapshotCreated(): ISignal<IHistoryManager, IHistorySnapshot> {
+    return this._snapshotCreated;
+  }
+  
   /**
-   * Signal emitted when content is restored from a snapshot
+   * Signal emitted when a snapshot is deleted
    */
-  readonly contentRestored = new Signal<
-    IHistoryManager,
-    { snapshot: IDocumentSnapshot; options: IRestoreOptions }
-  >(this);
-
+  get snapshotDeleted(): ISignal<IHistoryManager, string> {
+    return this._snapshotDeleted;
+  }
+  
   /**
-   * Create a snapshot of the current document state
-   *
-   * @param options - Options for the snapshot
-   * @returns Promise resolving to the created snapshot
+   * Signal emitted when a snapshot is updated
    */
-  async createSnapshot(options: ISnapshotOptions = {}): Promise<IDocumentSnapshot> {
-    // Generate a unique ID for the snapshot
-    const id = this._generateSnapshotId();
-    
-    // Get the current state vector and document state
-    const stateVector = Y.encodeStateVector(this.doc);
-    const state = Y.encodeStateAsUpdate(this.doc);
-    
-    // Create the snapshot object
-    const snapshot: IDocumentSnapshot = {
-      id,
-      timestamp: Date.now(),
-      author: options.author || this._lastChangeAuthor || {
-        id: 'unknown',
-        name: 'Unknown User'
-      },
-      description: options.description,
-      stateVector,
-      state,
-      tags: options.tags || [],
-      isMajorVersion: options.isMajorVersion ?? false,
-      version: this._nextVersion++
-    };
-    
-    // Store the snapshot if a storage provider is configured
-    if (this._config.storageProvider) {
-      await this._config.storageProvider.storeSnapshot(snapshot);
+  get snapshotUpdated(): ISignal<IHistoryManager, IHistorySnapshot> {
+    return this._snapshotUpdated;
+  }
+  
+  /**
+   * Create a new snapshot of the current notebook state
+   * 
+   * @param options - Options for creating the snapshot
+   * @returns A promise that resolves to the created snapshot
+   */
+  async createSnapshot(options: {
+    label?: string;
+    description?: string;
+    automatic?: boolean;
+    tags?: string[];
+    metadata?: { [key: string]: any };
+  } = {}): Promise<IHistorySnapshot> {
+    // Check if we can create a snapshot based on the retention policy
+    if (options.automatic && !this._canCreateAutomaticSnapshot()) {
+      throw new Error('Cannot create automatic snapshot: too soon after previous snapshot');
     }
     
-    // Add to in-memory cache
-    this._snapshotCache.set(id, snapshot);
+    // Generate a unique ID for the snapshot
+    const id = UUID.uuid4();
     
-    // Reset pending changes flag
-    this._pendingChanges = false;
+    // Get the current timestamp
+    const timestamp = Date.now();
+    
+    // Get the current notebook state
+    const notebookState = this._captureNotebookState();
+    
+    // Calculate the size of the snapshot
+    const size = new TextEncoder().encode(JSON.stringify(notebookState)).length;
+    
+    // Create the snapshot object
+    const snapshot: IHistorySnapshot = {
+      id,
+      timestamp,
+      author: {
+        id: this._userId,
+        name: this._userName,
+        avatarUrl: this._userAvatarUrl
+      },
+      label: options.label,
+      description: options.description,
+      automatic: options.automatic ?? false,
+      size,
+      tags: options.tags,
+      metadata: options.metadata
+    };
+    
+    // Store the snapshot in the Yjs shared map
+    const ySnapshot = new Y.Map<any>();
+    ySnapshot.set('id', snapshot.id);
+    ySnapshot.set('timestamp', snapshot.timestamp);
+    ySnapshot.set('author', snapshot.author);
+    ySnapshot.set('label', snapshot.label);
+    ySnapshot.set('description', snapshot.description);
+    ySnapshot.set('automatic', snapshot.automatic);
+    ySnapshot.set('size', snapshot.size);
+    ySnapshot.set('tags', snapshot.tags);
+    ySnapshot.set('metadata', snapshot.metadata);
+    ySnapshot.set('state', notebookState);
+    
+    // Add the snapshot to the shared map
+    this._ydoc.transact(() => {
+      this._ySnapshots.set(id, ySnapshot);
+    });
+    
+    // Apply retention policy if this is an automatic snapshot
+    if (snapshot.automatic) {
+      await this.applyRetentionPolicy();
+    }
     
     // Emit the snapshotCreated signal
-    this.snapshotCreated.emit(snapshot);
-    
-    // Prune old snapshots based on retention policy
-    this.pruneHistory().catch(error => {
-      console.error('Failed to prune history after creating snapshot:', error);
-    });
+    this._snapshotCreated.emit(snapshot);
     
     return snapshot;
   }
-
+  
   /**
-   * Get the list of available snapshots
-   *
-   * @param options - Options for filtering and pagination
-   * @returns Promise resolving to an array of snapshots
+   * Get a snapshot by ID
+   * 
+   * @param id - The ID of the snapshot to retrieve
+   * @returns The snapshot, or undefined if not found
    */
-  async getHistory(options: IHistoryOptions = {}): Promise<IDocumentSnapshot[]> {
-    // If we have a storage provider, use it to get snapshots
-    if (this._config.storageProvider) {
-      return this._config.storageProvider.getSnapshots(options);
+  async getSnapshot(id: string): Promise<IHistorySnapshot | undefined> {
+    const ySnapshot = this._ySnapshots.get(id);
+    if (!ySnapshot) {
+      return undefined;
     }
     
-    // Otherwise, filter the in-memory cache
-    let snapshots = Array.from(this._snapshotCache.values());
+    return this._ySnapshotToSnapshot(ySnapshot);
+  }
+  
+  /**
+   * Get all snapshots, optionally filtered
+   * 
+   * @param filter - Filter options
+   * @returns An array of snapshots matching the filter
+   */
+  async getSnapshots(filter: IHistoryFilter = {}): Promise<IHistorySnapshot[]> {
+    // Get all snapshots
+    const snapshots: IHistorySnapshot[] = [];
+    this._ySnapshots.forEach((ySnapshot) => {
+      snapshots.push(this._ySnapshotToSnapshot(ySnapshot));
+    });
     
     // Apply filters
-    if (options.authorId) {
-      snapshots = snapshots.filter(s => s.author.id === options.authorId);
-    }
+    let filteredSnapshots = snapshots;
     
-    if (options.tags && options.tags.length > 0) {
-      snapshots = snapshots.filter(s => 
-        s.tags && options.tags!.some(tag => s.tags!.includes(tag))
+    // Filter by author ID
+    if (filter.authorId) {
+      filteredSnapshots = filteredSnapshots.filter(snapshot => 
+        snapshot.author.id === filter.authorId
       );
     }
     
-    if (options.majorVersionsOnly) {
-      snapshots = snapshots.filter(s => s.isMajorVersion);
+    // Filter by tag
+    if (filter.tag) {
+      filteredSnapshots = filteredSnapshots.filter(snapshot => 
+        snapshot.tags?.includes(filter.tag!)
+      );
     }
     
-    if (options.startTime) {
-      snapshots = snapshots.filter(s => s.timestamp >= options.startTime!);
+    // Filter by time range
+    if (filter.startTime) {
+      filteredSnapshots = filteredSnapshots.filter(snapshot => 
+        snapshot.timestamp >= filter.startTime!
+      );
     }
     
-    if (options.endTime) {
-      snapshots = snapshots.filter(s => s.timestamp <= options.endTime!);
+    if (filter.endTime) {
+      filteredSnapshots = filteredSnapshots.filter(snapshot => 
+        snapshot.timestamp <= filter.endTime!
+      );
     }
     
-    // Sort by timestamp (newest first)
-    snapshots.sort((a, b) => b.timestamp - a.timestamp);
-    
-    // Apply pagination
-    if (options.skip) {
-      snapshots = snapshots.slice(options.skip);
+    // Filter by automatic vs. manual
+    if (filter.automatic !== undefined) {
+      filteredSnapshots = filteredSnapshots.filter(snapshot => 
+        snapshot.automatic === filter.automatic
+      );
     }
     
-    if (options.limit) {
-      snapshots = snapshots.slice(0, options.limit);
+    // Filter by search text
+    if (filter.searchText) {
+      const searchText = filter.searchText.toLowerCase();
+      filteredSnapshots = filteredSnapshots.filter(snapshot => {
+        const label = snapshot.label?.toLowerCase() || '';
+        const description = snapshot.description?.toLowerCase() || '';
+        return label.includes(searchText) || description.includes(searchText);
+      });
     }
     
-    return snapshots;
+    // Sort by timestamp
+    filteredSnapshots.sort((a, b) => {
+      if (filter.order === 'asc') {
+        return a.timestamp - b.timestamp;
+      } else {
+        return b.timestamp - a.timestamp;
+      }
+    });
+    
+    // Apply limit
+    if (filter.limit && filter.limit > 0) {
+      filteredSnapshots = filteredSnapshots.slice(0, filter.limit);
+    }
+    
+    return filteredSnapshots;
   }
-
+  
   /**
-   * Get a specific snapshot by ID
-   *
-   * @param id - The snapshot ID
-   * @returns Promise resolving to the snapshot or null if not found
+   * Update a snapshot's metadata
+   * 
+   * @param id - The ID of the snapshot to update
+   * @param updates - The fields to update
+   * @returns The updated snapshot, or undefined if not found
    */
-  async getSnapshot(id: string): Promise<IDocumentSnapshot | null> {
-    // Check in-memory cache first
-    if (this._snapshotCache.has(id)) {
-      return this._snapshotCache.get(id)!;
+  async updateSnapshot(id: string, updates: {
+    label?: string;
+    description?: string;
+    tags?: string[];
+    metadata?: { [key: string]: any };
+  }): Promise<IHistorySnapshot | undefined> {
+    const ySnapshot = this._ySnapshots.get(id);
+    if (!ySnapshot) {
+      return undefined;
     }
     
-    // If not in cache and we have a storage provider, try to get it from storage
-    if (this._config.storageProvider) {
-      const snapshot = await this._config.storageProvider.getSnapshot(id);
-      
-      // Add to cache if found
-      if (snapshot) {
-        this._snapshotCache.set(id, snapshot);
+    // Update the snapshot
+    this._ydoc.transact(() => {
+      if (updates.label !== undefined) {
+        ySnapshot.set('label', updates.label);
       }
       
-      return snapshot;
+      if (updates.description !== undefined) {
+        ySnapshot.set('description', updates.description);
+      }
+      
+      if (updates.tags !== undefined) {
+        ySnapshot.set('tags', updates.tags);
+      }
+      
+      if (updates.metadata !== undefined) {
+        ySnapshot.set('metadata', updates.metadata);
+      }
+    });
+    
+    // Get the updated snapshot
+    const snapshot = this._ySnapshotToSnapshot(ySnapshot);
+    
+    // Emit the snapshotUpdated signal
+    this._snapshotUpdated.emit(snapshot);
+    
+    return snapshot;
+  }
+  
+  /**
+   * Delete a snapshot
+   * 
+   * @param id - The ID of the snapshot to delete
+   * @returns A promise that resolves to true if the snapshot was deleted, false otherwise
+   */
+  async deleteSnapshot(id: string): Promise<boolean> {
+    const ySnapshot = this._ySnapshots.get(id);
+    if (!ySnapshot) {
+      return false;
     }
     
-    return null;
+    // Delete the snapshot
+    this._ydoc.transact(() => {
+      this._ySnapshots.delete(id);
+    });
+    
+    // Emit the snapshotDeleted signal
+    this._snapshotDeleted.emit(id);
+    
+    return true;
   }
-
+  
   /**
    * Compare two snapshots and generate a diff
-   *
-   * @param fromId - The source snapshot ID
-   * @param toId - The target snapshot ID
-   * @returns Promise resolving to a diff object
+   * 
+   * @param fromId - The ID of the first snapshot
+   * @param toId - The ID of the second snapshot
+   * @returns A promise that resolves to the diff between the snapshots
    */
-  async getDiff(fromId: string, toId: string): Promise<IDocumentDiff> {
+  async compareSnapshots(fromId: string, toId: string): Promise<INotebookDiff> {
     // Get the snapshots
     const fromSnapshot = await this.getSnapshot(fromId);
     const toSnapshot = await this.getSnapshot(toId);
     
     if (!fromSnapshot || !toSnapshot) {
-      throw new Error(`Snapshot not found: ${!fromSnapshot ? fromId : toId}`);
+      throw new Error('One or both snapshots not found');
     }
     
-    // Create temporary Y.Doc instances to apply the snapshots
-    const fromDoc = new Y.Doc();
-    const toDoc = new Y.Doc();
+    // Get the notebook states
+    const fromState = this._getSnapshotState(fromId);
+    const toState = this._getSnapshotState(toId);
     
-    // Apply the states to the temporary docs
-    Y.applyUpdate(fromDoc, fromSnapshot.state);
-    Y.applyUpdate(toDoc, toSnapshot.state);
+    if (!fromState || !toState) {
+      throw new Error('One or both snapshot states not found');
+    }
     
-    // Initialize the diff object
-    const diff: IDocumentDiff = {
-      fromId,
-      toId,
-      cellChanges: {},
-      metadataChanges: [],
-      summary: {
-        cellsAdded: 0,
-        cellsRemoved: 0,
-        cellsModified: 0,
-        totalContentChanges: 0,
-        totalMetadataChanges: 0
-      }
+    // Compare the cells
+    const cellDiffs = this._compareCells(fromState.cells, toState.cells);
+    
+    // Compare the metadata
+    const metadataChanges = this._compareMetadata(fromState.metadata, toState.metadata);
+    
+    // Calculate summary
+    const summary = {
+      cellsAdded: cellDiffs.filter(diff => diff.changeType === 'added').length,
+      cellsRemoved: cellDiffs.filter(diff => diff.changeType === 'removed').length,
+      cellsModified: cellDiffs.filter(diff => diff.changeType === 'modified').length,
+      cellsUnchanged: cellDiffs.filter(diff => diff.changeType === 'unchanged').length
     };
     
-    // Compare cells
-    // Note: This is a simplified implementation. In a real implementation,
-    // you would need to access the actual notebook structure from the Y.Doc
-    // and perform a more detailed comparison.
-    
-    // For demonstration purposes, we'll assume the Y.Doc has a 'cells' array
-    // and a 'metadata' map
-    const fromCells = fromDoc.getArray('cells');
-    const toCells = toDoc.getArray('cells');
-    
-    // Get all cell IDs from both documents
-    const fromCellIds = new Set<string>();
-    const toCellIds = new Set<string>();
-    
-    fromCells.forEach((cell: any) => {
-      if (cell && cell.get && cell.get('id')) {
-        fromCellIds.add(cell.get('id'));
-      }
-    });
-    
-    toCells.forEach((cell: any) => {
-      if (cell && cell.get && cell.get('id')) {
-        toCellIds.add(cell.get('id'));
-      }
-    });
-    
-    // Find added, removed, and potentially modified cells
-    const addedCellIds = new Set<string>();
-    const removedCellIds = new Set<string>();
-    const potentiallyModifiedCellIds = new Set<string>();
-    
-    for (const id of toCellIds) {
-      if (!fromCellIds.has(id)) {
-        addedCellIds.add(id);
-      } else {
-        potentiallyModifiedCellIds.add(id);
-      }
-    }
-    
-    for (const id of fromCellIds) {
-      if (!toCellIds.has(id)) {
-        removedCellIds.add(id);
-      }
-    }
-    
-    // Process added cells
-    for (const id of addedCellIds) {
-      diff.cellChanges[id] = {
-        type: 'added'
-      };
-      diff.summary.cellsAdded++;
-    }
-    
-    // Process removed cells
-    for (const id of removedCellIds) {
-      diff.cellChanges[id] = {
-        type: 'removed'
-      };
-      diff.summary.cellsRemoved++;
-    }
-    
-    // Process potentially modified cells
-    for (const id of potentiallyModifiedCellIds) {
-      // Find the cells in both documents
-      const fromCell = this._findCellById(fromCells, id);
-      const toCell = this._findCellById(toCells, id);
-      
-      if (!fromCell || !toCell) {
-        continue;
-      }
-      
-      // Compare cell content
-      const fromContent = fromCell.get('source') || '';
-      const toContent = toCell.get('source') || '';
-      
-      // Compare cell metadata
-      const fromMetadata = fromCell.get('metadata') || {};
-      const toMetadata = toCell.get('metadata') || {};
-      
-      const contentChanges: IDocumentDiff['cellChanges'][string]['contentChanges'] = [];
-      const metadataChanges: IDocumentDiff['cellChanges'][string]['metadataChanges'] = [];
-      
-      // Detect content changes (simplified diff)
-      if (fromContent !== toContent) {
-        // In a real implementation, you would use a proper diff algorithm
-        // to identify specific line changes. This is a simplified version.
-        contentChanges.push({
-          type: 'modified',
-          lineStart: 0,
-          lineEnd: Math.max(
-            fromContent.split('\n').length,
-            toContent.split('\n').length
-          ),
-          oldContent: fromContent,
-          newContent: toContent,
-          author: toSnapshot.author
-        });
-        
-        diff.summary.totalContentChanges++;
-      }
-      
-      // Detect metadata changes
-      const metadataChangesResult = this._diffObjects(fromMetadata, toMetadata);
-      for (const change of metadataChangesResult) {
-        metadataChanges.push({
-          path: change.path,
-          oldValue: change.oldValue,
-          newValue: change.newValue
-        });
-        
-        diff.summary.totalMetadataChanges++;
-      }
-      
-      // If there are any changes, mark the cell as modified
-      if (contentChanges.length > 0 || metadataChanges.length > 0) {
-        diff.cellChanges[id] = {
-          type: 'modified',
-          contentChanges: contentChanges.length > 0 ? contentChanges : undefined,
-          metadataChanges: metadataChanges.length > 0 ? metadataChanges : undefined
-        };
-        
-        diff.summary.cellsModified++;
-      } else {
-        diff.cellChanges[id] = {
-          type: 'unchanged'
-        };
-      }
-    }
-    
-    // Compare notebook metadata
-    const fromMetadata = fromDoc.getMap('metadata')?.toJSON() || {};
-    const toMetadata = toDoc.getMap('metadata')?.toJSON() || {};
-    
-    const notebookMetadataChanges = this._diffObjects(fromMetadata, toMetadata);
-    if (notebookMetadataChanges.length > 0) {
-      diff.metadataChanges = notebookMetadataChanges.map(change => ({
-        path: change.path,
-        oldValue: change.oldValue,
-        newValue: change.newValue
-      }));
-      
-      diff.summary.totalMetadataChanges += notebookMetadataChanges.length;
-    }
-    
-    // Clean up temporary docs
-    fromDoc.destroy();
-    toDoc.destroy();
+    // Create the diff object
+    const diff: INotebookDiff = {
+      fromId,
+      toId,
+      fromTimestamp: fromSnapshot.timestamp,
+      toTimestamp: toSnapshot.timestamp,
+      cellDiffs,
+      metadataChanges,
+      summary
+    };
     
     return diff;
   }
-
+  
   /**
-   * Restore content from a snapshot
-   *
-   * @param id - The snapshot ID to restore from
+   * Restore the notebook to a previous snapshot
+   * 
+   * @param id - The ID of the snapshot to restore
    * @param options - Options for the restoration
-   * @returns Promise that resolves when the restoration is complete
+   * @returns A promise that resolves to the result of the restoration
    */
-  async restoreSnapshot(id: string, options: IRestoreOptions = {}): Promise<void> {
+  async restoreSnapshot(id: string, options: IRestoreOptions = { mode: 'full' }): Promise<IRestoreResult> {
+    // Get the snapshot
     const snapshot = await this.getSnapshot(id);
-    
     if (!snapshot) {
-      throw new Error(`Snapshot not found: ${id}`);
+      return {
+        success: false,
+        error: 'Snapshot not found'
+      };
     }
     
-    // Create a transaction to apply the changes
-    this.doc.transact(() => {
-      // Apply the snapshot state to the current document
-      Y.applyUpdate(this.doc, snapshot.state);
-    }, 'history-restore');
+    // Get the snapshot state
+    const state = this._getSnapshotState(id);
+    if (!state) {
+      return {
+        success: false,
+        error: 'Snapshot state not found'
+      };
+    }
     
-    // Create a new snapshot if requested
+    // Create a new snapshot before restoring if requested
+    let snapshotId: string | undefined;
     if (options.createSnapshot) {
-      await this.createSnapshot({
-        description: options.snapshotDescription || `Restored from snapshot ${snapshot.version}`,
-        tags: ['restored'],
-        isMajorVersion: true
-      });
-    }
-    
-    // Emit the contentRestored signal
-    this.contentRestored.emit({ snapshot, options });
-  }
-
-  /**
-   * Restore specific cells from a snapshot
-   *
-   * @param id - The snapshot ID to restore from
-   * @param cellIds - Array of cell IDs to restore
-   * @param options - Options for the restoration
-   * @returns Promise that resolves when the restoration is complete
-   */
-  async restoreCells(id: string, cellIds: string[], options: IRestoreOptions = {}): Promise<void> {
-    const snapshot = await this.getSnapshot(id);
-    
-    if (!snapshot) {
-      throw new Error(`Snapshot not found: ${id}`);
-    }
-    
-    // Create a temporary doc to extract the cells from the snapshot
-    const tempDoc = new Y.Doc();
-    Y.applyUpdate(tempDoc, snapshot.state);
-    
-    // Get the cells array from both docs
-    const tempCells = tempDoc.getArray('cells');
-    const currentCells = this.doc.getArray('cells');
-    
-    // Create a transaction to apply the changes
-    this.doc.transact(() => {
-      // For each cell ID to restore
-      for (const cellId of cellIds) {
-        // Find the cell in the snapshot
-        const snapshotCell = this._findCellById(tempCells, cellId);
-        
-        if (!snapshotCell) {
-          console.warn(`Cell ${cellId} not found in snapshot ${id}`);
-          continue;
-        }
-        
-        // Find the cell in the current document
-        const currentCellIndex = this._findCellIndexById(currentCells, cellId);
-        
-        if (currentCellIndex >= 0) {
-          // Cell exists, update it
-          const currentCell = currentCells.get(currentCellIndex);
-          
-          // Update cell content
-          if (snapshotCell.has('source')) {
-            currentCell.set('source', snapshotCell.get('source'));
-          }
-          
-          // Update cell metadata if requested
-          if (options.restoreCellMetadata && snapshotCell.has('metadata')) {
-            currentCell.set('metadata', snapshotCell.get('metadata'));
-          }
-        } else {
-          // Cell doesn't exist, create it
-          // Clone the cell from the snapshot
-          const newCell = new Y.Map();
-          
-          // Copy all properties from the snapshot cell
-          for (const [key, value] of snapshotCell.entries()) {
-            if (key === 'metadata' && !options.restoreCellMetadata) {
-              continue;
-            }
-            newCell.set(key, value);
-          }
-          
-          // Add the cell to the current document
-          // In a real implementation, you would need to determine the correct position
-          currentCells.push([newCell]);
-        }
+      try {
+        const newSnapshot = await this.createSnapshot({
+          label: 'Pre-restoration snapshot',
+          description: `Automatic snapshot created before restoring to snapshot ${id}`,
+          automatic: true
+        });
+        snapshotId = newSnapshot.id;
+      } catch (error) {
+        console.warn('Failed to create pre-restoration snapshot:', error);
       }
+    }
+    
+    // Perform the restoration
+    try {
+      const restoredCells = await this._restoreNotebookState(state, options);
       
-      // Restore notebook metadata if requested
-      if (options.restoreNotebookMetadata) {
-        const snapshotMetadata = tempDoc.getMap('metadata');
-        const currentMetadata = this.doc.getMap('metadata');
-        
-        // Clear current metadata
-        for (const key of currentMetadata.keys()) {
-          currentMetadata.delete(key);
-        }
-        
-        // Copy metadata from snapshot
-        for (const [key, value] of snapshotMetadata.entries()) {
-          currentMetadata.set(key, value);
-        }
-      }
-    }, 'history-restore-cells');
-    
-    // Clean up temporary doc
-    tempDoc.destroy();
-    
-    // Create a new snapshot if requested
-    if (options.createSnapshot) {
-      await this.createSnapshot({
-        description: options.snapshotDescription || `Restored cells from snapshot ${snapshot.version}`,
-        tags: ['restored-cells'],
-        isMajorVersion: false
-      });
-    }
-    
-    // Emit the contentRestored signal
-    this.contentRestored.emit({ snapshot, options });
-  }
-
-  /**
-   * Update history manager configuration
-   *
-   * @param options - New configuration options
-   */
-  updateConfig(options: Partial<IHistoryManagerOptions>): void {
-    // Update configuration
-    this._config = { ...this._config, ...options };
-    
-    // Update auto-snapshot timer if interval changed
-    if (options.autoSnapshotInterval !== undefined) {
-      if (this._autoSnapshotTimer) {
-        clearInterval(this._autoSnapshotTimer);
-        this._autoSnapshotTimer = null;
-      }
-      
-      if (options.autoSnapshotInterval > 0) {
-        this._autoSnapshotTimer = setInterval(() => {
-          this.createSnapshot({
-            description: 'Auto-snapshot',
-            tags: ['auto'],
-            isMajorVersion: false
-          }).catch(error => {
-            console.error('Failed to create auto-snapshot:', error);
-          });
-        }, options.autoSnapshotInterval);
-      }
+      return {
+        success: true,
+        restoredCells,
+        snapshotId
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: `Failed to restore snapshot: ${error.message}`,
+        snapshotId
+      };
     }
   }
-
+  
   /**
-   * Prune old snapshots based on retention policy
-   *
-   * @returns Promise resolving to the number of snapshots pruned
+   * Get the content of a snapshot as a notebook JSON object
+   * 
+   * @param id - The ID of the snapshot
+   * @returns A promise that resolves to the notebook JSON, or undefined if not found
    */
-  async pruneHistory(): Promise<number> {
-    // If we have a storage provider, use it to prune snapshots
-    if (this._config.storageProvider) {
-      const pruned = await this._config.storageProvider.pruneSnapshots({
-        maxAge: this._config.maxSnapshotAge,
-        maxCount: this._config.maxSnapshots
-      });
-      
-      // Update in-memory cache
-      const snapshots = await this._config.storageProvider.getSnapshots({});
-      this._snapshotCache.clear();
-      for (const snapshot of snapshots) {
-        this._snapshotCache.set(snapshot.id, snapshot);
-      }
-      
-      return pruned;
+  async getSnapshotContent(id: string): Promise<any | undefined> {
+    const state = this._getSnapshotState(id);
+    if (!state) {
+      return undefined;
     }
     
-    // Otherwise, prune the in-memory cache
+    return state;
+  }
+  
+  /**
+   * Export a snapshot to a file
+   * 
+   * @param id - The ID of the snapshot to export
+   * @param format - The export format ('ipynb' or 'json')
+   * @returns A promise that resolves to the exported content as a string
+   */
+  async exportSnapshot(id: string, format: 'ipynb' | 'json'): Promise<string> {
+    const state = this._getSnapshotState(id);
+    if (!state) {
+      throw new Error('Snapshot not found');
+    }
+    
+    if (format === 'ipynb') {
+      // Return the notebook JSON as a string
+      return JSON.stringify(state, null, 2);
+    } else if (format === 'json') {
+      // Include additional metadata about the snapshot
+      const snapshot = await this.getSnapshot(id);
+      if (!snapshot) {
+        throw new Error('Snapshot metadata not found');
+      }
+      
+      const exportData = {
+        snapshot,
+        content: state
+      };
+      
+      return JSON.stringify(exportData, null, 2);
+    } else {
+      throw new Error(`Unsupported export format: ${format}`);
+    }
+  }
+  
+  /**
+   * Set the retention policy for automatic snapshots
+   * 
+   * @param options - Retention policy options
+   */
+  setRetentionPolicy(options: {
+    maxSnapshots?: number;
+    maxAge?: number;
+    minInterval?: number;
+  }): void {
+    if (options.maxSnapshots !== undefined) {
+      this._retentionPolicy.maxSnapshots = options.maxSnapshots;
+    }
+    
+    if (options.maxAge !== undefined) {
+      this._retentionPolicy.maxAge = options.maxAge;
+    }
+    
+    if (options.minInterval !== undefined) {
+      this._retentionPolicy.minInterval = options.minInterval;
+    }
+  }
+  
+  /**
+   * Get the current retention policy
+   * 
+   * @returns The current retention policy
+   */
+  getRetentionPolicy(): {
+    maxSnapshots: number;
+    maxAge: number;
+    minInterval: number;
+  } {
+    return { ...this._retentionPolicy };
+  }
+  
+  /**
+   * Apply the retention policy, removing snapshots that exceed the limits
+   * 
+   * @returns A promise that resolves to the number of snapshots removed
+   */
+  async applyRetentionPolicy(): Promise<number> {
+    // Get all automatic snapshots
+    const snapshots = await this.getSnapshots({ automatic: true, order: 'desc' });
+    
+    // No snapshots to process
+    if (snapshots.length === 0) {
+      return 0;
+    }
+    
     const now = Date.now();
-    const maxAge = this._config.maxSnapshotAge;
-    const maxCount = this._config.maxSnapshots;
+    const snapshotsToRemove: string[] = [];
     
-    // Get all snapshots sorted by timestamp (oldest first)
-    const snapshots = Array.from(this._snapshotCache.values())
-      .sort((a, b) => a.timestamp - b.timestamp);
-    
-    const snapshotsToDelete: string[] = [];
-    
-    // Mark old snapshots for deletion
-    if (maxAge) {
+    // Check age limit
+    if (this._retentionPolicy.maxAge > 0) {
+      const ageLimit = now - this._retentionPolicy.maxAge;
+      
       for (const snapshot of snapshots) {
-        if (now - snapshot.timestamp > maxAge) {
-          snapshotsToDelete.push(snapshot.id);
+        if (snapshot.timestamp < ageLimit) {
+          snapshotsToRemove.push(snapshot.id);
         }
       }
     }
     
-    // If we have more snapshots than the maximum, mark the oldest for deletion
-    if (maxCount && snapshots.length - snapshotsToDelete.length > maxCount) {
-      const excessCount = snapshots.length - snapshotsToDelete.length - maxCount;
-      for (let i = 0; i < excessCount; i++) {
-        // Skip snapshots already marked for deletion
-        if (!snapshotsToDelete.includes(snapshots[i].id)) {
-          snapshotsToDelete.push(snapshots[i].id);
+    // Check count limit
+    if (this._retentionPolicy.maxSnapshots > 0 && snapshots.length > this._retentionPolicy.maxSnapshots) {
+      // Skip the most recent maxSnapshots snapshots
+      for (let i = this._retentionPolicy.maxSnapshots; i < snapshots.length; i++) {
+        if (!snapshotsToRemove.includes(snapshots[i].id)) {
+          snapshotsToRemove.push(snapshots[i].id);
         }
       }
     }
     
-    // Delete the marked snapshots
-    for (const id of snapshotsToDelete) {
-      this._snapshotCache.delete(id);
+    // Remove the snapshots
+    for (const id of snapshotsToRemove) {
+      await this.deleteSnapshot(id);
     }
     
-    return snapshotsToDelete.length;
+    return snapshotsToRemove.length;
   }
-
-  /**
-   * Delete a specific snapshot
-   *
-   * @param id - The snapshot ID to delete
-   * @returns Promise that resolves when the deletion is complete
-   */
-  async deleteSnapshot(id: string): Promise<void> {
-    // Delete from storage provider if available
-    if (this._config.storageProvider) {
-      await this._config.storageProvider.deleteSnapshot(id);
-    }
-    
-    // Delete from in-memory cache
-    this._snapshotCache.delete(id);
-  }
-
-  /**
-   * Get the current configuration
-   *
-   * @returns The current configuration
-   */
-  getConfig(): IHistoryManagerOptions {
-    return { ...this._config };
-  }
-
+  
   /**
    * Dispose of the history manager and clean up resources
    */
   dispose(): void {
+    if (this._isDisposed) {
+      return;
+    }
+    
     // Clear auto-snapshot timer
     if (this._autoSnapshotTimer) {
       clearInterval(this._autoSnapshotTimer);
       this._autoSnapshotTimer = null;
     }
     
-    // Create final snapshot if configured
-    if (this._config.snapshotOnClose && this._pendingChanges) {
-      this.createSnapshot({
-        description: 'Final state',
-        tags: ['final'],
-        isMajorVersion: true
-      }).catch(error => {
-        console.error('Failed to create final snapshot:', error);
+    // Clean up signals
+    this._statusChanged.disconnect();
+    this._snapshotCreated.disconnect();
+    this._snapshotDeleted.disconnect();
+    this._snapshotUpdated.disconnect();
+    
+    this._isDisposed = true;
+  }
+  
+  /**
+   * Initialize the history manager
+   * 
+   * @param createInitialSnapshot - Whether to create an initial snapshot
+   */
+  private async _initialize(createInitialSnapshot: boolean): Promise<void> {
+    try {
+      // Set up auto-snapshot timer if enabled
+      if (this._enableAutoSnapshots) {
+        this._autoSnapshotTimer = setInterval(() => {
+          this._createAutoSnapshot().catch(error => {
+            console.warn('Failed to create automatic snapshot:', error);
+          });
+        }, this._autoSnapshotInterval);
+      }
+      
+      // Create initial snapshot if requested
+      if (createInitialSnapshot) {
+        await this.createSnapshot({
+          label: 'Initial snapshot',
+          description: 'Initial snapshot created when the document was opened',
+          automatic: true
+        });
+      }
+      
+      // Set status to ready
+      this._setStatus(HistoryManagerStatus.Ready);
+    } catch (error) {
+      console.error('Failed to initialize history manager:', error);
+      this._setStatus(HistoryManagerStatus.Degraded);
+    }
+  }
+  
+  /**
+   * Create an automatic snapshot
+   */
+  private async _createAutoSnapshot(): Promise<void> {
+    if (!this._canCreateAutomaticSnapshot()) {
+      return;
+    }
+    
+    try {
+      await this.createSnapshot({
+        automatic: true
       });
+    } catch (error) {
+      console.warn('Failed to create automatic snapshot:', error);
+    }
+  }
+  
+  /**
+   * Check if an automatic snapshot can be created based on the retention policy
+   */
+  private _canCreateAutomaticSnapshot(): boolean {
+    // If auto snapshots are disabled, don't create one
+    if (!this._enableAutoSnapshots) {
+      return false;
     }
     
-    // Clear in-memory cache
-    this._snapshotCache.clear();
-  }
-
-  /**
-   * Generate a unique ID for a snapshot
-   *
-   * @returns A unique ID string
-   */
-  private _generateSnapshotId(): string {
-    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  }
-
-  /**
-   * Find a cell by ID in a Y.Array of cells
-   *
-   * @param cells - The Y.Array of cells to search
-   * @param id - The cell ID to find
-   * @returns The cell if found, or undefined
-   */
-  private _findCellById(cells: Y.Array<any>, id: string): Y.Map<any> | undefined {
-    for (let i = 0; i < cells.length; i++) {
-      const cell = cells.get(i);
-      if (cell && cell.get && cell.get('id') === id) {
-        return cell;
-      }
+    // If there are no snapshots yet, allow creating one
+    if (this._ySnapshots.size === 0) {
+      return true;
     }
-    return undefined;
-  }
-
-  /**
-   * Find the index of a cell by ID in a Y.Array of cells
-   *
-   * @param cells - The Y.Array of cells to search
-   * @param id - The cell ID to find
-   * @returns The index of the cell if found, or -1
-   */
-  private _findCellIndexById(cells: Y.Array<any>, id: string): number {
-    for (let i = 0; i < cells.length; i++) {
-      const cell = cells.get(i);
-      if (cell && cell.get && cell.get('id') === id) {
-        return i;
-      }
-    }
-    return -1;
-  }
-
-  /**
-   * Compare two objects and return the differences
-   *
-   * @param obj1 - The first object
-   * @param obj2 - The second object
-   * @param path - The current path (used for recursion)
-   * @returns Array of changes
-   */
-  private _diffObjects(
-    obj1: Record<string, any>,
-    obj2: Record<string, any>,
-    path: string = ''
-  ): Array<{ path: string; oldValue: any; newValue: any }> {
-    const changes: Array<{ path: string; oldValue: any; newValue: any }> = [];
     
-    // Check for properties in obj1 that are different or missing in obj2
-    for (const key in obj1) {
-      const currentPath = path ? `${path}.${key}` : key;
+    // Check if enough time has passed since the last automatic snapshot
+    const now = Date.now();
+    let mostRecentAutoSnapshot: IHistorySnapshot | null = null;
+    
+    this._ySnapshots.forEach(ySnapshot => {
+      const snapshot = this._ySnapshotToSnapshot(ySnapshot);
+      if (snapshot.automatic) {
+        if (!mostRecentAutoSnapshot || snapshot.timestamp > mostRecentAutoSnapshot.timestamp) {
+          mostRecentAutoSnapshot = snapshot;
+        }
+      }
+    });
+    
+    if (mostRecentAutoSnapshot) {
+      const timeSinceLastSnapshot = now - mostRecentAutoSnapshot.timestamp;
+      return timeSinceLastSnapshot >= this._retentionPolicy.minInterval;
+    }
+    
+    return true;
+  }
+  
+  /**
+   * Capture the current state of the notebook
+   */
+  private _captureNotebookState(): any {
+    // Get the notebook model content
+    const notebook = this._notebookModel.toJSON();
+    
+    // Add additional metadata for history tracking
+    notebook.history = {
+      capturedAt: Date.now(),
+      capturedBy: {
+        id: this._userId,
+        name: this._userName
+      },
+      version: 1
+    };
+    
+    return notebook;
+  }
+  
+  /**
+   * Get the state of a snapshot
+   * 
+   * @param id - The ID of the snapshot
+   */
+  private _getSnapshotState(id: string): any | undefined {
+    const ySnapshot = this._ySnapshots.get(id);
+    if (!ySnapshot) {
+      return undefined;
+    }
+    
+    return ySnapshot.get('state');
+  }
+  
+  /**
+   * Convert a Yjs snapshot to an IHistorySnapshot
+   * 
+   * @param ySnapshot - The Yjs snapshot
+   */
+  private _ySnapshotToSnapshot(ySnapshot: Y.Map<any>): IHistorySnapshot {
+    return {
+      id: ySnapshot.get('id'),
+      timestamp: ySnapshot.get('timestamp'),
+      author: ySnapshot.get('author'),
+      label: ySnapshot.get('label'),
+      description: ySnapshot.get('description'),
+      automatic: ySnapshot.get('automatic'),
+      size: ySnapshot.get('size'),
+      tags: ySnapshot.get('tags'),
+      metadata: ySnapshot.get('metadata')
+    };
+  }
+  
+  /**
+   * Compare two sets of notebook cells and generate diffs
+   * 
+   * @param fromCells - The cells from the first snapshot
+   * @param toCells - The cells from the second snapshot
+   */
+  private _compareCells(fromCells: any[], toCells: any[]): ICellDiff[] {
+    const cellDiffs: ICellDiff[] = [];
+    const fromCellsMap = new Map<string, any>();
+    const toCellsMap = new Map<string, any>();
+    
+    // Create maps for faster lookup
+    fromCells.forEach(cell => {
+      fromCellsMap.set(cell.id, cell);
+    });
+    
+    toCells.forEach(cell => {
+      toCellsMap.set(cell.id, cell);
+    });
+    
+    // Find cells that were added, removed, or modified
+    const allCellIds = new Set<string>([...fromCellsMap.keys(), ...toCellsMap.keys()]);
+    
+    allCellIds.forEach(cellId => {
+      const fromCell = fromCellsMap.get(cellId);
+      const toCell = toCellsMap.get(cellId);
       
-      if (!(key in obj2)) {
-        // Property removed
-        changes.push({
-          path: currentPath,
-          oldValue: obj1[key],
-          newValue: undefined
+      if (!fromCell) {
+        // Cell was added
+        cellDiffs.push({
+          cellId,
+          changeType: 'added',
+          newContent: toCell.source
         });
-      } else if (typeof obj1[key] === 'object' && obj1[key] !== null &&
-                 typeof obj2[key] === 'object' && obj2[key] !== null) {
-        // Recursively compare objects
-        changes.push(...this._diffObjects(obj1[key], obj2[key], currentPath));
-      } else if (obj1[key] !== obj2[key]) {
-        // Value changed
-        changes.push({
-          path: currentPath,
-          oldValue: obj1[key],
-          newValue: obj2[key]
+      } else if (!toCell) {
+        // Cell was removed
+        cellDiffs.push({
+          cellId,
+          changeType: 'removed',
+          oldContent: fromCell.source
+        });
+      } else {
+        // Cell exists in both snapshots, check if it was modified
+        if (fromCell.source !== toCell.source) {
+          // Content was modified
+          const lineDiffs = this._compareLines(fromCell.source, toCell.source);
+          
+          cellDiffs.push({
+            cellId,
+            changeType: 'modified',
+            oldContent: fromCell.source,
+            newContent: toCell.source,
+            lineDiffs
+          });
+        } else {
+          // Check if metadata was modified
+          const metadataChanges = this._compareMetadata(fromCell.metadata, toCell.metadata);
+          
+          if (metadataChanges.length > 0) {
+            cellDiffs.push({
+              cellId,
+              changeType: 'modified',
+              oldContent: fromCell.source,
+              newContent: toCell.source,
+              metadataChanges
+            });
+          } else {
+            // Cell is unchanged
+            cellDiffs.push({
+              cellId,
+              changeType: 'unchanged'
+            });
+          }
+        }
+      }
+    });
+    
+    return cellDiffs;
+  }
+  
+  /**
+   * Compare two strings line by line
+   * 
+   * @param oldText - The old text
+   * @param newText - The new text
+   */
+  private _compareLines(oldText: string, newText: string): {
+    oldLineNumber: number;
+    newLineNumber: number;
+    type: 'added' | 'removed' | 'modified' | 'unchanged';
+    content: string;
+  }[] {
+    // Split the text into lines
+    const oldLines = oldText.split('\n');
+    const newLines = newText.split('\n');
+    
+    // Simple line-by-line diff
+    // In a real implementation, this would use a more sophisticated diff algorithm
+    const lineDiffs: {
+      oldLineNumber: number;
+      newLineNumber: number;
+      type: 'added' | 'removed' | 'modified' | 'unchanged';
+      content: string;
+    }[] = [];
+    
+    // Find the maximum length
+    const maxLength = Math.max(oldLines.length, newLines.length);
+    
+    for (let i = 0; i < maxLength; i++) {
+      const oldLine = i < oldLines.length ? oldLines[i] : null;
+      const newLine = i < newLines.length ? newLines[i] : null;
+      
+      if (oldLine === null) {
+        // Line was added
+        lineDiffs.push({
+          oldLineNumber: -1,
+          newLineNumber: i,
+          type: 'added',
+          content: newLine!
+        });
+      } else if (newLine === null) {
+        // Line was removed
+        lineDiffs.push({
+          oldLineNumber: i,
+          newLineNumber: -1,
+          type: 'removed',
+          content: oldLine
+        });
+      } else if (oldLine !== newLine) {
+        // Line was modified
+        lineDiffs.push({
+          oldLineNumber: i,
+          newLineNumber: i,
+          type: 'modified',
+          content: newLine
+        });
+      } else {
+        // Line is unchanged
+        lineDiffs.push({
+          oldLineNumber: i,
+          newLineNumber: i,
+          type: 'unchanged',
+          content: newLine
         });
       }
     }
     
-    // Check for properties in obj2 that are not in obj1
-    for (const key in obj2) {
-      const currentPath = path ? `${path}.${key}` : key;
+    return lineDiffs;
+  }
+  
+  /**
+   * Compare two metadata objects and generate changes
+   * 
+   * @param oldMetadata - The old metadata
+   * @param newMetadata - The new metadata
+   */
+  private _compareMetadata(oldMetadata: any, newMetadata: any): {
+    key: string;
+    oldValue: any;
+    newValue: any;
+  }[] {
+    const changes: {
+      key: string;
+      oldValue: any;
+      newValue: any;
+    }[] = [];
+    
+    // Handle undefined metadata
+    const oldMeta = oldMetadata || {};
+    const newMeta = newMetadata || {};
+    
+    // Get all keys from both objects
+    const allKeys = new Set<string>([...Object.keys(oldMeta), ...Object.keys(newMeta)]);
+    
+    allKeys.forEach(key => {
+      const oldValue = oldMeta[key];
+      const newValue = newMeta[key];
       
-      if (!(key in obj1)) {
-        // Property added
+      // Check if the key exists in both objects and has the same value
+      if (!this._deepEqual(oldValue, newValue)) {
         changes.push({
-          path: currentPath,
-          oldValue: undefined,
-          newValue: obj2[key]
+          key,
+          oldValue,
+          newValue
         });
       }
-    }
+    });
     
     return changes;
   }
+  
+  /**
+   * Deep equality check for objects
+   * 
+   * @param a - The first value
+   * @param b - The second value
+   */
+  private _deepEqual(a: any, b: any): boolean {
+    // If both are undefined or null, they're equal
+    if (a === b) {
+      return true;
+    }
+    
+    // If only one is undefined or null, they're not equal
+    if (a == null || b == null) {
+      return false;
+    }
+    
+    // If they're not objects, compare directly
+    if (typeof a !== 'object' || typeof b !== 'object') {
+      return a === b;
+    }
+    
+    // If they're arrays, compare each element
+    if (Array.isArray(a) && Array.isArray(b)) {
+      if (a.length !== b.length) {
+        return false;
+      }
+      
+      for (let i = 0; i < a.length; i++) {
+        if (!this._deepEqual(a[i], b[i])) {
+          return false;
+        }
+      }
+      
+      return true;
+    }
+    
+    // If one is an array and the other isn't, they're not equal
+    if (Array.isArray(a) || Array.isArray(b)) {
+      return false;
+    }
+    
+    // Compare objects
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
+    
+    if (keysA.length !== keysB.length) {
+      return false;
+    }
+    
+    for (const key of keysA) {
+      if (!keysB.includes(key) || !this._deepEqual(a[key], b[key])) {
+        return false;
+      }
+    }
+    
+    return true;
+  }
+  
+  /**
+   * Restore the notebook to a previous state
+   * 
+   * @param state - The notebook state to restore
+   * @param options - Options for the restoration
+   */
+  private async _restoreNotebookState(state: any, options: IRestoreOptions): Promise<string[]> {
+    const restoredCells: string[] = [];
+    
+    if (options.mode === 'full') {
+      // Full restoration - replace the entire notebook
+      await this._applyFullRestoration(state);
+      
+      // All cells were restored
+      state.cells.forEach((cell: any) => {
+        restoredCells.push(cell.id);
+      });
+    } else if (options.mode === 'selective' && options.cellIds && options.cellIds.length > 0) {
+      // Selective restoration - only restore specified cells
+      await this._applySelectiveRestoration(state, options.cellIds, options.asNewEdit ?? false);
+      
+      // Only the selected cells were restored
+      restoredCells.push(...options.cellIds);
+    } else {
+      throw new Error('Invalid restoration mode or missing cell IDs for selective restoration');
+    }
+    
+    return restoredCells;
+  }
+  
+  /**
+   * Apply a full restoration of the notebook
+   * 
+   * @param state - The notebook state to restore
+   */
+  private async _applyFullRestoration(state: any): Promise<void> {
+    // This would typically involve updating the Yjs document
+    // with the content from the snapshot, which would then
+    // propagate to all clients
+    
+    // For simplicity, we'll just update the notebook model directly
+    // In a real implementation, this would be more complex and involve
+    // proper Yjs document updates
+    
+    // Clear the current notebook content
+    this._notebookModel.fromJSON(state);
+  }
+  
+  /**
+   * Apply a selective restoration of specific cells
+   * 
+   * @param state - The notebook state to restore
+   * @param cellIds - The IDs of the cells to restore
+   * @param asNewEdit - Whether to apply the restoration as a new edit
+   */
+  private async _applySelectiveRestoration(state: any, cellIds: string[], asNewEdit: boolean): Promise<void> {
+    // Get the cells from the snapshot
+    const cellsToRestore = state.cells.filter((cell: any) => cellIds.includes(cell.id));
+    
+    if (cellsToRestore.length === 0) {
+      throw new Error('No cells found in snapshot with the specified IDs');
+    }
+    
+    // Get the current notebook state
+    const currentState = this._notebookModel.toJSON();
+    const currentCellsMap = new Map<string, any>();
+    
+    currentState.cells.forEach((cell: any) => {
+      currentCellsMap.set(cell.id, cell);
+    });
+    
+    // Apply the restoration
+    if (asNewEdit) {
+      // Add the restored cells as new cells
+      // This would typically involve creating new cells with the content
+      // from the snapshot, but with new IDs
+      
+      // For simplicity, we'll just add the cells to the end of the notebook
+      // In a real implementation, this would be more complex
+      
+      const newCells = [...currentState.cells];
+      
+      cellsToRestore.forEach((cell: any) => {
+        // Create a new cell with a new ID but the same content
+        const newCell = { ...cell, id: UUID.uuid4() };
+        newCells.push(newCell);
+      });
+      
+      // Update the notebook model
+      currentState.cells = newCells;
+      this._notebookModel.fromJSON(currentState);
+    } else {
+      // Replace the existing cells with the restored cells
+      // This would typically involve updating the existing cells
+      // with the content from the snapshot
+      
+      const newCells = [...currentState.cells];
+      
+      cellsToRestore.forEach((cell: any) => {
+        const index = newCells.findIndex((c: any) => c.id === cell.id);
+        
+        if (index !== -1) {
+          // Replace the existing cell
+          newCells[index] = cell;
+        } else {
+          // Cell doesn't exist in the current notebook, add it
+          newCells.push(cell);
+        }
+      });
+      
+      // Update the notebook model
+      currentState.cells = newCells;
+      this._notebookModel.fromJSON(currentState);
+    }
+  }
+  
+  /**
+   * Set the history manager status and emit a status change event
+   * 
+   * @param status - The new status
+   */
+  private _setStatus(status: HistoryManagerStatus): void {
+    if (this._status !== status) {
+      this._status = status;
+      this._statusChanged.emit(status);
+    }
+  }
+  
+  private _notebookModel: INotebookModel;
+  private _ydoc: Y.Doc;
+  private _ySnapshots: Y.Map<Y.Map<any>>;
+  private _userId: string;
+  private _userName: string;
+  private _userAvatarUrl?: string;
+  private _status: HistoryManagerStatus = HistoryManagerStatus.Initializing;
+  private _isDisposed = false;
+  private _retentionPolicy: {
+    maxSnapshots: number;
+    maxAge: number;
+    minInterval: number;
+  };
+  private _enableAutoSnapshots: boolean;
+  private _autoSnapshotInterval: number;
+  private _autoSnapshotTimer: any | null = null;
+  
+  private _statusChanged: Signal<IHistoryManager, HistoryManagerStatus>;
+  private _snapshotCreated: Signal<IHistoryManager, IHistorySnapshot>;
+  private _snapshotDeleted: Signal<IHistoryManager, string>;
+  private _snapshotUpdated: Signal<IHistoryManager, IHistorySnapshot>;
+}
 
-  // Configuration
-  private _config: IHistoryManagerOptions;
-  
-  // In-memory snapshot cache
-  private _snapshotCache = new Map<string, IDocumentSnapshot>();
-  
-  // Auto-snapshot timer
-  private _autoSnapshotTimer: NodeJS.Timeout | null = null;
-  
-  // Flag to track if there are pending changes since the last snapshot
-  private _pendingChanges = false;
-  
-  // Track the author of the last change
-  private _lastChangeAuthor: IDocumentSnapshot['author'] | null = null;
-  
-  // Counter for version numbers
-  private _nextVersion = 1;
+/**
+ * Create a history manager for a notebook
+ * 
+ * @param options - Configuration options for the history manager
+ * @returns A new history manager instance
+ */
+export function createHistoryManager(options: IHistoryManagerOptions): IHistoryManager {
+  return new HistoryManager(options);
 }
