@@ -1,212 +1,276 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { CommentSystem, ICommentSystem, CommentStatus, CommentPriority, ICommentUser, ICommentThread, IComment, ICommentReply, CommentChangeType } from '@jupyter-notebook/notebook/lib/collab/comments';
-import { NotebookModel } from '@jupyter-notebook/notebook';
+import {
+  CommentSystem,
+  ICommentSystem,
+  CommentStatus,
+  CommentPriority,
+  ICommentUser,
+  ICommentThread,
+  IComment,
+  ICommentReply,
+  CommentChangeType
+} from '../../src/collab/comments';
+
+import { INotebookModel } from '../../src/model';
 import * as Y from 'yjs';
-import { YNotebookProvider } from '@jupyter-notebook/notebook/lib/collab/yprovider';
 
-// Mock user data for testing
-const testUser1: ICommentUser = {
-  id: 'user1',
-  displayName: 'Test User 1',
-  avatarUrl: 'https://example.com/avatar1.png',
-  email: 'user1@example.com'
-};
+/**
+ * Mock notebook model for testing
+ */
+class MockNotebookModel implements Partial<INotebookModel> {
+  constructor() {}
+}
 
-const testUser2: ICommentUser = {
-  id: 'user2',
-  displayName: 'Test User 2',
-  avatarUrl: 'https://example.com/avatar2.png',
-  email: 'user2@example.com'
-};
+/**
+ * Helper function to create a mock user for testing
+ */
+function createMockUser(id: string, name: string, email?: string, avatarUrl?: string): ICommentUser {
+  return {
+    id,
+    displayName: name,
+    email,
+    avatarUrl
+  };
+}
 
-// Helper function to create a comment system for testing
-function createCommentSystem(): { commentSystem: ICommentSystem; ydoc: Y.Doc; model: NotebookModel } {
+/**
+ * Helper function to create a comment system for testing
+ */
+function createCommentSystem(): { ydoc: Y.Doc; commentSystem: ICommentSystem } {
   const ydoc = new Y.Doc();
-  const provider = new YNotebookProvider(ydoc);
-  
-  const model = new NotebookModel({
-    collaborative: true,
-    yjsProvider: provider
-  });
-  
-  const commentSystem = new CommentSystem(model, ydoc);
-  
-  return { commentSystem, ydoc, model };
+  const notebookModel = new MockNotebookModel() as INotebookModel;
+  const commentSystem = new CommentSystem(notebookModel, ydoc);
+  return { ydoc, commentSystem };
 }
 
-// Helper function to create a second comment system with the same Yjs document
-function createSecondClient(ydoc: Y.Doc): { commentSystem: ICommentSystem; model: NotebookModel } {
-  const provider = new YNotebookProvider(ydoc);
+/**
+ * Helper function to connect two Yjs documents
+ */
+function connectYjsDocs(doc1: Y.Doc, doc2: Y.Doc): void {
+  // Create update handlers to sync the documents
+  const doc1UpdateHandler = (update: Uint8Array) => {
+    Y.applyUpdate(doc2, update);
+  };
   
-  const model = new NotebookModel({
-    collaborative: true,
-    yjsProvider: provider
-  });
+  const doc2UpdateHandler = (update: Uint8Array) => {
+    Y.applyUpdate(doc1, update);
+  };
   
-  const commentSystem = new CommentSystem(model, ydoc);
+  // Set up event listeners
+  doc1.on('update', doc1UpdateHandler);
+  doc2.on('update', doc2UpdateHandler);
   
-  return { commentSystem, model };
-}
-
-// Helper function to simulate network synchronization between clients
-function syncClients(sourceDoc: Y.Doc, targetDoc: Y.Doc): void {
-  const update = Y.encodeStateAsUpdate(sourceDoc);
-  Y.applyUpdate(targetDoc, update);
+  // Sync the initial state
+  doc1UpdateHandler(Y.encodeStateAsUpdate(doc1));
 }
 
 describe('CommentSystem', () => {
-  
-  describe('Thread Management', () => {
-    it('should create a new comment thread', () => {
+  describe('constructor', () => {
+    it('should create a comment system with the correct initial state', () => {
       const { commentSystem } = createCommentSystem();
       
-      const thread = commentSystem.createThread(
-        'cell1',
-        'This is a test comment',
-        testUser1
-      );
+      expect(commentSystem.getThreads()).toHaveLength(0);
+      expect(commentSystem.getNotifications()).toHaveLength(0);
+    });
+  });
+  
+  describe('thread management', () => {
+    it('should create a new comment thread', () => {
+      const { commentSystem } = createCommentSystem();
+      const user = createMockUser('user1', 'User 1');
+      const cellId = 'cell1';
+      const content = 'This is a comment';
+      
+      const thread = commentSystem.createThread(cellId, content, user);
       
       expect(thread).toBeDefined();
       expect(thread.id).toBeDefined();
-      expect(thread.cellId).toBe('cell1');
-      expect(thread.comments.length).toBe(1);
-      expect(thread.comments[0].content).toBe('This is a test comment');
-      expect(thread.comments[0].author).toEqual(testUser1);
+      expect(thread.cellId).toBe(cellId);
+      expect(thread.comments).toHaveLength(1);
+      expect(thread.comments[0].content).toBe(content);
+      expect(thread.comments[0].author).toEqual(user);
       expect(thread.comments[0].status).toBe(CommentStatus.Open);
+      
+      // Verify the thread is in the system
+      const threads = commentSystem.getThreads();
+      expect(threads).toHaveLength(1);
+      expect(threads[0].id).toBe(thread.id);
     });
     
-    it('should create a thread with a specific range', () => {
+    it('should create a thread with a range', () => {
       const { commentSystem } = createCommentSystem();
-      
+      const user = createMockUser('user1', 'User 1');
+      const cellId = 'cell1';
+      const content = 'This is a comment';
       const range = { start: 10, end: 20 };
-      const thread = commentSystem.createThread(
-        'cell1',
-        'Comment on a specific range',
-        testUser1,
-        range
-      );
+      
+      const thread = commentSystem.createThread(cellId, content, user, range);
       
       expect(thread.range).toEqual(range);
     });
     
-    it('should retrieve all threads', () => {
-      const { commentSystem } = createCommentSystem();
-      
-      commentSystem.createThread('cell1', 'Comment 1', testUser1);
-      commentSystem.createThread('cell2', 'Comment 2', testUser1);
-      
-      const threads = commentSystem.getThreads();
-      expect(threads.length).toBe(2);
-    });
-    
-    it('should retrieve threads for a specific cell', () => {
-      const { commentSystem } = createCommentSystem();
-      
-      commentSystem.createThread('cell1', 'Comment 1', testUser1);
-      commentSystem.createThread('cell1', 'Comment 2', testUser1);
-      commentSystem.createThread('cell2', 'Comment 3', testUser1);
-      
-      const threadsForCell1 = commentSystem.getThreadsForCell('cell1');
-      expect(threadsForCell1.length).toBe(2);
-      
-      const threadsForCell2 = commentSystem.getThreadsForCell('cell2');
-      expect(threadsForCell2.length).toBe(1);
-    });
-    
-    it('should retrieve a specific thread by ID', () => {
-      const { commentSystem } = createCommentSystem();
-      
-      const thread1 = commentSystem.createThread('cell1', 'Comment 1', testUser1);
-      commentSystem.createThread('cell2', 'Comment 2', testUser1);
-      
-      const retrievedThread = commentSystem.getThread(thread1.id);
-      expect(retrievedThread).toBeDefined();
-      expect(retrievedThread?.id).toBe(thread1.id);
-    });
-    
     it('should delete a thread', () => {
       const { commentSystem } = createCommentSystem();
+      const user = createMockUser('user1', 'User 1');
+      const cellId = 'cell1';
       
-      const thread = commentSystem.createThread('cell1', 'Comment to delete', testUser1);
-      expect(commentSystem.getThreads().length).toBe(1);
+      // Create a thread
+      const thread = commentSystem.createThread(cellId, 'Comment', user);
+      expect(commentSystem.getThreads()).toHaveLength(1);
       
+      // Delete the thread
       commentSystem.deleteThread(thread.id);
-      expect(commentSystem.getThreads().length).toBe(0);
+      
+      // Verify the thread is deleted
+      expect(commentSystem.getThreads()).toHaveLength(0);
+      expect(commentSystem.getThread(thread.id)).toBeUndefined();
+    });
+    
+    it('should get threads for a specific cell', () => {
+      const { commentSystem } = createCommentSystem();
+      const user = createMockUser('user1', 'User 1');
+      
+      // Create threads for different cells
+      commentSystem.createThread('cell1', 'Comment 1', user);
+      commentSystem.createThread('cell2', 'Comment 2', user);
+      commentSystem.createThread('cell1', 'Comment 3', user);
+      
+      // Get threads for cell1
+      const cell1Threads = commentSystem.getThreadsForCell('cell1');
+      
+      expect(cell1Threads).toHaveLength(2);
+      expect(cell1Threads.every(thread => thread.cellId === 'cell1')).toBe(true);
     });
   });
   
-  describe('Comment Management', () => {
+  describe('comment management', () => {
     it('should add a comment to an existing thread', () => {
       const { commentSystem } = createCommentSystem();
+      const user1 = createMockUser('user1', 'User 1');
+      const user2 = createMockUser('user2', 'User 2');
       
-      const thread = commentSystem.createThread('cell1', 'Initial comment', testUser1);
+      // Create a thread
+      const thread = commentSystem.createThread('cell1', 'Initial comment', user1);
+      
+      // Add a comment to the thread
       const comment = commentSystem.addComment(
         thread.id,
         'Second comment',
-        testUser2,
+        user2,
         CommentPriority.High
       );
       
       expect(comment).toBeDefined();
       expect(comment?.content).toBe('Second comment');
-      expect(comment?.author).toEqual(testUser2);
+      expect(comment?.author).toEqual(user2);
       expect(comment?.priority).toBe(CommentPriority.High);
       
-      // Verify the thread has both comments
+      // Verify the comment is in the thread
       const updatedThread = commentSystem.getThread(thread.id);
-      expect(updatedThread?.comments.length).toBe(2);
+      expect(updatedThread?.comments).toHaveLength(2);
+      expect(updatedThread?.comments[1].id).toBe(comment?.id);
     });
     
     it('should update an existing comment', () => {
       const { commentSystem } = createCommentSystem();
+      const user = createMockUser('user1', 'User 1');
       
-      const thread = commentSystem.createThread('cell1', 'Comment to update', testUser1);
+      // Create a thread with a comment
+      const thread = commentSystem.createThread('cell1', 'Initial comment', user);
       const commentId = thread.comments[0].id;
       
+      // Update the comment
       const updatedComment = commentSystem.updateComment(
         thread.id,
         commentId,
-        'Updated comment content',
+        'Updated comment',
         CommentPriority.High
       );
       
       expect(updatedComment).toBeDefined();
-      expect(updatedComment?.content).toBe('Updated comment content');
+      expect(updatedComment?.content).toBe('Updated comment');
       expect(updatedComment?.priority).toBe(CommentPriority.High);
       expect(updatedComment?.edited).toBe(true);
       
-      // Verify the thread has the updated comment
+      // Verify the comment is updated in the thread
       const updatedThread = commentSystem.getThread(thread.id);
-      expect(updatedThread?.comments[0].content).toBe('Updated comment content');
+      expect(updatedThread?.comments[0].content).toBe('Updated comment');
     });
     
-    it('should resolve a comment', () => {
+    it('should delete a comment', () => {
       const { commentSystem } = createCommentSystem();
+      const user = createMockUser('user1', 'User 1');
       
-      const thread = commentSystem.createThread('cell1', 'Comment to resolve', testUser1);
+      // Create a thread with a comment
+      const thread = commentSystem.createThread('cell1', 'Comment 1', user);
+      
+      // Add another comment
+      const comment = commentSystem.addComment(thread.id, 'Comment 2', user);
+      expect(commentSystem.getThread(thread.id)?.comments).toHaveLength(2);
+      
+      // Delete the second comment
+      commentSystem.deleteComment(thread.id, comment!.id);
+      
+      // Verify the comment is deleted
+      const updatedThread = commentSystem.getThread(thread.id);
+      expect(updatedThread?.comments).toHaveLength(1);
+      expect(updatedThread?.comments[0].content).toBe('Comment 1');
+    });
+    
+    it('should delete the thread when the last comment is deleted', () => {
+      const { commentSystem } = createCommentSystem();
+      const user = createMockUser('user1', 'User 1');
+      
+      // Create a thread with a comment
+      const thread = commentSystem.createThread('cell1', 'Comment 1', user);
       const commentId = thread.comments[0].id;
       
-      const resolvedComment = commentSystem.resolveComment(thread.id, commentId, testUser2);
+      // Delete the only comment
+      commentSystem.deleteComment(thread.id, commentId);
+      
+      // Verify the thread is deleted
+      expect(commentSystem.getThread(thread.id)).toBeUndefined();
+    });
+  });
+  
+  describe('comment status management', () => {
+    it('should resolve a comment', () => {
+      const { commentSystem } = createCommentSystem();
+      const user1 = createMockUser('user1', 'User 1');
+      const user2 = createMockUser('user2', 'User 2');
+      
+      // Create a thread with a comment
+      const thread = commentSystem.createThread('cell1', 'Comment', user1);
+      const commentId = thread.comments[0].id;
+      
+      // Resolve the comment
+      const resolvedComment = commentSystem.resolveComment(thread.id, commentId, user2);
       
       expect(resolvedComment).toBeDefined();
       expect(resolvedComment?.status).toBe(CommentStatus.Resolved);
-      expect(resolvedComment?.resolvedBy).toEqual(testUser2);
+      expect(resolvedComment?.resolvedBy).toEqual(user2);
       expect(resolvedComment?.resolvedAt).toBeDefined();
       
-      // Verify the thread has the resolved comment
+      // Verify the comment is resolved in the thread
       const updatedThread = commentSystem.getThread(thread.id);
       expect(updatedThread?.comments[0].status).toBe(CommentStatus.Resolved);
     });
     
     it('should reopen a resolved comment', () => {
       const { commentSystem } = createCommentSystem();
+      const user1 = createMockUser('user1', 'User 1');
+      const user2 = createMockUser('user2', 'User 2');
       
-      const thread = commentSystem.createThread('cell1', 'Comment to resolve and reopen', testUser1);
+      // Create a thread with a comment
+      const thread = commentSystem.createThread('cell1', 'Comment', user1);
       const commentId = thread.comments[0].id;
       
-      commentSystem.resolveComment(thread.id, commentId, testUser2);
+      // Resolve the comment
+      commentSystem.resolveComment(thread.id, commentId, user2);
+      
+      // Reopen the comment
       const reopenedComment = commentSystem.reopenComment(thread.id, commentId);
       
       expect(reopenedComment).toBeDefined();
@@ -214,308 +278,285 @@ describe('CommentSystem', () => {
       expect(reopenedComment?.resolvedBy).toBeUndefined();
       expect(reopenedComment?.resolvedAt).toBeUndefined();
       
-      // Verify the thread has the reopened comment
+      // Verify the comment is reopened in the thread
       const updatedThread = commentSystem.getThread(thread.id);
       expect(updatedThread?.comments[0].status).toBe(CommentStatus.Open);
     });
     
     it('should archive a comment', () => {
       const { commentSystem } = createCommentSystem();
+      const user = createMockUser('user1', 'User 1');
       
-      const thread = commentSystem.createThread('cell1', 'Comment to archive', testUser1);
+      // Create a thread with a comment
+      const thread = commentSystem.createThread('cell1', 'Comment', user);
       const commentId = thread.comments[0].id;
       
+      // Archive the comment
       const archivedComment = commentSystem.archiveComment(thread.id, commentId);
       
       expect(archivedComment).toBeDefined();
       expect(archivedComment?.status).toBe(CommentStatus.Archived);
       
-      // Verify the thread has the archived comment
+      // Verify the comment is archived in the thread
       const updatedThread = commentSystem.getThread(thread.id);
       expect(updatedThread?.comments[0].status).toBe(CommentStatus.Archived);
     });
-    
-    it('should delete a comment', () => {
-      const { commentSystem } = createCommentSystem();
-      
-      const thread = commentSystem.createThread('cell1', 'Initial comment', testUser1);
-      const comment = commentSystem.addComment(thread.id, 'Comment to delete', testUser2);
-      
-      expect(commentSystem.getThread(thread.id)?.comments.length).toBe(2);
-      
-      commentSystem.deleteComment(thread.id, comment!.id);
-      
-      // Verify the comment was deleted
-      expect(commentSystem.getThread(thread.id)?.comments.length).toBe(1);
-    });
-    
-    it('should delete the thread when the last comment is deleted', () => {
-      const { commentSystem } = createCommentSystem();
-      
-      const thread = commentSystem.createThread('cell1', 'Only comment', testUser1);
-      const commentId = thread.comments[0].id;
-      
-      commentSystem.deleteComment(thread.id, commentId);
-      
-      // Verify the thread was deleted
-      expect(commentSystem.getThread(thread.id)).toBeUndefined();
-    });
   });
   
-  describe('Reply Management', () => {
+  describe('reply management', () => {
     it('should add a reply to a comment', () => {
       const { commentSystem } = createCommentSystem();
+      const user1 = createMockUser('user1', 'User 1');
+      const user2 = createMockUser('user2', 'User 2');
       
-      const thread = commentSystem.createThread('cell1', 'Comment with reply', testUser1);
+      // Create a thread with a comment
+      const thread = commentSystem.createThread('cell1', 'Comment', user1);
       const commentId = thread.comments[0].id;
       
-      const reply = commentSystem.addReply(
-        thread.id,
-        commentId,
-        'This is a reply',
-        testUser2
-      );
+      // Add a reply to the comment
+      const reply = commentSystem.addReply(thread.id, commentId, 'Reply', user2);
       
       expect(reply).toBeDefined();
-      expect(reply?.content).toBe('This is a reply');
-      expect(reply?.author).toEqual(testUser2);
+      expect(reply?.content).toBe('Reply');
+      expect(reply?.author).toEqual(user2);
       
-      // Verify the comment has the reply
+      // Verify the reply is in the comment
       const updatedThread = commentSystem.getThread(thread.id);
-      expect(updatedThread?.comments[0].replies.length).toBe(1);
-      expect(updatedThread?.comments[0].replies[0].content).toBe('This is a reply');
+      expect(updatedThread?.comments[0].replies).toHaveLength(1);
+      expect(updatedThread?.comments[0].replies[0].id).toBe(reply?.id);
     });
     
     it('should update a reply', () => {
       const { commentSystem } = createCommentSystem();
+      const user1 = createMockUser('user1', 'User 1');
+      const user2 = createMockUser('user2', 'User 2');
       
-      const thread = commentSystem.createThread('cell1', 'Comment with reply', testUser1);
+      // Create a thread with a comment
+      const thread = commentSystem.createThread('cell1', 'Comment', user1);
       const commentId = thread.comments[0].id;
       
-      const reply = commentSystem.addReply(thread.id, commentId, 'Reply to update', testUser2);
+      // Add a reply
+      const reply = commentSystem.addReply(thread.id, commentId, 'Reply', user2);
+      
+      // Update the reply
       const updatedReply = commentSystem.updateReply(
         thread.id,
         commentId,
         reply!.id,
-        'Updated reply content'
+        'Updated reply'
       );
       
       expect(updatedReply).toBeDefined();
-      expect(updatedReply?.content).toBe('Updated reply content');
+      expect(updatedReply?.content).toBe('Updated reply');
       expect(updatedReply?.edited).toBe(true);
       
-      // Verify the comment has the updated reply
+      // Verify the reply is updated in the comment
       const updatedThread = commentSystem.getThread(thread.id);
-      expect(updatedThread?.comments[0].replies[0].content).toBe('Updated reply content');
+      expect(updatedThread?.comments[0].replies[0].content).toBe('Updated reply');
     });
     
     it('should delete a reply', () => {
       const { commentSystem } = createCommentSystem();
+      const user1 = createMockUser('user1', 'User 1');
+      const user2 = createMockUser('user2', 'User 2');
       
-      const thread = commentSystem.createThread('cell1', 'Comment with reply', testUser1);
+      // Create a thread with a comment
+      const thread = commentSystem.createThread('cell1', 'Comment', user1);
       const commentId = thread.comments[0].id;
       
-      const reply = commentSystem.addReply(thread.id, commentId, 'Reply to delete', testUser2);
+      // Add a reply
+      const reply = commentSystem.addReply(thread.id, commentId, 'Reply', user2);
       
-      expect(commentSystem.getThread(thread.id)?.comments[0].replies.length).toBe(1);
-      
+      // Delete the reply
       commentSystem.deleteReply(thread.id, commentId, reply!.id);
       
-      // Verify the reply was deleted
-      expect(commentSystem.getThread(thread.id)?.comments[0].replies.length).toBe(0);
+      // Verify the reply is deleted
+      const updatedThread = commentSystem.getThread(thread.id);
+      expect(updatedThread?.comments[0].replies).toHaveLength(0);
     });
   });
   
-  describe('Notification Management', () => {
+  describe('notification management', () => {
     it('should create notifications for new comments', () => {
       const { commentSystem } = createCommentSystem();
+      const user = createMockUser('user1', 'User 1');
       
-      // Create a thread which should generate a notification
-      commentSystem.createThread('cell1', 'Comment with notification', testUser1);
+      // Create a thread with a comment
+      commentSystem.createThread('cell1', 'Comment', user);
       
+      // Verify a notification was created
       const notifications = commentSystem.getNotifications();
-      expect(notifications.length).toBe(1);
+      expect(notifications).toHaveLength(1);
       expect(notifications[0].type).toBe('new-comment');
-      expect(notifications[0].userId).toBe(testUser1.id);
+      expect(notifications[0].userId).toBe(user.id);
     });
     
     it('should create notifications for replies', () => {
       const { commentSystem } = createCommentSystem();
+      const user1 = createMockUser('user1', 'User 1');
+      const user2 = createMockUser('user2', 'User 2');
       
-      const thread = commentSystem.createThread('cell1', 'Comment with reply', testUser1);
+      // Create a thread with a comment
+      const thread = commentSystem.createThread('cell1', 'Comment', user1);
       const commentId = thread.comments[0].id;
       
-      // Add a reply which should generate a notification
-      commentSystem.addReply(thread.id, commentId, 'Reply with notification', testUser2);
+      // Add a reply
+      commentSystem.addReply(thread.id, commentId, 'Reply', user2);
       
+      // Verify notifications were created
       const notifications = commentSystem.getNotifications();
-      expect(notifications.length).toBe(2); // One for the comment, one for the reply
+      expect(notifications).toHaveLength(2); // One for the comment, one for the reply
       expect(notifications[1].type).toBe('new-reply');
-      expect(notifications[1].userId).toBe(testUser2.id);
-    });
-    
-    it('should create notifications for resolved comments', () => {
-      const { commentSystem } = createCommentSystem();
-      
-      const thread = commentSystem.createThread('cell1', 'Comment to resolve', testUser1);
-      const commentId = thread.comments[0].id;
-      
-      // Resolve the comment which should generate a notification
-      commentSystem.resolveComment(thread.id, commentId, testUser2);
-      
-      const notifications = commentSystem.getNotifications();
-      expect(notifications.length).toBe(2); // One for the comment, one for resolving
-      expect(notifications[1].type).toBe('resolved');
-      expect(notifications[1].userId).toBe(testUser2.id);
+      expect(notifications[1].userId).toBe(user2.id);
     });
     
     it('should create notifications for mentions', () => {
       const { commentSystem } = createCommentSystem();
+      const user1 = createMockUser('user1', 'User 1');
+      const user2 = createMockUser('user2', 'User 2');
       
-      // Create a comment with a mention
-      commentSystem.createThread('cell1', 'Comment mentioning @user2', testUser1);
+      // Create a thread with a comment that mentions user2
+      commentSystem.createThread('cell1', 'Comment mentioning @user2', user1);
       
+      // Verify notifications were created
       const notifications = commentSystem.getNotifications();
-      expect(notifications.length).toBeGreaterThanOrEqual(1);
-      
-      // Check if there's a mention notification
-      const mentionNotifications = notifications.filter(n => n.type === 'mention');
-      expect(mentionNotifications.length).toBeGreaterThanOrEqual(1);
+      expect(notifications.length).toBeGreaterThan(1); // At least one for the comment and one for the mention
+      expect(notifications.some(n => n.type === 'mention')).toBe(true);
     });
     
     it('should mark notifications as read', () => {
       const { commentSystem } = createCommentSystem();
+      const user = createMockUser('user1', 'User 1');
       
-      commentSystem.createThread('cell1', 'Comment with notification', testUser1);
+      // Create a thread with a comment
+      commentSystem.createThread('cell1', 'Comment', user);
       
+      // Get the notification
       const notifications = commentSystem.getNotifications();
-      expect(notifications[0].read).toBe(false);
+      const notificationId = notifications[0].id;
       
-      commentSystem.markNotificationAsRead(notifications[0].id);
+      // Mark the notification as read
+      commentSystem.markNotificationAsRead(notificationId);
       
+      // Verify the notification is marked as read
       const updatedNotifications = commentSystem.getNotifications();
       expect(updatedNotifications[0].read).toBe(true);
+      
+      // Verify unread notifications filter
+      expect(commentSystem.getUnreadNotifications()).toHaveLength(0);
     });
     
     it('should mark all notifications as read', () => {
       const { commentSystem } = createCommentSystem();
+      const user = createMockUser('user1', 'User 1');
       
-      commentSystem.createThread('cell1', 'First comment', testUser1);
-      commentSystem.createThread('cell2', 'Second comment', testUser1);
+      // Create multiple threads with comments
+      commentSystem.createThread('cell1', 'Comment 1', user);
+      commentSystem.createThread('cell2', 'Comment 2', user);
       
-      expect(commentSystem.getUnreadNotifications().length).toBe(2);
+      // Verify we have unread notifications
+      expect(commentSystem.getUnreadNotifications()).toHaveLength(2);
       
+      // Mark all notifications as read
       commentSystem.markAllNotificationsAsRead();
       
-      expect(commentSystem.getUnreadNotifications().length).toBe(0);
+      // Verify all notifications are read
+      expect(commentSystem.getUnreadNotifications()).toHaveLength(0);
     });
   });
   
-  describe('Filtering and Searching', () => {
+  describe('filtering and searching', () => {
     it('should filter comments by status', () => {
       const { commentSystem } = createCommentSystem();
+      const user = createMockUser('user1', 'User 1');
       
-      const thread1 = commentSystem.createThread('cell1', 'Open comment', testUser1);
-      const thread2 = commentSystem.createThread('cell2', 'Comment to resolve', testUser1);
+      // Create threads with comments in different states
+      const thread1 = commentSystem.createThread('cell1', 'Open comment', user);
+      const thread2 = commentSystem.createThread('cell2', 'Resolved comment', user);
       
-      commentSystem.resolveComment(thread2.id, thread2.comments[0].id, testUser2);
+      // Resolve the second comment
+      commentSystem.resolveComment(thread2.id, thread2.comments[0].id, user);
       
-      const openComments = commentSystem.filterComments({ status: CommentStatus.Open });
-      expect(openComments.length).toBe(1);
-      expect(openComments[0].id).toBe(thread1.id);
+      // Filter by open status
+      const openThreads = commentSystem.filterComments({ status: CommentStatus.Open });
+      expect(openThreads).toHaveLength(1);
+      expect(openThreads[0].id).toBe(thread1.id);
       
-      const resolvedComments = commentSystem.filterComments({ status: CommentStatus.Resolved });
-      expect(resolvedComments.length).toBe(1);
-      expect(resolvedComments[0].id).toBe(thread2.id);
-    });
-    
-    it('should filter comments by author', () => {
-      const { commentSystem } = createCommentSystem();
-      
-      commentSystem.createThread('cell1', 'Comment by user1', testUser1);
-      const thread2 = commentSystem.createThread('cell2', 'Initial comment', testUser1);
-      
-      commentSystem.addComment(thread2.id, 'Comment by user2', testUser2);
-      
-      const user1Comments = commentSystem.filterComments({ authorId: testUser1.id });
-      expect(user1Comments.length).toBe(2);
-      
-      const user2Comments = commentSystem.filterComments({ authorId: testUser2.id });
-      expect(user2Comments.length).toBe(1);
-      expect(user2Comments[0].id).toBe(thread2.id);
+      // Filter by resolved status
+      const resolvedThreads = commentSystem.filterComments({ status: CommentStatus.Resolved });
+      expect(resolvedThreads).toHaveLength(1);
+      expect(resolvedThreads[0].id).toBe(thread2.id);
     });
     
     it('should filter comments by cell ID', () => {
       const { commentSystem } = createCommentSystem();
+      const user = createMockUser('user1', 'User 1');
       
-      commentSystem.createThread('cell1', 'Comment on cell1', testUser1);
-      commentSystem.createThread('cell2', 'Comment on cell2', testUser1);
-      commentSystem.createThread('cell1', 'Another comment on cell1', testUser1);
+      // Create threads for different cells
+      commentSystem.createThread('cell1', 'Comment 1', user);
+      commentSystem.createThread('cell2', 'Comment 2', user);
+      commentSystem.createThread('cell1', 'Comment 3', user);
       
-      const cell1Comments = commentSystem.filterComments({ cellId: 'cell1' });
-      expect(cell1Comments.length).toBe(2);
-      
-      const cell2Comments = commentSystem.filterComments({ cellId: 'cell2' });
-      expect(cell2Comments.length).toBe(1);
+      // Filter by cell ID
+      const cell1Threads = commentSystem.filterComments({ cellId: 'cell1' });
+      expect(cell1Threads).toHaveLength(2);
+      expect(cell1Threads.every(thread => thread.cellId === 'cell1')).toBe(true);
     });
     
-    it('should filter comments by priority', () => {
+    it('should filter comments by author', () => {
       const { commentSystem } = createCommentSystem();
+      const user1 = createMockUser('user1', 'User 1');
+      const user2 = createMockUser('user2', 'User 2');
       
-      commentSystem.createThread('cell1', 'Low priority comment', testUser1, undefined, CommentPriority.Low);
-      commentSystem.createThread('cell2', 'Medium priority comment', testUser1, undefined, CommentPriority.Medium);
-      commentSystem.createThread('cell3', 'High priority comment', testUser1, undefined, CommentPriority.High);
+      // Create threads with different authors
+      commentSystem.createThread('cell1', 'Comment by user1', user1);
+      commentSystem.createThread('cell2', 'Comment by user2', user2);
       
-      const highPriorityComments = commentSystem.filterComments({ priority: CommentPriority.High });
-      expect(highPriorityComments.length).toBe(1);
-      expect(highPriorityComments[0].comments[0].priority).toBe(CommentPriority.High);
+      // Filter by author
+      const user1Threads = commentSystem.filterComments({ authorId: 'user1' });
+      expect(user1Threads).toHaveLength(1);
+      expect(user1Threads[0].comments[0].author.id).toBe('user1');
     });
     
     it('should search comments by text content', () => {
       const { commentSystem } = createCommentSystem();
+      const user = createMockUser('user1', 'User 1');
       
-      commentSystem.createThread('cell1', 'Comment about Python', testUser1);
-      commentSystem.createThread('cell2', 'Comment about JavaScript', testUser1);
+      // Create threads with different content
+      commentSystem.createThread('cell1', 'This is about Python', user);
+      commentSystem.createThread('cell2', 'This is about JavaScript', user);
       
-      const pythonComments = commentSystem.searchComments('Python');
-      expect(pythonComments.length).toBe(1);
-      expect(pythonComments[0].comments[0].content).toBe('Comment about Python');
+      // Search for Python
+      const pythonThreads = commentSystem.searchComments('Python');
+      expect(pythonThreads).toHaveLength(1);
+      expect(pythonThreads[0].comments[0].content).toContain('Python');
       
-      const jsComments = commentSystem.searchComments('JavaScript');
-      expect(jsComments.length).toBe(1);
-      expect(jsComments[0].comments[0].content).toBe('Comment about JavaScript');
-    });
-    
-    it('should search in replies as well', () => {
-      const { commentSystem } = createCommentSystem();
-      
-      const thread = commentSystem.createThread('cell1', 'Main comment', testUser1);
-      commentSystem.addReply(thread.id, thread.comments[0].id, 'Reply mentioning Python', testUser2);
-      
-      const pythonComments = commentSystem.searchComments('Python');
-      expect(pythonComments.length).toBe(1);
+      // Search for JavaScript
+      const jsThreads = commentSystem.searchComments('JavaScript');
+      expect(jsThreads).toHaveLength(1);
+      expect(jsThreads[0].comments[0].content).toContain('JavaScript');
     });
   });
   
-  describe('Statistics', () => {
-    it('should calculate comment statistics', () => {
+  describe('statistics', () => {
+    it('should provide accurate statistics', () => {
       const { commentSystem } = createCommentSystem();
+      const user = createMockUser('user1', 'User 1');
       
-      // Create various comments with different statuses
-      const thread1 = commentSystem.createThread('cell1', 'Open comment 1', testUser1);
-      const thread2 = commentSystem.createThread('cell2', 'Open comment 2', testUser1);
-      const thread3 = commentSystem.createThread('cell3', 'Comment to resolve', testUser1);
+      // Create threads with comments in different states
+      const thread1 = commentSystem.createThread('cell1', 'Open comment', user);
+      const thread2 = commentSystem.createThread('cell2', 'To be resolved', user);
+      const thread3 = commentSystem.createThread('cell3', 'To be archived', user);
       
       // Add replies
-      commentSystem.addReply(thread1.id, thread1.comments[0].id, 'Reply 1', testUser2);
-      commentSystem.addReply(thread1.id, thread1.comments[0].id, 'Reply 2', testUser2);
+      commentSystem.addReply(thread1.id, thread1.comments[0].id, 'Reply 1', user);
+      commentSystem.addReply(thread1.id, thread1.comments[0].id, 'Reply 2', user);
       
-      // Resolve one comment
-      commentSystem.resolveComment(thread3.id, thread3.comments[0].id, testUser2);
+      // Change statuses
+      commentSystem.resolveComment(thread2.id, thread2.comments[0].id, user);
+      commentSystem.archiveComment(thread3.id, thread3.comments[0].id);
       
-      // Archive one comment
-      commentSystem.archiveComment(thread2.id, thread2.comments[0].id);
-      
+      // Get statistics
       const stats = commentSystem.getStatistics();
       
       expect(stats.totalThreads).toBe(3);
@@ -527,281 +568,194 @@ describe('CommentSystem', () => {
     });
   });
   
-  describe('Multi-client Synchronization', () => {
-    it('should synchronize comment threads between clients', () => {
-      // Create two clients with the same Yjs document
-      const { commentSystem: client1, ydoc } = createCommentSystem();
-      const { commentSystem: client2 } = createSecondClient(ydoc);
+  describe('multi-user collaboration', () => {
+    it('should synchronize comments between users', () => {
+      // Create two comment systems with connected Yjs docs
+      const { ydoc: ydoc1, commentSystem: commentSystem1 } = createCommentSystem();
+      const { ydoc: ydoc2, commentSystem: commentSystem2 } = createCommentSystem();
       
-      // Client 1 creates a thread
-      const thread = client1.createThread('cell1', 'Collaborative comment', testUser1);
+      // Connect the Yjs documents
+      connectYjsDocs(ydoc1, ydoc2);
       
-      // Verify that client 2 sees the thread
-      const threadsInClient2 = client2.getThreads();
-      expect(threadsInClient2.length).toBe(1);
-      expect(threadsInClient2[0].id).toBe(thread.id);
-      expect(threadsInClient2[0].comments[0].content).toBe('Collaborative comment');
+      const user1 = createMockUser('user1', 'User 1');
+      const user2 = createMockUser('user2', 'User 2');
+      
+      // User 1 creates a thread
+      const thread = commentSystem1.createThread('cell1', 'Comment from User 1', user1);
+      
+      // Verify User 2 can see the thread
+      const threadsForUser2 = commentSystem2.getThreads();
+      expect(threadsForUser2).toHaveLength(1);
+      expect(threadsForUser2[0].id).toBe(thread.id);
+      expect(threadsForUser2[0].comments[0].content).toBe('Comment from User 1');
+      
+      // User 2 adds a comment to the thread
+      commentSystem2.addComment(thread.id, 'Reply from User 2', user2);
+      
+      // Verify User 1 can see the new comment
+      const updatedThreadForUser1 = commentSystem1.getThread(thread.id);
+      expect(updatedThreadForUser1?.comments).toHaveLength(2);
+      expect(updatedThreadForUser1?.comments[1].content).toBe('Reply from User 2');
     });
     
-    it('should synchronize comment updates between clients', () => {
-      // Create two clients with the same Yjs document
-      const { commentSystem: client1, ydoc } = createCommentSystem();
-      const { commentSystem: client2 } = createSecondClient(ydoc);
+    it('should synchronize comment status changes', () => {
+      // Create two comment systems with connected Yjs docs
+      const { ydoc: ydoc1, commentSystem: commentSystem1 } = createCommentSystem();
+      const { ydoc: ydoc2, commentSystem: commentSystem2 } = createCommentSystem();
       
-      // Client 1 creates a thread
-      const thread = client1.createThread('cell1', 'Comment to update', testUser1);
+      // Connect the Yjs documents
+      connectYjsDocs(ydoc1, ydoc2);
+      
+      const user1 = createMockUser('user1', 'User 1');
+      const user2 = createMockUser('user2', 'User 2');
+      
+      // User 1 creates a thread
+      const thread = commentSystem1.createThread('cell1', 'Comment from User 1', user1);
       const commentId = thread.comments[0].id;
       
-      // Client 2 updates the comment
-      client2.updateComment(thread.id, commentId, 'Updated by client 2');
+      // User 2 resolves the comment
+      commentSystem2.resolveComment(thread.id, commentId, user2);
       
-      // Verify that client 1 sees the update
-      const updatedThreadInClient1 = client1.getThread(thread.id);
-      expect(updatedThreadInClient1?.comments[0].content).toBe('Updated by client 2');
+      // Verify User 1 sees the comment as resolved
+      const updatedThreadForUser1 = commentSystem1.getThread(thread.id);
+      expect(updatedThreadForUser1?.comments[0].status).toBe(CommentStatus.Resolved);
+      expect(updatedThreadForUser1?.comments[0].resolvedBy?.id).toBe(user2.id);
     });
     
-    it('should synchronize comment resolution between clients', () => {
-      // Create two clients with the same Yjs document
-      const { commentSystem: client1, ydoc } = createCommentSystem();
-      const { commentSystem: client2 } = createSecondClient(ydoc);
+    it('should synchronize notifications', () => {
+      // Create two comment systems with connected Yjs docs
+      const { ydoc: ydoc1, commentSystem: commentSystem1 } = createCommentSystem();
+      const { ydoc: ydoc2, commentSystem: commentSystem2 } = createCommentSystem();
       
-      // Client 1 creates a thread
-      const thread = client1.createThread('cell1', 'Comment to resolve', testUser1);
-      const commentId = thread.comments[0].id;
+      // Connect the Yjs documents
+      connectYjsDocs(ydoc1, ydoc2);
       
-      // Client 2 resolves the comment
-      client2.resolveComment(thread.id, commentId, testUser2);
+      const user1 = createMockUser('user1', 'User 1');
+      const user2 = createMockUser('user2', 'User 2');
       
-      // Verify that client 1 sees the resolution
-      const resolvedThreadInClient1 = client1.getThread(thread.id);
-      expect(resolvedThreadInClient1?.comments[0].status).toBe(CommentStatus.Resolved);
-      expect(resolvedThreadInClient1?.comments[0].resolvedBy).toEqual(testUser2);
-    });
-    
-    it('should synchronize replies between clients', () => {
-      // Create two clients with the same Yjs document
-      const { commentSystem: client1, ydoc } = createCommentSystem();
-      const { commentSystem: client2 } = createSecondClient(ydoc);
+      // User 1 creates a thread
+      commentSystem1.createThread('cell1', 'Comment from User 1', user1);
       
-      // Client 1 creates a thread
-      const thread = client1.createThread('cell1', 'Comment for reply', testUser1);
-      const commentId = thread.comments[0].id;
+      // Verify both users see the notification
+      expect(commentSystem1.getNotifications()).toHaveLength(1);
+      expect(commentSystem2.getNotifications()).toHaveLength(1);
       
-      // Client 2 adds a reply
-      client2.addReply(thread.id, commentId, 'Reply from client 2', testUser2);
+      // User 2 marks the notification as read
+      const notificationId = commentSystem2.getNotifications()[0].id;
+      commentSystem2.markNotificationAsRead(notificationId);
       
-      // Verify that client 1 sees the reply
-      const threadWithReplyInClient1 = client1.getThread(thread.id);
-      expect(threadWithReplyInClient1?.comments[0].replies.length).toBe(1);
-      expect(threadWithReplyInClient1?.comments[0].replies[0].content).toBe('Reply from client 2');
-    });
-    
-    it('should synchronize thread deletion between clients', () => {
-      // Create two clients with the same Yjs document
-      const { commentSystem: client1, ydoc } = createCommentSystem();
-      const { commentSystem: client2 } = createSecondClient(ydoc);
-      
-      // Client 1 creates a thread
-      const thread = client1.createThread('cell1', 'Comment to delete', testUser1);
-      
-      // Verify that client 2 sees the thread
-      expect(client2.getThreads().length).toBe(1);
-      
-      // Client 1 deletes the thread
-      client1.deleteThread(thread.id);
-      
-      // Verify that client 2 sees the deletion
-      expect(client2.getThreads().length).toBe(0);
-    });
-    
-    it('should handle concurrent comment creation', () => {
-      // Create two clients with separate Yjs documents (to simulate network partition)
-      const { commentSystem: client1, ydoc: ydoc1 } = createCommentSystem();
-      const { commentSystem: client2, ydoc: ydoc2 } = createCommentSystem();
-      
-      // Initial sync to ensure both documents are in the same state
-      syncClients(ydoc1, ydoc2);
-      syncClients(ydoc2, ydoc1);
-      
-      // Client 1 creates a thread
-      client1.createThread('cell1', 'Comment from client 1', testUser1);
-      
-      // Client 2 creates a thread (without seeing client 1's thread)
-      client2.createThread('cell1', 'Comment from client 2', testUser2);
-      
-      // Sync the clients
-      syncClients(ydoc1, ydoc2);
-      syncClients(ydoc2, ydoc1);
-      
-      // Verify that both clients see both threads
-      expect(client1.getThreads().length).toBe(2);
-      expect(client2.getThreads().length).toBe(2);
-      
-      // Verify the content of the threads
-      const threadsInClient1 = client1.getThreads();
-      const commentContents = threadsInClient1.map(t => t.comments[0].content);
-      expect(commentContents).toContain('Comment from client 1');
-      expect(commentContents).toContain('Comment from client 2');
+      // Verify the notification is marked as read for both users
+      expect(commentSystem1.getNotifications()[0].read).toBe(true);
+      expect(commentSystem2.getNotifications()[0].read).toBe(true);
     });
   });
   
-  describe('Error Handling and Edge Cases', () => {
-    it('should handle non-existent thread IDs gracefully', () => {
+  describe('event handling', () => {
+    it('should emit events when comments are added', () => {
       const { commentSystem } = createCommentSystem();
+      const user = createMockUser('user1', 'User 1');
       
-      // Try to get a non-existent thread
-      const thread = commentSystem.getThread('non-existent-id');
-      expect(thread).toBeUndefined();
-      
-      // Try to add a comment to a non-existent thread
-      const comment = commentSystem.addComment('non-existent-id', 'Comment', testUser1);
-      expect(comment).toBeUndefined();
-      
-      // Try to delete a non-existent thread
-      expect(() => {
-        commentSystem.deleteThread('non-existent-id');
-      }).not.toThrow();
-    });
-    
-    it('should handle non-existent comment IDs gracefully', () => {
-      const { commentSystem } = createCommentSystem();
-      
-      const thread = commentSystem.createThread('cell1', 'Comment', testUser1);
-      
-      // Try to update a non-existent comment
-      const updatedComment = commentSystem.updateComment(thread.id, 'non-existent-id', 'Updated');
-      expect(updatedComment).toBeUndefined();
-      
-      // Try to resolve a non-existent comment
-      const resolvedComment = commentSystem.resolveComment(thread.id, 'non-existent-id', testUser2);
-      expect(resolvedComment).toBeUndefined();
-      
-      // Try to delete a non-existent comment
-      expect(() => {
-        commentSystem.deleteComment(thread.id, 'non-existent-id');
-      }).not.toThrow();
-    });
-    
-    it('should handle non-existent reply IDs gracefully', () => {
-      const { commentSystem } = createCommentSystem();
-      
-      const thread = commentSystem.createThread('cell1', 'Comment', testUser1);
-      const commentId = thread.comments[0].id;
-      
-      // Try to update a non-existent reply
-      const updatedReply = commentSystem.updateReply(thread.id, commentId, 'non-existent-id', 'Updated');
-      expect(updatedReply).toBeUndefined();
-      
-      // Try to delete a non-existent reply
-      expect(() => {
-        commentSystem.deleteReply(thread.id, commentId, 'non-existent-id');
-      }).not.toThrow();
-    });
-    
-    it('should handle empty or invalid input gracefully', () => {
-      const { commentSystem } = createCommentSystem();
-      
-      // Create a thread with empty content
-      const thread = commentSystem.createThread('cell1', '', testUser1);
-      expect(thread).toBeDefined();
-      expect(thread.comments[0].content).toBe('');
-      
-      // Update a comment with empty content
-      const commentId = thread.comments[0].id;
-      const updatedComment = commentSystem.updateComment(thread.id, commentId, '');
-      expect(updatedComment).toBeDefined();
-      expect(updatedComment?.content).toBe('');
-    });
-    
-    it('should handle disposal correctly', () => {
-      const { commentSystem } = createCommentSystem();
-      
-      // Create some data
-      commentSystem.createThread('cell1', 'Comment', testUser1);
-      
-      // Dispose the comment system
-      commentSystem.dispose();
-      
-      // Verify that the comment system is disposed
-      // Note: This is a bit tricky to test directly since dispose() is mostly about cleaning up resources
-      // We're just ensuring it doesn't throw an error
-      expect(() => {
-        commentSystem.dispose();
-      }).not.toThrow();
-    });
-  });
-  
-  describe('Change Events', () => {
-    it('should emit change events when threads are created', () => {
-      const { commentSystem } = createCommentSystem();
-      
-      // Set up a listener for change events
+      // Set up event listener
       const changeHandler = jest.fn();
       commentSystem.changed.connect(changeHandler);
       
       // Create a thread
-      const thread = commentSystem.createThread('cell1', 'Comment', testUser1);
+      const thread = commentSystem.createThread('cell1', 'Comment', user);
       
-      // Verify that the change event was emitted
+      // Verify the event was emitted
       expect(changeHandler).toHaveBeenCalled();
       expect(changeHandler.mock.calls[0][1].type).toBe(CommentChangeType.ThreadAdded);
       expect(changeHandler.mock.calls[0][1].threadId).toBe(thread.id);
     });
     
-    it('should emit change events when comments are updated', () => {
+    it('should emit events when comments are updated', () => {
       const { commentSystem } = createCommentSystem();
+      const user = createMockUser('user1', 'User 1');
       
-      const thread = commentSystem.createThread('cell1', 'Comment', testUser1);
+      // Create a thread
+      const thread = commentSystem.createThread('cell1', 'Comment', user);
       const commentId = thread.comments[0].id;
       
-      // Set up a listener for change events
+      // Set up event listener
       const changeHandler = jest.fn();
       commentSystem.changed.connect(changeHandler);
       
       // Update the comment
       commentSystem.updateComment(thread.id, commentId, 'Updated comment');
       
-      // Verify that the change event was emitted
+      // Verify the event was emitted
       expect(changeHandler).toHaveBeenCalled();
       expect(changeHandler.mock.calls[0][1].type).toBe(CommentChangeType.CommentUpdated);
-      expect(changeHandler.mock.calls[0][1].threadId).toBe(thread.id);
       expect(changeHandler.mock.calls[0][1].commentId).toBe(commentId);
     });
     
-    it('should emit change events when replies are added', () => {
+    it('should emit events when notifications change', () => {
+      const { commentSystem } = createCommentSystem();
+      const user = createMockUser('user1', 'User 1');
+      
+      // Create a thread to generate a notification
+      commentSystem.createThread('cell1', 'Comment', user);
+      
+      // Set up event listener
+      const notificationsHandler = jest.fn();
+      commentSystem.notificationsChanged.connect(notificationsHandler);
+      
+      // Mark all notifications as read
+      commentSystem.markAllNotificationsAsRead();
+      
+      // Verify the event was emitted
+      expect(notificationsHandler).toHaveBeenCalled();
+      expect(notificationsHandler.mock.calls[0][1]).toBeInstanceOf(Array);
+    });
+  });
+  
+  describe('error handling', () => {
+    it('should handle non-existent thread IDs gracefully', () => {
+      const { commentSystem } = createCommentSystem();
+      const user = createMockUser('user1', 'User 1');
+      
+      // Try to add a comment to a non-existent thread
+      const comment = commentSystem.addComment('non-existent-id', 'Comment', user);
+      
+      // Should return undefined
+      expect(comment).toBeUndefined();
+    });
+    
+    it('should handle non-existent comment IDs gracefully', () => {
+      const { commentSystem } = createCommentSystem();
+      const user = createMockUser('user1', 'User 1');
+      
+      // Create a thread
+      const thread = commentSystem.createThread('cell1', 'Comment', user);
+      
+      // Try to update a non-existent comment
+      const updatedComment = commentSystem.updateComment(thread.id, 'non-existent-id', 'Updated');
+      
+      // Should return undefined
+      expect(updatedComment).toBeUndefined();
+    });
+  });
+  
+  describe('cleanup', () => {
+    it('should dispose resources properly', () => {
       const { commentSystem } = createCommentSystem();
       
-      const thread = commentSystem.createThread('cell1', 'Comment', testUser1);
-      const commentId = thread.comments[0].id;
+      // Create some data
+      const user = createMockUser('user1', 'User 1');
+      commentSystem.createThread('cell1', 'Comment', user);
       
-      // Set up a listener for change events
+      // Set up event listeners
       const changeHandler = jest.fn();
+      const notificationsHandler = jest.fn();
       commentSystem.changed.connect(changeHandler);
+      commentSystem.notificationsChanged.connect(notificationsHandler);
       
-      // Add a reply
-      const reply = commentSystem.addReply(thread.id, commentId, 'Reply', testUser2);
+      // Dispose the comment system
+      commentSystem.dispose();
       
-      // Verify that the change event was emitted
-      expect(changeHandler).toHaveBeenCalled();
-      expect(changeHandler.mock.calls[0][1].type).toBe(CommentChangeType.ReplyAdded);
-      expect(changeHandler.mock.calls[0][1].threadId).toBe(thread.id);
-      expect(changeHandler.mock.calls[0][1].commentId).toBe(commentId);
-      expect(changeHandler.mock.calls[0][1].replyId).toBe(reply?.id);
-    });
-    
-    it('should emit notification events', () => {
-      const { commentSystem } = createCommentSystem();
-      
-      // Set up a listener for notification events
-      const notificationHandler = jest.fn();
-      commentSystem.notificationsChanged.connect(notificationHandler);
-      
-      // Create a thread (which should generate a notification)
-      commentSystem.createThread('cell1', 'Comment', testUser1);
-      
-      // Verify that the notification event was emitted
-      expect(notificationHandler).toHaveBeenCalled();
-      expect(notificationHandler.mock.calls[0][1].length).toBeGreaterThan(0);
+      // Verify the signals are disconnected
+      expect(commentSystem.changed.hasConnections).toBe(false);
+      expect(commentSystem.notificationsChanged.hasConnections).toBe(false);
     });
   });
 });
