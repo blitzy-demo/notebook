@@ -39,7 +39,7 @@ export namespace INotebookShell {
   /**
    * The areas of the application shell where widgets can reside.
    */
-  export type Area = 'main' | 'top' | 'menu' | 'left' | 'right' | 'down';
+  export type Area = 'main' | 'top' | 'menu' | 'left' | 'right' | 'down' | 'collaborationBar';
 
   /**
    * Widget position
@@ -84,6 +84,7 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     this._menuHandler = new PanelHandler();
     this._leftHandler = new SidePanelHandler('left');
     this._rightHandler = new SidePanelHandler('right');
+    this._collaborationBarHandler = new SidePanelHandler('collaborationBar');
     this._main = new Panel();
     const topWrapper = (this._topWrapper = new Panel());
     const menuWrapper = (this._menuWrapper = new Panel());
@@ -110,15 +111,19 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     const rootLayout = new BoxLayout();
     const leftHandler = this._leftHandler;
     const rightHandler = this._rightHandler;
+    const collaborationBarHandler = this._collaborationBarHandler;
 
     leftHandler.panel.id = 'jp-left-stack';
     leftHandler.panel.node.setAttribute('role', 'complementary');
     rightHandler.panel.id = 'jp-right-stack';
     rightHandler.panel.node.setAttribute('role', 'complementary');
+    collaborationBarHandler.panel.id = 'jp-collaboration-bar';
+    collaborationBarHandler.panel.node.setAttribute('role', 'complementary');
 
     // Hide the side panels by default.
     leftHandler.hide();
     rightHandler.hide();
+    collaborationBarHandler.hide();
 
     const middleLayout = new BoxLayout({
       spacing: 0,
@@ -167,7 +172,30 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     // panel.
     hsplitPanel.setRelativeSizes([1, 2.5, 1]);
 
-    vsplitPanel.addWidget(hsplitPanel);
+    // Create a horizontal split panel for the collaboration bar
+    const collaborationSplitPanel = new SplitPanel();
+    collaborationSplitPanel.id = 'collaboration-split-panel';
+    collaborationSplitPanel.spacing = 1;
+    collaborationSplitPanel.orientation = 'horizontal';
+    SplitPanel.setStretch(collaborationSplitPanel, 0);
+
+    // Add the collaboration bar to the split panel
+    collaborationSplitPanel.addWidget(collaborationBarHandler.panel);
+    SplitPanel.setStretch(collaborationBarHandler.panel, 0);
+
+    // Create a vertical box layout for the main content and collaboration bar
+    const mainWithCollabLayout = new BoxLayout({
+      spacing: 0,
+      direction: 'top-to-bottom'
+    });
+    BoxLayout.setStretch(hsplitPanel, 1);
+    BoxLayout.setStretch(collaborationSplitPanel, 0);
+
+    const mainWithCollabPanel = new Panel({ layout: mainWithCollabLayout });
+    mainWithCollabPanel.addWidget(hsplitPanel);
+    mainWithCollabPanel.addWidget(collaborationSplitPanel);
+
+    vsplitPanel.addWidget(mainWithCollabPanel);
     vsplitPanel.addWidget(downPanel);
 
     rootLayout.spacing = 0;
@@ -239,6 +267,13 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
   }
 
   /**
+   * Get the collaboration bar handler
+   */
+  get collaborationBarHandler(): SidePanelHandler {
+    return this._collaborationBarHandler;
+  }
+
+  /**
    * Is the left sidebar visible?
    */
   get leftCollapsed(): boolean {
@@ -251,6 +286,15 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
   get rightCollapsed(): boolean {
     return !(
       this._rightHandler.isVisible && this._rightHandler.panel.isVisible
+    );
+  }
+
+  /**
+   * Is the collaboration bar visible?
+   */
+  get collaborationBarCollapsed(): boolean {
+    return !(
+      this._collaborationBarHandler.isVisible && this._collaborationBarHandler.panel.isVisible
     );
   }
 
@@ -279,6 +323,10 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
         'Collapse %1 side panel',
         this._rightHandler.area
       );
+      this._collaborationBarHandler.closeButton.title = trans.__(
+        'Collapse %1 side panel',
+        this._collaborationBarHandler.area
+      );
     }
   }
 
@@ -294,7 +342,7 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
    */
   activateById(id: string): void {
     // Search all areas that can have widgets for this widget, starting with main.
-    for (const area of ['main', 'top', 'left', 'right', 'menu', 'down']) {
+    for (const area of ['main', 'top', 'left', 'right', 'menu', 'down', 'collaborationBar']) {
       const widget = find(
         this.widgets(area as INotebookShell.Area),
         (w) => w.id === id
@@ -307,6 +355,8 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
         } else if (area === 'down') {
           this._downPanel.show();
           widget.activate();
+        } else if (area === 'collaborationBar') {
+          this.expandCollaborationBar(id);
         } else {
           widget.activate();
         }
@@ -374,6 +424,8 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
         return this._rightHandler.addWidget(widget, rank);
       case 'down':
         return this._downPanel.addWidget(widget);
+      case 'collaborationBar':
+        return this._collaborationBarHandler.addWidget(widget, rank);
       default:
         console.warn(`Cannot add widget to area: ${area}`);
     }
@@ -420,6 +472,9 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
       case 'down':
         yield* this._downPanel.widgets;
         return;
+      case 'collaborationBar':
+        yield* this._collaborationBarHandler.widgets;
+        return;
       default:
         console.error(`This shell has no area called "${area}"`);
         return;
@@ -459,6 +514,33 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
   }
 
   /**
+   * Expand the collaboration bar to show its widgets.
+   */
+  expandCollaborationBar(id?: string): void {
+    this._collaborationBarHandler.panel.show();
+    this._collaborationBarHandler.expand(id); // Show the current widget, if any
+  }
+
+  /**
+   * Collapse the collaboration bar
+   */
+  collapseCollaborationBar(): void {
+    this._collaborationBarHandler.collapse();
+    this._collaborationBarHandler.panel.hide();
+  }
+
+  /**
+   * Toggle the visibility of the collaboration bar.
+   */
+  toggleCollaborationBar(): void {
+    if (this.collaborationBarCollapsed) {
+      this.expandCollaborationBar();
+    } else {
+      this.collapseCollaborationBar();
+    }
+  }
+
+  /**
    * Restore the layout state and configuration for the application shell.
    */
   async restoreLayout(
@@ -482,6 +564,7 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
   private _menuHandler: PanelHandler;
   private _leftHandler: SidePanelHandler;
   private _rightHandler: SidePanelHandler;
+  private _collaborationBarHandler: SidePanelHandler;
   private _spacer_top: Widget;
   private _spacer_bottom: Widget;
   private _skipLinkWidgetHandler: Private.SkipLinkWidgetHandler;
