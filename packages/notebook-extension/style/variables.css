@@ -1,6 +1,30 @@
 :root {
+  /* Base notebook layout */
   --jp-notebook-toolbar-margin-bottom: 20px;
   --jp-notebook-padding-offset: 20px;
-
   --jp-kernel-status-padding: 5px;
+
+  /* Collaboration elements */
+  --jp-collab-avatar-size: 28px;
+  --jp-collab-lock-icon-color: rgba(62, 62, 62, 0.8);
+  --jp-collab-comment-badge-color: rgba(33, 150, 243, 0.9);
+  
+  /* Presence indicators and highlight colors */
+  --jp-collab-presence-active: rgba(46, 204, 113, 1.0);
+  --jp-collab-presence-idle: rgba(46, 204, 113, 0.7);
+  --jp-collab-selection-highlight: rgba(255, 212, 0, 0.3);
+  --jp-collab-cursor-color: rgba(46, 204, 113, 1.0);
+  --jp-collab-user-color-1: rgba(52, 152, 219, 1.0);
+  --jp-collab-user-color-2: rgba(231, 76, 60, 1.0);
+  --jp-collab-user-color-3: rgba(155, 89, 182, 1.0);
+  --jp-collab-user-color-4: rgba(241, 196, 15, 1.0);
+  --jp-collab-user-color-5: rgba(230, 126, 34, 1.0);
+  
+  /* Animation durations and transitions */
+  --jp-collab-avatar-transition: 200ms ease-in;
+  --jp-collab-cursor-transition: 200ms linear;
+  --jp-collab-activity-pulse-duration: 2s;
+  --jp-collab-lock-transition: 250ms;
+  --jp-collab-comment-transition: 150ms;
+  --jp-collab-highlight-pulse-duration: 3s;
 }
