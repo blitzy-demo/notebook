@@ -4,113 +4,118 @@
 | Distributed under the terms of the Modified BSD License.
 |----------------------------------------------------------------------------*/
 
-/*
- * Styles for cell-level locking indicators in collaborative notebooks
- * These styles define the appearance of lock icons that show when a cell
- * is being edited by a specific user.
+/**
+ * Styles for cell-level locking indicators in collaborative editing mode.
+ * These styles define the appearance of lock icons in the cell gutter that
+ * indicate when a cell is being edited by a specific user.
  */
 
-/* Base lock icon container in the cell gutter */
-.jp-Notebook-cell .jp-cell-lock-indicator {
+/* Base container for the lock indicator in the cell gutter */
+.jp-CellLock {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 4px;
   position: absolute;
   left: 0;
   top: 50%;
   transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
-  padding: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   z-index: 10;
-  cursor: pointer;
   transition: all 300ms ease;
+  cursor: pointer;
+}
+
+/* Position the lock indicator in the left gutter next to the execution counter */
+.jp-Notebook .jp-Cell .jp-CellLock {
+  left: 8px; /* Align with the left gutter */
 }
 
 /* Unlocked state - outline icon with reduced opacity */
-.jp-Notebook-cell .jp-cell-lock-indicator.jp-cell-unlocked {
+.jp-CellLock-unlocked {
   opacity: 0.6;
 }
 
 /* Locked state - solid icon with full opacity */
-.jp-Notebook-cell .jp-cell-lock-indicator.jp-cell-locked {
+.jp-CellLock-locked {
   opacity: 1;
 }
 
-/* Locked by current user */
-.jp-Notebook-cell .jp-cell-lock-indicator.jp-cell-locked-by-me {
-  /* Uses the user's assigned color from the collaboration system */
-  color: var(--jp-collaborator-color);
+/* Styling for lock icon when locked by current user */
+.jp-CellLock-self {
+  color: var(--jp-brand-color1);
 }
 
-/* Locked by another user */
-.jp-Notebook-cell .jp-cell-lock-indicator.jp-cell-locked-by-other {
-  /* Uses the specific user's assigned color */
-  color: var(--jp-cell-lock-owner-color);
+/* Styling for lock icon when locked by another user */
+.jp-CellLock-other {
+  /* The color will be dynamically set based on the user's assigned color */
 }
 
 /* Hover state for lock indicators */
-.jp-Notebook-cell .jp-cell-lock-indicator:hover {
-  background-color: var(--jp-layout-color2);
-  border-radius: 2px;
+.jp-CellLock:hover {
+  opacity: 1;
+  transform: translateY(-50%) scale(1.1);
 }
 
-/* Focus state for accessibility */
-.jp-Notebook-cell .jp-cell-lock-indicator:focus {
+/* Focus state for lock indicators (accessibility) */
+.jp-CellLock:focus {
   outline: 2px solid var(--jp-brand-color1);
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
 
-/* Lock icon with user initials for locked-by-other state */
-.jp-Notebook-cell .jp-cell-lock-indicator.jp-cell-locked-by-other::after {
-  content: attr(data-user-initials);
+/* Lock icon tooltip that shows owner information */
+.jp-CellLock-tooltip {
   position: absolute;
-  bottom: -2px;
-  right: -2px;
-  font-size: 8px;
-  font-weight: bold;
-  background-color: var(--jp-cell-lock-owner-color);
-  color: white;
-  border-radius: 50%;
-  width: 12px;
-  height: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* Ensure proper alignment with existing cell gutter elements */
-.jp-Notebook-cell .jp-InputArea-prompt {
-  margin-left: 24px; /* Adjusted to make room for lock icon */
-}
-
-/* Tooltip for lock indicator showing owner information */
-.jp-cell-lock-tooltip {
-  position: absolute;
-  background-color: var(--jp-layout-color0);
+  background: var(--jp-layout-color0);
   border: 1px solid var(--jp-border-color1);
   box-shadow: var(--jp-elevation-z6);
-  padding: 6px 8px;
-  border-radius: 3px;
-  font-size: 12px;
-  max-width: 200px;
-  z-index: 1000;
+  padding: 8px;
+  border-radius: 4px;
+  font-size: var(--jp-ui-font-size1);
+  white-space: nowrap;
+  z-index: 100;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 150ms ease-in;
+  transition: opacity 150ms ease;
 }
 
-.jp-cell-lock-tooltip.jp-cell-lock-tooltip-visible {
+/* Show tooltip on hover */
+.jp-CellLock:hover .jp-CellLock-tooltip {
   opacity: 1;
 }
 
-/* Lock icon animation when state changes */
-@keyframes jp-cell-lock-animation {
-  0% { transform: translateY(-50%) scale(0.8); }
-  50% { transform: translateY(-50%) scale(1.1); }
-  100% { transform: translateY(-50%) scale(1); }
+/* Lock owner name in tooltip */
+.jp-CellLock-owner {
+  font-weight: bold;
+  margin-bottom: 4px;
 }
 
-.jp-Notebook-cell .jp-cell-lock-indicator.jp-cell-lock-state-changing {
-  animation: jp-cell-lock-animation 300ms ease;
+/* Lock timestamp in tooltip */
+.jp-CellLock-time {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+}
+
+/* Visual indicator for cells that cannot be edited due to locks */
+.jp-Cell.jp-mod-locked {
+  position: relative;
+}
+
+/* Add a subtle background color to locked cells */
+.jp-Cell.jp-mod-locked::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--jp-layout-color1);
+  opacity: 0.1;
+  pointer-events: none;
+}
+
+/* Ensure proper alignment with existing cell gutter elements */
+.jp-Notebook .jp-Cell .jp-InputArea-prompt {
+  margin-left: 28px; /* Add space for the lock icon */
 }
