@@ -1,435 +1,507 @@
-/*
- * Styles for the permissions dialog component
+/*-----------------------------------------------------------------------------
+| Copyright (c) Jupyter Development Team.
+|
+| Distributed under the terms of the Modified BSD License.
+|----------------------------------------------------------------------------*/
+
+/**
+ * Styles for the permissions dialog and access control UI in collaborative notebooks.
+ * This file implements the interface for managing user roles, editing permissions,
+ * and access levels.
  */
 
-.jp-PermissionsDialog {
-  display: flex;
-  flex-direction: column;
-  min-width: 500px;
-  max-width: 800px;
-  max-height: 600px;
-  overflow: hidden;
-}
-
-/* Error message */
-.jp-PermissionsDialog-error {
-  background-color: var(--jp-error-color1);
-  color: white;
-  padding: 8px 12px;
-  margin-bottom: 16px;
-  border-radius: 2px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.jp-PermissionsDialog-errorDismiss {
-  background: none;
-  border: none;
-  color: white;
-  font-size: 16px;
-  cursor: pointer;
-  padding: 0 4px;
-}
-
-/* Loading state */
-.jp-PermissionsDialog-loading {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 32px;
-  color: var(--jp-ui-font-color2);
-}
-
-.jp-PermissionsDialog-spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid var(--jp-border-color1);
-  border-radius: 50%;
-  border-top-color: var(--jp-brand-color1);
-  animation: jp-PermissionsDialog-spin 1s linear infinite;
-  margin-bottom: 16px;
-}
-
-@keyframes jp-PermissionsDialog-spin {
-  to { transform: rotate(360deg); }
-}
-
-/* Tabs */
-.jp-PermissionsDialog-tabs {
-  display: flex;
-  border-bottom: 1px solid var(--jp-border-color1);
-  margin-bottom: 16px;
-}
-
-.jp-PermissionsDialog-tab {
-  padding: 8px 16px;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--jp-ui-font-color2);
-  cursor: pointer;
-  font-size: var(--jp-ui-font-size1);
-  font-weight: 500;
-}
-
-.jp-PermissionsDialog-tab:hover {
-  color: var(--jp-ui-font-color0);
-}
-
-.jp-PermissionsDialog-activeTab {
-  color: var(--jp-ui-font-color0);
-  border-bottom-color: var(--jp-brand-color1);
-}
-
-/* Tab content */
-.jp-PermissionsDialog-tabContent {
-  flex: 1;
+/* Main dialog container */
+.jp-CollabPermissions-dialog {
+  min-width: 480px;
+  max-width: 600px;
+  max-height: 80vh;
   overflow-y: auto;
-  padding: 0 4px;
+  padding: 0;
+  background: var(--jp-layout-color0);
+  color: var(--jp-ui-font-color1);
+  box-shadow: var(--jp-elevation-z6);
 }
 
-/* Access mode section */
-.jp-PermissionsDialog-accessMode {
-  margin-bottom: 24px;
-}
-
-.jp-PermissionsDialog-accessMode h3 {
-  font-size: var(--jp-ui-font-size1);
-  font-weight: 600;
-  margin: 0 0 12px 0;
-  color: var(--jp-ui-font-color0);
-}
-
-.jp-PermissionsDialog-accessModeOptions {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.jp-PermissionsDialog-accessModeOptions label {
-  display: flex;
-  flex-direction: column;
-  padding: 8px 12px;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.jp-PermissionsDialog-accessModeOptions label:hover {
-  background-color: var(--jp-layout-color2);
-}
-
-.jp-PermissionsDialog-accessModeOptions input {
-  margin-right: 8px;
-}
-
-.jp-PermissionsDialog-accessModeOptions span {
-  font-weight: 500;
-  margin-bottom: 4px;
-  display: flex;
-  align-items: center;
-}
-
-.jp-PermissionsDialog-accessModeDescription {
-  margin: 4px 0 0 24px;
-  font-size: var(--jp-ui-font-size0);
-  color: var(--jp-ui-font-color2);
-}
-
-/* User search section */
-.jp-PermissionsDialog-userSearch {
-  margin-bottom: 24px;
-}
-
-.jp-PermissionsDialog-userSearch h3 {
-  font-size: var(--jp-ui-font-size1);
-  font-weight: 600;
-  margin: 0 0 12px 0;
-  color: var(--jp-ui-font-color0);
-}
-
-.jp-PermissionsDialog-searchBox {
-  position: relative;
-  margin-bottom: 8px;
-}
-
-.jp-PermissionsDialog-searchBox input {
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 4px;
-  font-size: var(--jp-ui-font-size1);
-  background-color: var(--jp-layout-color1);
-  color: var(--jp-ui-font-color0);
-}
-
-.jp-PermissionsDialog-searchBox input:focus {
-  border-color: var(--jp-brand-color1);
-  outline: none;
-}
-
-.jp-PermissionsDialog-searchSpinner {
-  position: absolute;
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
-  border: 2px solid var(--jp-border-color1);
-  border-radius: 50%;
-  border-top-color: var(--jp-brand-color1);
-  animation: jp-PermissionsDialog-spin 1s linear infinite;
-}
-
-.jp-PermissionsDialog-searchResults {
-  max-height: 200px;
-  overflow-y: auto;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 4px;
-  margin-bottom: 16px;
-}
-
-.jp-PermissionsDialog-searchResultItem {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--jp-border-color1);
-}
-
-.jp-PermissionsDialog-searchResultItem:last-child {
-  border-bottom: none;
-}
-
-.jp-PermissionsDialog-searchResultItem:hover {
-  background-color: var(--jp-layout-color2);
-}
-
-/* User list section */
-.jp-PermissionsDialog-userList {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.jp-PermissionsDialog-userItem {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 12px;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 4px;
-}
-
-.jp-PermissionsDialog-userItem:hover {
-  background-color: var(--jp-layout-color2);
-}
-
-.jp-PermissionsDialog-userInfo {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.jp-PermissionsDialog-userAvatar,
-.jp-PermissionsDialog-userInitials {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: var(--jp-brand-color1);
-  color: white;
-  font-weight: 500;
-  font-size: var(--jp-ui-font-size0);
-}
-
-.jp-PermissionsDialog-userName {
-  font-weight: 500;
-  color: var(--jp-ui-font-color0);
-}
-
-.jp-PermissionsDialog-userEmail {
-  font-size: var(--jp-ui-font-size0);
-  color: var(--jp-ui-font-color2);
-}
-
-.jp-PermissionsDialog-userActions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.jp-PermissionsDialog-userActions select {
-  padding: 4px 8px;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 4px;
-  background-color: var(--jp-layout-color1);
-  color: var(--jp-ui-font-color0);
-  font-size: var(--jp-ui-font-size1);
-}
-
-.jp-PermissionsDialog-removeButton {
-  background: none;
-  border: none;
-  color: var(--jp-ui-font-color2);
-  font-size: 16px;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 4px;
-}
-
-.jp-PermissionsDialog-removeButton:hover {
-  background-color: var(--jp-layout-color3);
-  color: var(--jp-ui-font-color0);
-}
-
-/* Link creator section */
-.jp-PermissionsDialog-linkCreator {
-  margin-bottom: 24px;
-}
-
-.jp-PermissionsDialog-linkCreator h3 {
-  font-size: var(--jp-ui-font-size1);
-  font-weight: 600;
-  margin: 0 0 12px 0;
-  color: var(--jp-ui-font-color0);
-}
-
-.jp-PermissionsDialog-linkForm {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 4px;
-  background-color: var(--jp-layout-color2);
-}
-
-.jp-PermissionsDialog-linkFormRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.jp-PermissionsDialog-linkFormRow label {
-  min-width: 100px;
-  font-weight: 500;
-}
-
-.jp-PermissionsDialog-linkFormRow select {
-  flex: 1;
-  padding: 4px 8px;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 4px;
-  background-color: var(--jp-layout-color1);
-  color: var(--jp-ui-font-color0);
-  font-size: var(--jp-ui-font-size1);
-}
-
-.jp-PermissionsDialog-createLinkButton {
-  align-self: flex-end;
-  padding: 6px 12px;
-  background-color: var(--jp-brand-color1);
-  color: white;
-  border: none;
-  border-radius: 4px;
-  font-size: var(--jp-ui-font-size1);
-  cursor: pointer;
-}
-
-.jp-PermissionsDialog-createLinkButton:hover {
-  background-color: var(--jp-brand-color0);
-}
-
-.jp-PermissionsDialog-createLinkButton:disabled {
-  background-color: var(--jp-layout-color3);
-  color: var(--jp-ui-font-color2);
-  cursor: not-allowed;
-}
-
-/* Link list section */
-.jp-PermissionsDialog-linkList {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.jp-PermissionsDialog-linkItem {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 4px;
-}
-
-.jp-PermissionsDialog-linkItem:hover {
-  background-color: var(--jp-layout-color2);
-}
-
-.jp-PermissionsDialog-linkInfo {
+/* Dialog header */
+.jp-CollabPermissions-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--jp-border-color2);
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.jp-PermissionsDialog-linkRole {
-  font-weight: 500;
+.jp-CollabPermissions-title {
+  font-size: var(--jp-ui-font-size2);
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+  margin: 0;
+}
+
+.jp-CollabPermissions-subtitle {
+  font-size: var(--jp-ui-font-size1);
+  color: var(--jp-ui-font-color2);
+  margin: 0;
+}
+
+/* User list section */
+.jp-CollabPermissions-userSection {
+  padding: 16px;
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.jp-CollabPermissions-sectionTitle {
+  font-size: var(--jp-ui-font-size1);
+  font-weight: 600;
+  margin: 0 0 12px 0;
   color: var(--jp-ui-font-color0);
 }
 
-.jp-PermissionsDialog-linkUrl {
-  font-family: var(--jp-code-font-family);
-  font-size: var(--jp-ui-font-size0);
-  color: var(--jp-ui-font-color2);
+/* User list table */
+.jp-CollabPermissions-userTable {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 12px;
+}
+
+.jp-CollabPermissions-userTable th {
+  text-align: left;
+  font-weight: 600;
+  font-size: var(--jp-ui-font-size1);
+  color: var(--jp-ui-font-color1);
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.jp-CollabPermissions-userTable td {
+  padding: 8px 4px;
+  font-size: var(--jp-ui-font-size1);
+  border-bottom: 1px solid var(--jp-border-color3);
+  vertical-align: middle;
+}
+
+/* User row styling */
+.jp-CollabPermissions-userRow {
+  transition: background-color 0.1s ease;
+}
+
+.jp-CollabPermissions-userRow:hover {
   background-color: var(--jp-layout-color2);
-  padding: 4px 8px;
-  border-radius: 2px;
-  max-width: 300px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.jp-PermissionsDialog-linkExpiration {
-  font-size: var(--jp-ui-font-size0);
-  color: var(--jp-ui-font-color2);
-}
-
-.jp-PermissionsDialog-linkActions {
+/* User info cell with avatar and name */
+.jp-CollabPermissions-userInfo {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.jp-PermissionsDialog-copyLinkButton,
-.jp-PermissionsDialog-deactivateLinkButton {
-  padding: 4px 8px;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 4px;
-  background-color: var(--jp-layout-color1);
-  color: var(--jp-ui-font-color0);
+.jp-CollabPermissions-userAvatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background-color: var(--jp-brand-color1);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: var(--jp-ui-font-size0);
+  font-weight: 600;
+}
+
+.jp-CollabPermissions-userName {
+  font-size: var(--jp-ui-font-size1);
+  color: var(--jp-ui-font-color0);
+}
+
+/* Role selector dropdown */
+.jp-CollabPermissions-roleSelect {
+  appearance: none;
+  background-color: var(--jp-layout-color1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 2px;
+  color: var(--jp-ui-font-color1);
+  font-size: var(--jp-ui-font-size1);
+  height: 24px;
+  padding: 0 8px;
+  width: 100%;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>');
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  background-size: 16px;
   cursor: pointer;
 }
 
-.jp-PermissionsDialog-copyLinkButton:hover,
-.jp-PermissionsDialog-deactivateLinkButton:hover {
+.jp-CollabPermissions-roleSelect:hover {
+  background-color: var(--jp-layout-color2);
+}
+
+.jp-CollabPermissions-roleSelect:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--jp-brand-color1);
+}
+
+/* Role indicators */
+.jp-CollabPermissions-roleIndicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 600;
+  min-width: 60px;
+  text-align: center;
+}
+
+.jp-CollabPermissions-roleOwner {
+  background-color: var(--jp-brand-color1);
+  color: white;
+}
+
+.jp-CollabPermissions-roleEditor {
+  background-color: var(--jp-success-color1);
+  color: white;
+}
+
+.jp-CollabPermissions-roleViewer {
+  background-color: var(--jp-info-color1);
+  color: white;
+}
+
+/* Permission toggles */
+.jp-CollabPermissions-toggle {
+  position: relative;
+  display: inline-block;
+  width: 32px;
+  height: 16px;
+}
+
+.jp-CollabPermissions-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.jp-CollabPermissions-toggleSlider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--jp-layout-color3);
+  transition: .2s;
+  border-radius: 16px;
+}
+
+.jp-CollabPermissions-toggleSlider:before {
+  position: absolute;
+  content: "";
+  height: 12px;
+  width: 12px;
+  left: 2px;
+  bottom: 2px;
+  background-color: white;
+  transition: .2s;
+  border-radius: 50%;
+}
+
+.jp-CollabPermissions-toggle input:checked + .jp-CollabPermissions-toggleSlider {
+  background-color: var(--jp-brand-color1);
+}
+
+.jp-CollabPermissions-toggle input:focus + .jp-CollabPermissions-toggleSlider {
+  box-shadow: 0 0 1px var(--jp-brand-color1);
+}
+
+.jp-CollabPermissions-toggle input:checked + .jp-CollabPermissions-toggleSlider:before {
+  transform: translateX(16px);
+}
+
+/* Permission indicators */
+.jp-CollabPermissions-permissionIndicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.jp-CollabPermissions-permissionIndicator.jp-mod-allowed {
+  color: var(--jp-success-color1);
+}
+
+.jp-CollabPermissions-permissionIndicator.jp-mod-denied {
+  color: var(--jp-error-color1);
+}
+
+/* Add people section */
+.jp-CollabPermissions-addPeople {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+}
+
+.jp-CollabPermissions-addInput {
+  flex: 1;
+  height: 28px;
+  padding: 0 8px;
+  font-size: var(--jp-ui-font-size1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 2px;
+  background-color: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-CollabPermissions-addInput:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--jp-brand-color1);
+  border-color: var(--jp-brand-color1);
+}
+
+.jp-CollabPermissions-addButton {
+  height: 28px;
+  padding: 0 12px;
+  font-size: var(--jp-ui-font-size1);
+  background-color: var(--jp-brand-color1);
+  color: white;
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.jp-CollabPermissions-addButton:hover {
+  background-color: var(--jp-brand-color0);
+}
+
+.jp-CollabPermissions-addButton:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--jp-layout-color0), 0 0 0 4px var(--jp-brand-color1);
+}
+
+/* General access section */
+.jp-CollabPermissions-generalSection {
+  padding: 16px;
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.jp-CollabPermissions-accessOption {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 4px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.jp-CollabPermissions-accessOption:hover {
+  background-color: var(--jp-layout-color2);
+}
+
+.jp-CollabPermissions-accessRadio {
+  margin-right: 8px;
+}
+
+.jp-CollabPermissions-accessLabel {
+  display: flex;
+  flex-direction: column;
+}
+
+.jp-CollabPermissions-accessTitle {
+  font-size: var(--jp-ui-font-size1);
+  color: var(--jp-ui-font-color0);
+}
+
+.jp-CollabPermissions-accessDescription {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+}
+
+/* Dialog footer with action buttons */
+.jp-CollabPermissions-footer {
+  padding: 12px 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  background-color: var(--jp-layout-color1);
+}
+
+.jp-CollabPermissions-button {
+  height: 32px;
+  padding: 0 16px;
+  font-size: var(--jp-ui-font-size1);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.jp-CollabPermissions-cancelButton {
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  border: 1px solid var(--jp-border-color1);
+}
+
+.jp-CollabPermissions-cancelButton:hover {
   background-color: var(--jp-layout-color3);
 }
 
-.jp-PermissionsDialog-deactivateLinkButton {
-  color: var(--jp-warn-color0);
+.jp-CollabPermissions-saveButton {
+  background-color: var(--jp-brand-color1);
+  color: white;
+  border: none;
 }
 
-/* Empty state */
-.jp-PermissionsDialog-emptyState {
+.jp-CollabPermissions-saveButton:hover {
+  background-color: var(--jp-brand-color0);
+}
+
+.jp-CollabPermissions-saveButton:focus,
+.jp-CollabPermissions-cancelButton:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--jp-layout-color0), 0 0 0 4px var(--jp-brand-color1);
+}
+
+/* Responsive adjustments */
+@media only screen and (max-width: 600px) {
+  .jp-CollabPermissions-dialog {
+    min-width: 320px;
+    max-width: 100%;
+    max-height: 90vh;
+  }
+  
+  .jp-CollabPermissions-userTable th:nth-child(3),
+  .jp-CollabPermissions-userTable td:nth-child(3) {
+    display: none; /* Hide less important columns on small screens */
+  }
+  
+  .jp-CollabPermissions-addPeople {
+    flex-direction: column;
+  }
+  
+  .jp-CollabPermissions-addButton {
+    width: 100%;
+  }
+}
+
+/* Accessibility focus styles */
+.jp-CollabPermissions-dialog *:focus-visible {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 2px;
+}
+
+/* Permission group containers */
+.jp-CollabPermissions-permissionGroup {
+  margin-top: 16px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.jp-CollabPermissions-permissionGroupHeader {
+  background-color: var(--jp-layout-color2);
+  padding: 8px 12px;
+  font-weight: 600;
+  font-size: var(--jp-ui-font-size1);
+  color: var(--jp-ui-font-color0);
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.jp-CollabPermissions-permissionGroupContent {
+  padding: 12px;
+  background-color: var(--jp-layout-color1);
+}
+
+.jp-CollabPermissions-permissionItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--jp-border-color3);
+}
+
+.jp-CollabPermissions-permissionItem:last-child {
+  border-bottom: none;
+}
+
+.jp-CollabPermissions-permissionName {
+  font-size: var(--jp-ui-font-size1);
+  color: var(--jp-ui-font-color1);
+}
+
+/* Loading state */
+.jp-CollabPermissions-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 24px;
-  text-align: center;
   color: var(--jp-ui-font-color2);
-  font-style: italic;
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-CollabPermissions-spinner {
+  width: 24px;
+  height: 24px;
+  margin-right: 8px;
+  border: 2px solid var(--jp-border-color2);
+  border-top: 2px solid var(--jp-brand-color1);
+  border-radius: 50%;
+  animation: jp-CollabPermissions-spin 1s linear infinite;
+}
+
+@keyframes jp-CollabPermissions-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Error state */
+.jp-CollabPermissions-error {
+  padding: 16px;
+  color: var(--jp-error-color1);
+  background-color: var(--jp-error-color3);
+  border-radius: 4px;
+  margin: 16px;
+  font-size: var(--jp-ui-font-size1);
+}
+
+/* Tooltip for permission explanations */
+.jp-CollabPermissions-tooltip {
+  position: relative;
+  display: inline-block;
+  margin-left: 4px;
+  cursor: help;
+}
+
+.jp-CollabPermissions-tooltipIcon {
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background-color: var(--jp-layout-color3);
+}
+
+.jp-CollabPermissions-tooltipText {
+  visibility: hidden;
+  width: 200px;
+  background-color: var(--jp-layout-color4);
+  color: var(--jp-ui-inverse-font-color0);
+  text-align: center;
+  border-radius: 4px;
+  padding: 8px;
+  position: absolute;
+  z-index: 1;
+  bottom: 125%;
+  left: 50%;
+  margin-left: -100px;
+  opacity: 0;
+  transition: opacity 0.3s;
+  font-size: var(--jp-ui-font-size0);
+  font-weight: normal;
+  box-shadow: var(--jp-elevation-z6);
+}
+
+.jp-CollabPermissions-tooltip:hover .jp-CollabPermissions-tooltipText {
+  visibility: visible;
+  opacity: 1;
 }
