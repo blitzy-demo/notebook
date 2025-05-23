@@ -1,201 +1,239 @@
-/*
- * Copyright (c) Jupyter Development Team.
- * Distributed under the terms of the Modified BSD License.
+/*-----------------------------------------------------------------------------
+| Copyright (c) Jupyter Development Team.
+|
+| Distributed under the terms of the Modified BSD License.
+|----------------------------------------------------------------------------*/
+
+/**
+ * User Presence and Avatar Styling for Collaborative Editing
+ * 
+ * This file defines styles for user avatars and presence indicators in collaborative
+ * editing sessions. It implements circular avatars with user-specific color borders,
+ * opacity changes for active/idle states, stacking behavior for multiple users,
+ * and tooltips showing user information.
  */
 
 :root {
+  /* Base avatar sizing */
   --jp-collab-avatar-size: 28px;
   --jp-collab-avatar-border-width: 2px;
-  --jp-collab-avatar-stack-offset: 4px;
-  --jp-collab-cursor-width: 2px;
-  --jp-collab-cursor-height: 16px;
+  --jp-collab-avatar-spacing: 4px;
+  
+  /* Avatar states */
+  --jp-collab-avatar-active-opacity: 1;
+  --jp-collab-avatar-idle-opacity: 0.7;
+  
+  /* Animation timing */
+  --jp-collab-avatar-fade-in-time: 200ms;
+  
+  /* Tooltip styling */
+  --jp-collab-tooltip-background: var(--jp-layout-color2);
+  --jp-collab-tooltip-color: var(--jp-ui-font-color1);
+  --jp-collab-tooltip-border-radius: 4px;
+  --jp-collab-tooltip-padding: 8px;
+  --jp-collab-tooltip-font-size: 12px;
+  --jp-collab-tooltip-shadow: 0 1px 6px rgba(0, 0, 0, 0.2);
 }
 
-/* User presence container */
-.jp-UserPresence {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  padding: 4px;
-  overflow: hidden;
-}
-
-.jp-UserPresence-container {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.jp-UserPresence-empty {
-  color: var(--jp-ui-font-color2);
-  font-style: italic;
-  font-size: var(--jp-ui-font-size1);
-}
-
-/* User avatar styling */
-.jp-UserPresence-user {
-  position: relative;
+/* Base avatar styling */
+.jp-CollabAvatar {
   width: var(--jp-collab-avatar-size);
   height: var(--jp-collab-avatar-size);
   border-radius: 50%;
   border: var(--jp-collab-avatar-border-width) solid;
   box-sizing: border-box;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(var(--jp-collab-avatar-size) * 0.4);
+  font-weight: 600;
+  color: var(--jp-ui-inverse-font-color0);
+  background-color: var(--jp-layout-color3);
+  opacity: var(--jp-collab-avatar-active-opacity);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  animation: jp-collab-avatar-fade-in var(--jp-collab-avatar-fade-in-time) ease-in;
+  user-select: none;
   cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-  animation: jp-UserPresence-fadeIn 0.2s ease-in;
-  background-color: var(--jp-layout-color1);
+  z-index: 1;
 }
 
-/* Animation for new avatars */
-@keyframes jp-UserPresence-fadeIn {
-  from { opacity: 0; transform: scale(0.8); }
-  to { opacity: 1; transform: scale(1); }
+/* Define the fade-in animation */
+@keyframes jp-collab-avatar-fade-in {
+  from { opacity: 0; }
+  to { opacity: var(--jp-collab-avatar-active-opacity); }
 }
 
-/* User status variations */
-.jp-UserPresence-status-active {
-  opacity: 1;
-}
-
-.jp-UserPresence-status-idle {
-  opacity: 0.7;
-}
-
-.jp-UserPresence-status-away {
-  opacity: 0.5;
-}
-
-/* Hover and focus states */
-.jp-UserPresence-user:hover,
-.jp-UserPresence-user:focus {
-  transform: scale(1.1);
-  box-shadow: 0 0 4px rgba(0, 0, 0, 0.2);
-  z-index: 10;
-}
-
-/* Avatar image */
-.jp-UserPresence-avatar {
+/* Avatar image styling */
+.jp-CollabAvatar img {
   width: 100%;
   height: 100%;
-  border-radius: 50%;
   object-fit: cover;
 }
 
-/* Initials fallback when no avatar is available */
-.jp-UserPresence-initials {
+/* Idle user styling */
+.jp-CollabAvatar.jp-mod-idle {
+  opacity: var(--jp-collab-avatar-idle-opacity);
+}
+
+/* Avatar container for stacking */
+.jp-CollabAvatarGroup {
   display: flex;
+  flex-direction: row-reverse; /* Stack from right to left */
   align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  color: white;
-  font-size: calc(var(--jp-collab-avatar-size) * 0.4);
-  font-weight: bold;
+  height: var(--jp-collab-avatar-size);
+  position: relative;
+  margin-right: var(--jp-collab-avatar-spacing);
 }
 
-/* Tooltip that appears on hover */
-.jp-UserPresence-tooltip {
-  position: absolute;
-  top: calc(var(--jp-collab-avatar-size) + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-  background-color: var(--jp-layout-color2);
-  color: var(--jp-ui-font-color1);
-  border-radius: 4px;
-  padding: 6px 8px;
-  font-size: var(--jp-ui-font-size0);
-  white-space: nowrap;
-  z-index: 100;
-  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.2);
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  width: max-content;
+/* Stacked avatar styling */
+.jp-CollabAvatarGroup .jp-CollabAvatar {
+  margin-left: calc(-1 * var(--jp-collab-avatar-size) / 3); /* Overlap avatars */
+  box-shadow: 0 0 0 1px var(--jp-layout-color0); /* Separator between avatars */
+  transition: transform 0.2s ease;
 }
 
-.jp-UserPresence-user:hover .jp-UserPresence-tooltip {
-  opacity: 1;
-}
-
-.jp-UserPresence-tooltipName {
-  font-weight: bold;
-  margin-bottom: 2px;
-}
-
-.jp-UserPresence-tooltipStatus {
-  font-style: italic;
-  margin-bottom: 2px;
-}
-
-.jp-UserPresence-tooltipTime {
-  font-size: calc(var(--jp-ui-font-size0) - 1px);
-  color: var(--jp-ui-font-color2);
-}
-
-/* Stacked avatars for multiple users in the same cell */
-.jp-UserPresence-stacked {
-  margin-left: calc(-1 * var(--jp-collab-avatar-stack-offset));
+/* Hover effect for stacked avatars */
+.jp-CollabAvatarGroup .jp-CollabAvatar:hover,
+.jp-CollabAvatarMore:hover {
+  transform: translateY(-3px);
+  z-index: 10;
 }
 
 /* Additional users indicator (+N) */
-.jp-UserPresence-more {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.jp-CollabAvatarMore {
   width: var(--jp-collab-avatar-size);
   height: var(--jp-collab-avatar-size);
   border-radius: 50%;
   background-color: var(--jp-layout-color3);
   color: var(--jp-ui-font-color1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: calc(var(--jp-collab-avatar-size) * 0.4);
-  font-weight: bold;
+  font-weight: 600;
+  margin-left: calc(-1 * var(--jp-collab-avatar-size) / 3);
+  box-shadow: 0 0 0 1px var(--jp-layout-color0);
+  cursor: pointer;
+  z-index: 1;
+}
+
+/* Tooltip styling */
+.jp-CollabTooltip {
+  position: absolute;
+  background-color: var(--jp-collab-tooltip-background);
+  color: var(--jp-collab-tooltip-color);
+  border-radius: var(--jp-collab-tooltip-border-radius);
+  padding: var(--jp-collab-tooltip-padding);
+  font-size: var(--jp-collab-tooltip-font-size);
+  box-shadow: var(--jp-collab-tooltip-shadow);
+  z-index: 1000;
+  pointer-events: none;
+  white-space: nowrap;
+  max-width: 250px;
+  opacity: 0;
+  transform: translateY(5px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  font-family: var(--jp-ui-font-family);
+}
+
+/* Tooltip visibility */
+.jp-CollabAvatar:hover + .jp-CollabTooltip,
+.jp-CollabAvatarMore:hover + .jp-CollabTooltip,
+.jp-CollabCursor:hover::after {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+}
+
+/* Tooltip user info */
+.jp-CollabTooltip-user {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.jp-CollabTooltip-name {
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.jp-CollabTooltip-status {
+  font-style: italic;
+  opacity: 0.8;
+}
+
+.jp-CollabTooltip-time {
+  font-size: 11px;
+  opacity: 0.7;
 }
 
 /* Remote cursor styling */
-.jp-UserCursor {
+.jp-CollabCursor {
   position: absolute;
-  width: var(--jp-collab-cursor-width);
-  height: var(--jp-collab-cursor-height);
+  width: 2px;
+  height: 1.2em;
+  background-color: currentColor;
   z-index: 5;
-  pointer-events: none;
-  animation: jp-UserCursor-blink 1s step-end infinite;
+  animation: jp-collab-cursor-blink 1s step-end infinite;
 }
 
-@keyframes jp-UserCursor-blink {
+@keyframes jp-collab-cursor-blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
 }
 
-/* Cursor tooltip with username */
-.jp-UserCursor-tooltip {
+.jp-CollabCursor::after {
+  content: attr(data-user-initials);
   position: absolute;
-  top: -20px;
-  left: 0;
-  transform: translateX(-50%);
-  padding: 2px 6px;
-  border-radius: 2px;
-  color: white;
-  font-size: var(--jp-ui-font-size0);
+  top: -1.4em;
+  left: -2px;
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--jp-ui-inverse-font-color0);
+  background-color: currentColor;
+  padding: 1px 4px;
+  border-radius: 3px;
   white-space: nowrap;
-  pointer-events: none;
 }
 
-/* Selection highlight for remote users */
-.jp-UserSelection {
+/* Remote selection styling */
+.jp-CollabSelection {
   position: absolute;
-  background-color: rgba(0, 0, 0, 0.1);
-  pointer-events: none;
+  background-color: currentColor;
+  opacity: 0.2;
   z-index: 4;
+  pointer-events: none;
 }
 
-/* Cell highlight when a remote user is editing it */
-.jp-Notebook .jp-Cell.jp-mod-collaborator-editing {
-  box-shadow: inset 0 0 0 1px var(--jp-collaborator-color);
+/* Collaboration panel integration */
+.jp-Notebook .jp-CollabAvatarGroup {
+  position: absolute;
+  right: 8px;
+  top: 8px;
 }
 
-/* Active cell indicator for remote users */
-.jp-Notebook .jp-Cell.jp-mod-collaborator-active {
-  box-shadow: inset 3px 0 0 var(--jp-collaborator-color);
+/* Cell-specific presence indicators */
+.jp-Notebook-cell .jp-CollabAvatarGroup {
+  position: absolute;
+  right: 8px;
+  top: 4px;
+  z-index: 10;
+}
+
+/* Responsive adjustments */
+@media only screen and (max-width: 760px) {
+  :root {
+    --jp-collab-avatar-size: 24px; /* Slightly smaller on mobile */
+  }
+  
+  .jp-Notebook-cell .jp-CollabAvatarGroup {
+    right: 4px;
+    top: 2px;
+  }
+  
+  .jp-CollabCursor::after {
+    font-size: 10px;
+    padding: 0 2px;
+  }
 }
