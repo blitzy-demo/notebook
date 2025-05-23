@@ -1,0 +1,1022 @@
+/*-----------------------------------------------------------------------------
+| Copyright (c) Jupyter Development Team.
+| Distributed under the terms of the Modified BSD License.
+|----------------------------------------------------------------------------*/
+
+/*
+ * Collaboration CSS for Jupyter Notebook v7
+ * This file defines styling for all collaboration-related UI components
+ */
+
+/*-----------------------------------------------------------------------------
+| CSS Custom Properties for Collaboration
+|----------------------------------------------------------------------------*/
+
+:root {
+  /* Avatar and presence indicators */
+  --jp-collab-avatar-size: 28px;
+  --jp-collab-avatar-border-width: 2px;
+  --jp-collab-avatar-stack-offset: 10px;
+  --jp-collab-cursor-width: 2px;
+  
+  /* Lock indicators */
+  --jp-collab-lock-icon-size: 16px;
+  --jp-collab-lock-icon-color: rgba(62, 62, 62, 0.8);
+  --jp-collab-lock-icon-color-active: rgba(62, 62, 62, 1);
+  
+  /* Comment system */
+  --jp-collab-comment-badge-color: rgba(33, 150, 243, 0.9);
+  --jp-collab-comment-badge-color-resolved: rgba(76, 175, 80, 0.9);
+  --jp-collab-comment-badge-size: 16px;
+  
+  /* Collaboration bar */
+  --jp-collab-bar-height: 36px;
+  --jp-collab-bar-padding: 8px;
+  
+  /* History and diff visualization */
+  --jp-collab-history-insert-color: rgba(76, 175, 80, 0.2);
+  --jp-collab-history-delete-color: rgba(244, 67, 54, 0.2);
+  
+  /* Animation durations */
+  --jp-collab-transition-duration: 200ms;
+}
+
+/*-----------------------------------------------------------------------------
+| User Avatars and Presence Indicators
+|----------------------------------------------------------------------------*/
+
+/* User avatar base styling */
+.jp-Collab-avatar {
+  width: var(--jp-collab-avatar-size);
+  height: var(--jp-collab-avatar-size);
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: calc(var(--jp-collab-avatar-size) * 0.5);
+  color: var(--jp-ui-inverse-font-color1);
+  transition: opacity var(--jp-collab-transition-duration) ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+/* Avatar with user image */
+.jp-Collab-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Avatar with user initials (fallback) */
+.jp-Collab-avatar-initials {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Active user avatar */
+.jp-Collab-avatar-active {
+  opacity: 1;
+}
+
+/* Idle user avatar */
+.jp-Collab-avatar-idle {
+  opacity: 0.7;
+}
+
+/* Avatar stacking in collaboration bar */
+.jp-Collab-avatarStack {
+  display: flex;
+  flex-direction: row;
+}
+
+.jp-Collab-avatarStack .jp-Collab-avatar:not(:first-child) {
+  margin-left: calc(-1 * var(--jp-collab-avatar-stack-offset));
+}
+
+/* Additional users indicator (+N) */
+.jp-Collab-moreUsers {
+  width: var(--jp-collab-avatar-size);
+  height: var(--jp-collab-avatar-size);
+  border-radius: 50%;
+  background-color: var(--jp-layout-color3);
+  color: var(--jp-ui-font-color1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(var(--jp-collab-avatar-size) * 0.4);
+  margin-left: calc(-1 * var(--jp-collab-avatar-stack-offset));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+/* User cursor in text */
+.jp-Collab-cursor {
+  position: absolute;
+  width: var(--jp-collab-cursor-width);
+  height: 1.2em;
+  transition: all var(--jp-collab-transition-duration) linear;
+  z-index: 10;
+}
+
+/* User selection highlight */
+.jp-Collab-selection {
+  position: absolute;
+  opacity: 0.2;
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* User presence tooltip */
+.jp-Collab-presenceTooltip {
+  position: absolute;
+  background-color: var(--jp-layout-color2);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color1);
+  z-index: 1000;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  pointer-events: none;
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* User presence animation */
+@keyframes jp-Collab-presencePulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.6; }
+  100% { opacity: 1; }
+}
+
+.jp-Collab-activePresence {
+  animation: jp-Collab-presencePulse 2s infinite ease-in-out;
+}
+
+/*-----------------------------------------------------------------------------
+| Cell Locking Mechanisms
+|----------------------------------------------------------------------------*/
+
+/* Lock icon base styling */
+.jp-Collab-lockIcon {
+  width: var(--jp-collab-lock-icon-size);
+  height: var(--jp-collab-lock-icon-size);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--jp-collab-lock-icon-color);
+  transition: all var(--jp-collab-transition-duration) ease;
+  margin-right: 4px;
+}
+
+/* Unlocked state */
+.jp-Collab-lockIcon-unlocked {
+  opacity: 0.6;
+}
+
+/* Locked state */
+.jp-Collab-lockIcon-locked {
+  color: var(--jp-collab-lock-icon-color-active);
+  opacity: 1;
+}
+
+/* Lock icon in cell gutter */
+.jp-Notebook .jp-Cell .jp-Collab-lockGutter {
+  flex: 0 0 var(--jp-collab-lock-icon-size);
+  margin-right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Lock animation */
+@keyframes jp-Collab-lockPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+.jp-Collab-lockIcon-transition {
+  animation: jp-Collab-lockPulse 250ms ease-in-out;
+}
+
+/* Cell with active lock */
+.jp-Cell-locked {
+  position: relative;
+}
+
+.jp-Cell-locked::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  border: 1px solid;
+  border-radius: 2px;
+  opacity: 0.3;
+  transition: opacity var(--jp-collab-transition-duration) ease;
+}
+
+.jp-Cell-locked:hover::after {
+  opacity: 0.5;
+}
+
+/* Lock owner tooltip */
+.jp-Collab-lockTooltip {
+  position: absolute;
+  background-color: var(--jp-layout-color2);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color1);
+  z-index: 1000;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  pointer-events: none;
+}
+
+/*-----------------------------------------------------------------------------
+| Comment Badges and Threads
+|----------------------------------------------------------------------------*/
+
+/* Comment badge base styling */
+.jp-Collab-commentBadge {
+  height: var(--jp-collab-comment-badge-size);
+  min-width: var(--jp-collab-comment-badge-size);
+  border-radius: 8px;
+  background-color: var(--jp-collab-comment-badge-color);
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  cursor: pointer;
+  transition: all var(--jp-collab-transition-duration) ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.jp-Collab-commentBadge:hover {
+  transform: scale(1.1);
+}
+
+/* Resolved comment badge */
+.jp-Collab-commentBadge-resolved {
+  background-color: var(--jp-collab-comment-badge-color-resolved);
+}
+
+/* Selected comment badge */
+.jp-Collab-commentBadge-selected {
+  box-shadow: 0 0 0 2px white, 0 0 0 4px var(--jp-collab-comment-badge-color);
+}
+
+/* Comment badge in cell margin */
+.jp-Notebook .jp-Cell .jp-Collab-commentMargin {
+  position: absolute;
+  right: -24px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Comment thread panel */
+.jp-Collab-commentPanel {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 300px;
+  background-color: var(--jp-layout-color1);
+  border-left: 1px solid var(--jp-border-color1);
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  transition: transform var(--jp-collab-transition-duration) ease;
+}
+
+.jp-Collab-commentPanel-hidden {
+  transform: translateX(100%);
+}
+
+/* Comment thread header */
+.jp-Collab-commentHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--jp-border-color1);
+  background-color: var(--jp-layout-color2);
+}
+
+.jp-Collab-commentHeader h3 {
+  margin: 0;
+  font-size: var(--jp-ui-font-size1);
+  font-weight: 600;
+}
+
+/* Comment thread content */
+.jp-Collab-commentContent {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+/* Individual comment */
+.jp-Collab-comment {
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--jp-border-color0);
+}
+
+.jp-Collab-comment:last-child {
+  border-bottom: none;
+}
+
+/* Comment header with user info */
+.jp-Collab-commentUserHeader {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.jp-Collab-commentUserHeader .jp-Collab-avatar {
+  width: 24px;
+  height: 24px;
+  margin-right: 8px;
+}
+
+.jp-Collab-commentUserName {
+  font-weight: 600;
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-Collab-commentTimestamp {
+  margin-left: 8px;
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+}
+
+/* Comment text */
+.jp-Collab-commentText {
+  font-size: var(--jp-ui-font-size1);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Comment actions */
+.jp-Collab-commentActions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.jp-Collab-commentAction {
+  background: none;
+  border: none;
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+  cursor: pointer;
+  padding: 2px 4px;
+  margin-left: 8px;
+  border-radius: 2px;
+}
+
+.jp-Collab-commentAction:hover {
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color0);
+}
+
+/* Comment input area */
+.jp-Collab-commentInputArea {
+  padding: 12px;
+  border-top: 1px solid var(--jp-border-color1);
+  background-color: var(--jp-layout-color1);
+}
+
+.jp-Collab-commentInput {
+  width: 100%;
+  min-height: 80px;
+  padding: 8px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  background-color: var(--jp-layout-color0);
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  resize: vertical;
+}
+
+.jp-Collab-commentInput:focus {
+  outline: none;
+  border-color: var(--jp-brand-color1);
+  box-shadow: 0 0 0 1px var(--jp-brand-color1);
+}
+
+.jp-Collab-commentSubmit {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Comment badge animation */
+@keyframes jp-Collab-commentPulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+.jp-Collab-commentBadge-new {
+  animation: jp-Collab-commentPulse 3s ease-in-out;
+}
+
+/*-----------------------------------------------------------------------------
+| Collaboration Bar
+|----------------------------------------------------------------------------*/
+
+/* Collaboration bar container */
+.jp-Collab-bar {
+  height: var(--jp-collab-bar-height);
+  background-color: var(--jp-layout-color1);
+  border-bottom: 1px solid var(--jp-border-color1);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--jp-collab-bar-padding);
+  position: relative;
+}
+
+/* Left section with user avatars */
+.jp-Collab-barUsers {
+  display: flex;
+  align-items: center;
+}
+
+/* Center section with status */
+.jp-Collab-barStatus {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--jp-ui-font-size1);
+  color: var(--jp-ui-font-color2);
+}
+
+/* Right section with actions */
+.jp-Collab-barActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Collaboration toggle button */
+.jp-Collab-toggleButton {
+  background: none;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: var(--jp-ui-font-size1);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  transition: all var(--jp-collab-transition-duration) ease;
+}
+
+.jp-Collab-toggleButton:hover {
+  background-color: var(--jp-layout-color2);
+}
+
+.jp-Collab-toggleButton-active {
+  background-color: var(--jp-brand-color1);
+  color: white;
+  border-color: var(--jp-brand-color1);
+}
+
+.jp-Collab-toggleButton-active:hover {
+  background-color: var(--jp-brand-color0);
+}
+
+/* Collaboration activity feed */
+.jp-Collab-activityFeed {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  right: var(--jp-collab-bar-padding);
+  width: 300px;
+  max-height: 400px;
+  overflow-y: auto;
+  background-color: var(--jp-layout-color1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+  display: none;
+}
+
+.jp-Collab-activityFeed-visible {
+  display: block;
+}
+
+/* Activity feed header */
+.jp-Collab-activityHeader {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--jp-border-color1);
+  font-weight: 600;
+  background-color: var(--jp-layout-color2);
+}
+
+/* Activity feed items */
+.jp-Collab-activityItem {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--jp-border-color0);
+  display: flex;
+  align-items: flex-start;
+}
+
+.jp-Collab-activityItem:last-child {
+  border-bottom: none;
+}
+
+.jp-Collab-activityItem .jp-Collab-avatar {
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.jp-Collab-activityContent {
+  flex: 1;
+}
+
+.jp-Collab-activityUser {
+  font-weight: 600;
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-Collab-activityAction {
+  font-size: var(--jp-ui-font-size0);
+  line-height: 1.4;
+}
+
+.jp-Collab-activityTime {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+  margin-top: 2px;
+}
+
+/* Collaboration notification badge */
+.jp-Collab-notificationBadge {
+  background-color: var(--jp-brand-color1);
+  color: white;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: -4px;
+  right: -4px;
+}
+
+/*-----------------------------------------------------------------------------
+| Version History and Diff Visualization
+|----------------------------------------------------------------------------*/
+
+/* History viewer container */
+.jp-Collab-historyViewer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 50%;
+  height: 100%;
+  background-color: var(--jp-layout-color1);
+  border-left: 1px solid var(--jp-border-color1);
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  transition: transform var(--jp-collab-transition-duration) ease;
+}
+
+.jp-Collab-historyViewer-hidden {
+  transform: translateX(100%);
+}
+
+/* History viewer header */
+.jp-Collab-historyHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--jp-border-color1);
+  background-color: var(--jp-layout-color2);
+}
+
+.jp-Collab-historyHeader h3 {
+  margin: 0;
+  font-size: var(--jp-ui-font-size1);
+  font-weight: 600;
+}
+
+/* History timeline */
+.jp-Collab-historyTimeline {
+  padding: 12px;
+  border-bottom: 1px solid var(--jp-border-color1);
+  background-color: var(--jp-layout-color2);
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+}
+
+.jp-Collab-historyTimelineItem {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: var(--jp-layout-color3);
+  margin: 0 2px;
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.jp-Collab-historyTimelineItem:hover {
+  background-color: var(--jp-brand-color1);
+}
+
+.jp-Collab-historyTimelineItem-selected {
+  background-color: var(--jp-brand-color1);
+  width: 16px;
+  height: 16px;
+}
+
+.jp-Collab-historyTimelineItem-current {
+  border: 2px solid var(--jp-brand-color1);
+  background-color: var(--jp-layout-color1);
+}
+
+/* History timeline connector */
+.jp-Collab-historyTimelineConnector {
+  height: 2px;
+  background-color: var(--jp-layout-color3);
+  flex: 1;
+  min-width: 8px;
+  flex-shrink: 0;
+}
+
+/* History version info */
+.jp-Collab-historyVersionInfo {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--jp-border-color1);
+  background-color: var(--jp-layout-color2);
+  font-size: var(--jp-ui-font-size0);
+  display: flex;
+  align-items: center;
+}
+
+.jp-Collab-historyVersionUser {
+  display: flex;
+  align-items: center;
+  margin-right: 12px;
+}
+
+.jp-Collab-historyVersionUser .jp-Collab-avatar {
+  width: 20px;
+  height: 20px;
+  margin-right: 6px;
+}
+
+.jp-Collab-historyVersionTime {
+  color: var(--jp-ui-font-color2);
+  margin-left: auto;
+}
+
+/* Diff content area */
+.jp-Collab-diffContent {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+  position: relative;
+}
+
+/* Diff cell */
+.jp-Collab-diffCell {
+  margin: 8px 0;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.jp-Collab-diffCellHeader {
+  padding: 4px 8px;
+  background-color: var(--jp-layout-color2);
+  border-bottom: 1px solid var(--jp-border-color1);
+  font-size: var(--jp-ui-font-size0);
+  display: flex;
+  align-items: center;
+}
+
+.jp-Collab-diffCellContent {
+  padding: 8px;
+  font-family: var(--jp-code-font-family);
+  font-size: var(--jp-code-font-size);
+  line-height: var(--jp-code-line-height);
+  white-space: pre-wrap;
+}
+
+/* Diff highlighting */
+.jp-Collab-diffInsert {
+  background-color: var(--jp-collab-history-insert-color);
+  text-decoration: none;
+}
+
+.jp-Collab-diffDelete {
+  background-color: var(--jp-collab-history-delete-color);
+  text-decoration: line-through;
+}
+
+/* History actions */
+.jp-Collab-historyActions {
+  padding: 8px 12px;
+  border-top: 1px solid var(--jp-border-color1);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.jp-Collab-historyAction {
+  background: none;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: var(--jp-ui-font-size1);
+  cursor: pointer;
+  transition: all var(--jp-collab-transition-duration) ease;
+}
+
+.jp-Collab-historyAction:hover {
+  background-color: var(--jp-layout-color2);
+}
+
+.jp-Collab-historyAction-primary {
+  background-color: var(--jp-brand-color1);
+  color: white;
+  border-color: var(--jp-brand-color1);
+}
+
+.jp-Collab-historyAction-primary:hover {
+  background-color: var(--jp-brand-color0);
+}
+
+/*-----------------------------------------------------------------------------
+| Permissions Dialog and Role Indicators
+|----------------------------------------------------------------------------*/
+
+/* Permissions dialog */
+.jp-Collab-permissionsDialog {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.jp-Collab-permissionsDialogContent {
+  width: 500px;
+  max-width: 90%;
+  max-height: 90vh;
+  background-color: var(--jp-layout-color1);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Permissions dialog header */
+.jp-Collab-permissionsHeader {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--jp-border-color1);
+  background-color: var(--jp-layout-color2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.jp-Collab-permissionsHeader h3 {
+  margin: 0;
+  font-size: var(--jp-ui-font-size2);
+  font-weight: 600;
+}
+
+/* Permissions content */
+.jp-Collab-permissionsContent {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+/* Permissions section */
+.jp-Collab-permissionsSection {
+  margin-bottom: 20px;
+}
+
+.jp-Collab-permissionsSection h4 {
+  margin: 0 0 8px 0;
+  font-size: var(--jp-ui-font-size1);
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+}
+
+/* User list in permissions dialog */
+.jp-Collab-permissionsUserList {
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.jp-Collab-permissionsUser {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--jp-border-color0);
+}
+
+.jp-Collab-permissionsUser:last-child {
+  border-bottom: none;
+}
+
+.jp-Collab-permissionsUser .jp-Collab-avatar {
+  width: 24px;
+  height: 24px;
+  margin-right: 8px;
+}
+
+.jp-Collab-permissionsUserInfo {
+  flex: 1;
+}
+
+.jp-Collab-permissionsUserName {
+  font-weight: 600;
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-Collab-permissionsUserEmail {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+}
+
+/* Role selector */
+.jp-Collab-permissionsRoleSelect {
+  background-color: var(--jp-layout-color1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: var(--jp-ui-font-size1);
+  color: var(--jp-ui-font-color0);
+  min-width: 120px;
+}
+
+.jp-Collab-permissionsRoleSelect:focus {
+  outline: none;
+  border-color: var(--jp-brand-color1);
+}
+
+/* Add user section */
+.jp-Collab-permissionsAddUser {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+}
+
+.jp-Collab-permissionsAddUserInput {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-Collab-permissionsAddUserInput:focus {
+  outline: none;
+  border-color: var(--jp-brand-color1);
+}
+
+/* Role badges */
+.jp-Collab-roleBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 10px;
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 600;
+  margin-left: 8px;
+}
+
+.jp-Collab-roleBadge-owner {
+  background-color: rgba(103, 58, 183, 0.1);
+  color: rgb(103, 58, 183);
+}
+
+.jp-Collab-roleBadge-editor {
+  background-color: rgba(33, 150, 243, 0.1);
+  color: rgb(33, 150, 243);
+}
+
+.jp-Collab-roleBadge-commenter {
+  background-color: rgba(76, 175, 80, 0.1);
+  color: rgb(76, 175, 80);
+}
+
+.jp-Collab-roleBadge-viewer {
+  background-color: rgba(158, 158, 158, 0.1);
+  color: rgb(158, 158, 158);
+}
+
+/* Permissions dialog actions */
+.jp-Collab-permissionsActions {
+  padding: 12px 16px;
+  border-top: 1px solid var(--jp-border-color1);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Responsive adjustments for permissions dialog */
+@media only screen and (max-width: 600px) {
+  .jp-Collab-permissionsUser {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .jp-Collab-permissionsRoleSelect {
+    margin-top: 8px;
+    width: 100%;
+  }
+  
+  .jp-Collab-permissionsAddUser {
+    flex-direction: column;
+  }
+}
+
+/* Accessibility focus styles */
+.jp-Collab-permissionsRoleSelect:focus-visible,
+.jp-Collab-permissionsAddUserInput:focus-visible,
+.jp-Collab-historyAction:focus-visible,
+.jp-Collab-commentAction:focus-visible,
+.jp-Collab-toggleButton:focus-visible {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 2px;
+}
+
+/*-----------------------------------------------------------------------------
+| Reduced Motion & Accessibility Adjustments
+|----------------------------------------------------------------------------*/
+
+@media (prefers-reduced-motion: reduce) {
+  .jp-Collab-avatar,
+  .jp-Collab-cursor,
+  .jp-Collab-lockIcon,
+  .jp-Collab-commentBadge,
+  .jp-Collab-toggleButton,
+  .jp-Collab-historyViewer,
+  .jp-Collab-commentPanel {
+    transition: none !important;
+  }
+  
+  .jp-Collab-activePresence,
+  .jp-Collab-lockIcon-transition,
+  .jp-Collab-commentBadge-new {
+    animation: none !important;
+  }
+}
+
+/* High contrast mode adjustments */
+@media (forced-colors: active) {
+  .jp-Collab-avatar,
+  .jp-Collab-cursor,
+  .jp-Collab-lockIcon,
+  .jp-Collab-commentBadge,
+  .jp-Collab-roleBadge {
+    border: 1px solid CanvasText;
+  }
+  
+  .jp-Collab-diffInsert,
+  .jp-Collab-diffDelete {
+    border: 1px dashed CanvasText;
+  }
+}
