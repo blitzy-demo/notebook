@@ -5,708 +5,663 @@ import { Cell, ICellModel } from '@jupyterlab/cells';
 import { IObservableMap } from '@jupyterlab/observables';
 import { ISignal, Signal } from '@lumino/signaling';
 import { Widget } from '@lumino/widgets';
-import { CodeEditor } from '@jupyterlab/codeeditor';
+import { UUID } from '@lumino/coreutils';
 import * as Y from 'yjs';
 
-import { ILockManager } from './collab/locks';
-import { YjsAwareness } from './collab/awareness';
+import { IYjsAwareness, ICursorPosition, IAwarenessState } from './collab/awareness';
+import { ILockManager, ILockInfo } from './collab/locks';
 
 /**
- * An interface describing the collaborative state of a cell.
+ * Interface for collaborative cell state
  */
 export interface ICollaborativeCellState {
   /**
-   * Whether the cell is currently locked for editing.
+   * Whether the cell is currently being edited by a remote user
    */
-  locked: boolean;
+  isRemotelyEdited: boolean;
 
   /**
-   * The ID of the user who has locked the cell, if any.
+   * The ID of the user currently editing the cell, if any
    */
-  lockedBy: string | null;
+  editorId?: string;
 
   /**
-   * The Yjs shared document for this cell.
+   * The name of the user currently editing the cell, if any
    */
-  ydoc: Y.Doc | null;
+  editorName?: string;
 
   /**
-   * The Yjs text type for the cell's content.
+   * Whether the cell is currently locked
    */
-  ytext: Y.Text | null;
+  isLocked: boolean;
 
   /**
-   * The awareness instance for tracking user presence in this cell.
+   * The lock information if the cell is locked
    */
-  awareness: YjsAwareness | null;
+  lockInfo?: ILockInfo;
+
+  /**
+   * Remote cursors and selections in this cell
+   */
+  remoteCursors: Map<string, ICursorPosition>;
 }
 
 /**
- * An interface describing a cell with collaborative editing capabilities.
+ * Interface for a cell with collaborative editing support
  */
 export interface ICollaborativeCell extends Cell {
   /**
-   * The collaborative state of the cell.
+   * The collaborative state of the cell
    */
   readonly collaborativeState: ICollaborativeCellState;
 
   /**
-   * Signal emitted when the collaborative state of the cell changes.
+   * Signal emitted when the collaborative state changes
    */
   readonly collaborativeStateChanged: ISignal<ICollaborativeCell, void>;
 
   /**
-   * Acquire a lock on this cell for editing.
+   * Attempt to acquire a lock on this cell
    * 
-   * @returns A promise that resolves to a boolean indicating whether the lock was acquired.
+   * @returns A promise that resolves to true if the lock was acquired, false otherwise
    */
   acquireLock(): Promise<boolean>;
 
   /**
-   * Release the lock on this cell.
+   * Release the lock on this cell
    * 
-   * @returns A promise that resolves when the lock is released.
+   * @returns A promise that resolves to true if the lock was released, false otherwise
    */
-  releaseLock(): Promise<void>;
+  releaseLock(): Promise<boolean>;
 
   /**
-   * Update the visual indicators for remote cursors and selections.
+   * Update the collaborative state based on awareness and lock information
    */
-  updateRemoteCursors(): void;
+  updateCollaborativeState(): void;
 
   /**
-   * Update the lock status indicator.
+   * Set up collaborative editing for this cell
+   * 
+   * @param ydoc - The Yjs document
+   * @param awareness - The awareness instance
+   * @param lockManager - The lock manager
    */
-  updateLockStatus(): void;
+  setupCollaboration(ydoc: Y.Doc, awareness: IYjsAwareness, lockManager: ILockManager): void;
+
+  /**
+   * Clean up collaborative editing resources
+   */
+  cleanupCollaboration(): void;
 }
 
 /**
- * An interface describing a cell model with collaborative editing capabilities.
- */
-export interface ICollaborativeCellModel extends ICellModel {
-  /**
-   * The Yjs shared document for this cell model.
-   */
-  readonly ydoc: Y.Doc | null;
-
-  /**
-   * The Yjs text type for the cell's content.
-   */
-  readonly ytext: Y.Text | null;
-
-  /**
-   * Set the Yjs shared document for this cell model.
-   */
-  setYDoc(ydoc: Y.Doc): void;
-
-  /**
-   * Signal emitted when the Yjs document changes.
-   */
-  readonly ydocChanged: ISignal<ICollaborativeCellModel, void>;
-}
-
-/**
- * A class that adds collaborative editing capabilities to a cell.
+ * Default implementation of a cell with collaborative editing support
  */
 export class CollaborativeCell extends Cell implements ICollaborativeCell {
   /**
-   * Construct a new collaborative cell.
+   * Constructor
+   * 
+   * @param options - The cell initialization options
    */
   constructor(options: Cell.IOptions) {
     super(options);
     this._collaborativeState = {
-      locked: false,
-      lockedBy: null,
-      ydoc: null,
-      ytext: null,
-      awareness: null
+      isRemotelyEdited: false,
+      isLocked: false,
+      remoteCursors: new Map<string, ICursorPosition>()
     };
 
     // Add CSS class for collaborative cell
     this.addClass('jp-CollaborativeCell');
 
-    // Create lock status indicator
-    this._lockStatusIndicator = new Widget();
-    this._lockStatusIndicator.addClass('jp-CollaborativeCell-LockIndicator');
-    this.layout!.addWidget(this._lockStatusIndicator);
-
     // Create remote cursors container
-    this._remoteCursorsContainer = new Widget();
-    this._remoteCursorsContainer.addClass('jp-CollaborativeCell-RemoteCursors');
-    this.layout!.addWidget(this._remoteCursorsContainer);
+    this._remoteCursorsContainer = document.createElement('div');
+    this._remoteCursorsContainer.className = 'jp-CollaborativeCell-remoteCursors';
+    this.node.appendChild(this._remoteCursorsContainer);
 
-    // Initialize collaborative features if the model supports them
-    if (this._isCollaborativeModel(this.model)) {
-      this._initializeCollaboration();
-    }
+    // Create lock indicator
+    this._lockIndicator = document.createElement('div');
+    this._lockIndicator.className = 'jp-CollaborativeCell-lockIndicator';
+    this._lockIndicator.style.display = 'none';
+    this.node.appendChild(this._lockIndicator);
 
-    // Listen for model changes
-    this.model.contentChanged.connect(this._onContentChanged, this);
+    // Handle editor focus events to update awareness
+    this.editor.focus.connect(this._onEditorFocus, this);
+    this.editor.blur.connect(this._onEditorBlur, this);
   }
 
   /**
-   * The collaborative state of the cell.
+   * The collaborative state of the cell
    */
   get collaborativeState(): ICollaborativeCellState {
     return this._collaborativeState;
   }
 
   /**
-   * Signal emitted when the collaborative state of the cell changes.
+   * Signal emitted when the collaborative state changes
    */
   get collaborativeStateChanged(): ISignal<ICollaborativeCell, void> {
     return this._collaborativeStateChanged;
   }
 
   /**
-   * Acquire a lock on this cell for editing.
+   * Attempt to acquire a lock on this cell
    * 
-   * @returns A promise that resolves to a boolean indicating whether the lock was acquired.
+   * @returns A promise that resolves to true if the lock was acquired, false otherwise
    */
   async acquireLock(): Promise<boolean> {
     if (!this._lockManager) {
-      return true; // No lock manager, so editing is always allowed
+      return false;
     }
 
-    const lockAcquired = await this._lockManager.acquireLock(this.model.id);
-    if (lockAcquired) {
-      this._collaborativeState.locked = true;
-      this._collaborativeState.lockedBy = this._getCurrentUserId();
-      this.updateLockStatus();
-      this._collaborativeStateChanged.emit(void 0);
+    const result = await this._lockManager.acquireLock(this.model.id);
+    if (result.success) {
+      this.updateCollaborativeState();
+      return true;
     }
-    return lockAcquired;
+
+    // If lock acquisition failed, update UI to show who has the lock
+    this.updateCollaborativeState();
+    return false;
   }
 
   /**
-   * Release the lock on this cell.
+   * Release the lock on this cell
    * 
-   * @returns A promise that resolves when the lock is released.
+   * @returns A promise that resolves to true if the lock was released, false otherwise
    */
-  async releaseLock(): Promise<void> {
-    if (!this._lockManager || !this._collaborativeState.locked) {
+  async releaseLock(): Promise<boolean> {
+    if (!this._lockManager) {
+      return false;
+    }
+
+    const result = await this._lockManager.releaseLock(this.model.id);
+    if (result) {
+      this.updateCollaborativeState();
+    }
+    return result;
+  }
+
+  /**
+   * Update the collaborative state based on awareness and lock information
+   */
+  updateCollaborativeState(): void {
+    if (!this._awareness || !this._lockManager) {
       return;
     }
 
-    await this._lockManager.releaseLock(this.model.id);
-    this._collaborativeState.locked = false;
-    this._collaborativeState.lockedBy = null;
-    this.updateLockStatus();
+    // Get lock information
+    const lockInfo = this._lockManager.getLock(this.model.id);
+    const isLocked = !!lockInfo;
+    const hasLock = this._lockManager.hasLock(this.model.id);
+
+    // Update lock state
+    this._collaborativeState.isLocked = isLocked;
+    this._collaborativeState.lockInfo = lockInfo || undefined;
+
+    // Update remote editing state
+    const awarenessStates = this._awareness.getStates();
+    const remoteCursors = new Map<string, ICursorPosition>();
+    let isRemotelyEdited = false;
+    let editorId: string | undefined;
+    let editorName: string | undefined;
+
+    // Process awareness states to find remote cursors and active editors
+    awarenessStates.forEach((state: IAwarenessState, clientId: number) => {
+      // Skip our own state
+      if (clientId === this._awareness!.clientID) {
+        return;
+      }
+
+      // Check if this user has a cursor in this cell
+      if (state.cursor && state.cursor.cellIndex === this._cellIndex) {
+        const userId = state.user.id || `user-${clientId}`;
+        remoteCursors.set(userId, state.cursor);
+
+        // If the user is actively editing this cell
+        if (state.cursor.active) {
+          isRemotelyEdited = true;
+          editorId = userId;
+          editorName = state.user.name || `User ${clientId}`;
+        }
+      }
+    });
+
+    // Update collaborative state
+    this._collaborativeState.isRemotelyEdited = isRemotelyEdited;
+    this._collaborativeState.editorId = editorId;
+    this._collaborativeState.editorName = editorName;
+    this._collaborativeState.remoteCursors = remoteCursors;
+
+    // Update UI
+    this._updateLockIndicator();
+    this._updateRemoteCursors();
+    this._updateCellClasses();
+
+    // Emit signal
     this._collaborativeStateChanged.emit(void 0);
   }
 
   /**
-   * Update the visual indicators for remote cursors and selections.
+   * Set up collaborative editing for this cell
+   * 
+   * @param ydoc - The Yjs document
+   * @param awareness - The awareness instance
+   * @param lockManager - The lock manager
+   * @param cellIndex - The index of this cell in the notebook
    */
-  updateRemoteCursors(): void {
-    if (!this._collaborativeState.awareness) {
-      return;
+  setupCollaboration(ydoc: Y.Doc, awareness: IYjsAwareness, lockManager: ILockManager, cellIndex?: number): void {
+    this._ydoc = ydoc;
+    this._awareness = awareness;
+    this._lockManager = lockManager;
+    this._cellIndex = cellIndex !== undefined ? cellIndex : -1;
+
+    // Set up Yjs text binding for the editor if not already set up
+    if (!this._ytext && this.editor) {
+      // Get or create a Yjs text for this cell
+      const cellId = this.model.id;
+      this._ytext = this._ydoc.getText(`cell:${cellId}`);
+
+      // Bind the editor to the Yjs text
+      this._bindEditor();
     }
 
-    // Clear existing cursors
-    this._remoteCursorsContainer.node.innerHTML = '';
+    // Set up awareness change handler
+    if (this._awareness) {
+      this._awarenessChangeHandler = (changes: any) => {
+        this.updateCollaborativeState();
+      };
+      this._awareness.stateChanged.connect(this._awarenessChangeHandler);
+    }
 
-    const awareness = this._collaborativeState.awareness;
-    const currentUserId = this._getCurrentUserId();
-    const states = awareness.getStates();
+    // Set up lock change handlers
+    if (this._lockManager) {
+      this._lockAcquiredHandler = (info: ILockInfo) => {
+        if (info.cellId === this.model.id) {
+          this.updateCollaborativeState();
+        }
+      };
+      this._lockReleasedHandler = (info: ILockInfo) => {
+        if (info.cellId === this.model.id) {
+          this.updateCollaborativeState();
+        }
+      };
+      this._lockManager.lockAcquired.connect(this._lockAcquiredHandler);
+      this._lockManager.lockReleased.connect(this._lockReleasedHandler);
+    }
 
-    // Iterate through all users
-    states.forEach((state, clientId) => {
-      // Skip current user
-      if (clientId.toString() === currentUserId) {
-        return;
-      }
-
-      // Check if user has cursor data for this cell
-      if (state.cursor && state.cursor.cellId === this.model.id) {
-        this._renderRemoteCursor(clientId, state);
-      }
-    });
+    // Initial update of collaborative state
+    this.updateCollaborativeState();
   }
 
   /**
-   * Update the lock status indicator.
+   * Clean up collaborative editing resources
    */
-  updateLockStatus(): void {
-    this._lockStatusIndicator.node.innerHTML = '';
-
-    if (this._collaborativeState.locked) {
-      const lockedBy = this._collaborativeState.lockedBy;
-      const isCurrentUser = lockedBy === this._getCurrentUserId();
-
-      // Update CSS classes based on lock state
-      this.toggleClass('jp-CollaborativeCell-locked', true);
-      this.toggleClass('jp-CollaborativeCell-lockedByCurrentUser', isCurrentUser);
-      this.toggleClass('jp-CollaborativeCell-lockedByOtherUser', !isCurrentUser);
-
-      // Create lock indicator content
-      const lockIcon = document.createElement('div');
-      lockIcon.className = 'jp-CollaborativeCell-lockIcon';
-      
-      const lockText = document.createElement('span');
-      lockText.className = 'jp-CollaborativeCell-lockText';
-      lockText.textContent = isCurrentUser ? 'Editing' : 'Locked';
-
-      this._lockStatusIndicator.node.appendChild(lockIcon);
-      this._lockStatusIndicator.node.appendChild(lockText);
-    } else {
-      // Remove lock-related CSS classes
-      this.toggleClass('jp-CollaborativeCell-locked', false);
-      this.toggleClass('jp-CollaborativeCell-lockedByCurrentUser', false);
-      this.toggleClass('jp-CollaborativeCell-lockedByOtherUser', false);
+  cleanupCollaboration(): void {
+    // Disconnect awareness change handler
+    if (this._awareness && this._awarenessChangeHandler) {
+      this._awareness.stateChanged.disconnect(this._awarenessChangeHandler);
+      this._awarenessChangeHandler = null;
     }
+
+    // Disconnect lock change handlers
+    if (this._lockManager) {
+      if (this._lockAcquiredHandler) {
+        this._lockManager.lockAcquired.disconnect(this._lockAcquiredHandler);
+        this._lockAcquiredHandler = null;
+      }
+      if (this._lockReleasedHandler) {
+        this._lockManager.lockReleased.disconnect(this._lockReleasedHandler);
+        this._lockReleasedHandler = null;
+      }
+    }
+
+    // Release any locks we hold
+    if (this._lockManager && this._lockManager.hasLock(this.model.id)) {
+      this.releaseLock().catch(error => {
+        console.error('Error releasing lock during cleanup:', error);
+      });
+    }
+
+    // Clean up Yjs text binding
+    this._unbindEditor();
+
+    // Clear references
+    this._ydoc = null;
+    this._awareness = null;
+    this._lockManager = null;
+    this._ytext = null;
   }
 
   /**
-   * Dispose of the resources held by the cell.
+   * Dispose of the cell
    */
   dispose(): void {
     if (this.isDisposed) {
       return;
     }
 
-    // Clean up Yjs and awareness resources
-    this._cleanupCollaboration();
+    // Clean up collaborative editing resources
+    this.cleanupCollaboration();
 
-    // Dispose of widgets
-    if (this._lockStatusIndicator) {
-      this._lockStatusIndicator.dispose();
+    // Remove DOM elements
+    if (this._remoteCursorsContainer && this._remoteCursorsContainer.parentNode) {
+      this._remoteCursorsContainer.parentNode.removeChild(this._remoteCursorsContainer);
+      this._remoteCursorsContainer = null;
     }
-    if (this._remoteCursorsContainer) {
-      this._remoteCursorsContainer.dispose();
+
+    if (this._lockIndicator && this._lockIndicator.parentNode) {
+      this._lockIndicator.parentNode.removeChild(this._lockIndicator);
+      this._lockIndicator = null;
     }
 
     super.dispose();
   }
 
   /**
-   * Set the lock manager for this cell.
+   * Handle cell model changes
    */
-  setLockManager(lockManager: ILockManager): void {
-    this._lockManager = lockManager;
-  }
+  protected onModelChanged(oldValue: ICellModel, newValue: ICellModel): void {
+    super.onModelChanged(oldValue, newValue);
 
-  /**
-   * Set the awareness instance for this cell.
-   */
-  setAwareness(awareness: YjsAwareness): void {
-    // Clean up existing awareness if any
-    if (this._collaborativeState.awareness) {
-      this._collaborativeState.awareness.off('change', this._onAwarenessChange);
-    }
+    // Clean up old bindings
+    this._unbindEditor();
 
-    this._collaborativeState.awareness = awareness;
-    awareness.on('change', this._onAwarenessChange);
-    this.updateRemoteCursors();
-    this._collaborativeStateChanged.emit(void 0);
-  }
-
-  /**
-   * Initialize collaborative features for this cell.
-   */
-  private _initializeCollaboration(): void {
-    const model = this.model as ICollaborativeCellModel;
-    
-    // Connect to model's Yjs document changes
-    model.ydocChanged.connect(this._onYDocChanged, this);
-    
-    // Initialize with current Yjs document if available
-    if (model.ydoc) {
-      this._onYDocChanged();
+    // Set up new bindings if collaboration is active
+    if (this._ydoc && this._awareness && this._lockManager) {
+      this.setupCollaboration(this._ydoc, this._awareness, this._lockManager, this._cellIndex);
     }
   }
 
   /**
-   * Clean up collaborative resources.
+   * Handle editor focus events
    */
-  private _cleanupCollaboration(): void {
-    // Disconnect from Yjs document
-    if (this._collaborativeState.ytext) {
-      this._collaborativeState.ytext.unobserve(this._onYTextChange);
-    }
-
-    // Disconnect from awareness
-    if (this._collaborativeState.awareness) {
-      this._collaborativeState.awareness.off('change', this._onAwarenessChange);
-    }
-
-    // Release lock if held
-    if (this._collaborativeState.locked) {
-      this.releaseLock().catch(console.error);
-    }
-
-    // Clear collaborative state
-    this._collaborativeState.ydoc = null;
-    this._collaborativeState.ytext = null;
-    this._collaborativeState.awareness = null;
-  }
-
-  /**
-   * Handle changes to the Yjs document.
-   */
-  private _onYDocChanged(): void {
-    const model = this.model as ICollaborativeCellModel;
-    
-    // Clean up existing Yjs resources
-    if (this._collaborativeState.ytext) {
-      this._collaborativeState.ytext.unobserve(this._onYTextChange);
-    }
-
-    // Update collaborative state with new Yjs document
-    this._collaborativeState.ydoc = model.ydoc;
-    this._collaborativeState.ytext = model.ytext;
-
-    // Observe changes to the Yjs text
-    if (this._collaborativeState.ytext) {
-      this._collaborativeState.ytext.observe(this._onYTextChange);
-    }
-
-    this._collaborativeStateChanged.emit(void 0);
-  }
-
-  /**
-   * Handle changes to the Yjs text.
-   */
-  private _onYTextChange = (event: Y.YTextEvent, transaction: Y.Transaction): void => {
-    // Skip if the change originated from this client
-    if (transaction.local) {
+  private _onEditorFocus(): void {
+    if (!this._awareness) {
       return;
     }
 
-    // Update the editor content if needed
-    // This is handled by the editor binding in most cases
-  };
+    // Try to acquire a lock when the editor is focused
+    this.acquireLock().catch(error => {
+      console.error('Error acquiring lock on focus:', error);
+    });
+
+    // Update awareness state to show we're editing this cell
+    const cursorPos = this.editor.getCursorPosition();
+    const selection = this.editor.getSelection();
+
+    this._awareness.setLocalStateField('cursor', {
+      cellIndex: this._cellIndex,
+      offset: cursorPos.column,
+      active: true,
+      selection: selection ? {
+        start: selection.start.column,
+        end: selection.end.column
+      } : undefined
+    });
+  }
 
   /**
-   * Handle changes to the awareness state.
+   * Handle editor blur events
    */
-  private _onAwarenessChange = (): void => {
-    this.updateRemoteCursors();
-  };
+  private _onEditorBlur(): void {
+    if (!this._awareness) {
+      return;
+    }
 
-  /**
-   * Handle changes to the cell content.
-   */
-  private _onContentChanged(): void {
-    // Update cursor position in awareness if we have the lock
-    if (this._collaborativeState.awareness && this._collaborativeState.locked) {
-      const cursorPos = this._getCurrentCursorPosition();
-      if (cursorPos !== null) {
-        this._collaborativeState.awareness.setLocalStateField('cursor', {
-          cellId: this.model.id,
-          position: cursorPos,
-          selection: this._getCurrentSelection()
+    // Update awareness state to show we're no longer editing this cell
+    const cursorState = this._awareness.getLocalState()?.cursor;
+    if (cursorState && cursorState.cellIndex === this._cellIndex) {
+      this._awareness.setLocalStateField('cursor', {
+        ...cursorState,
+        active: false
+      });
+    }
+
+    // Release the lock after a short delay to allow for focus switching between cells
+    setTimeout(() => {
+      // Only release if we still don't have focus
+      if (!this.editor.hasFocus) {
+        this.releaseLock().catch(error => {
+          console.error('Error releasing lock on blur:', error);
         });
       }
-    }
+    }, 1000);
   }
 
   /**
-   * Render a remote cursor for a specific user.
+   * Bind the editor to the Yjs text
    */
-  private _renderRemoteCursor(clientId: number, state: any): void {
-    if (!state.user || !state.cursor) {
+  private _bindEditor(): void {
+    if (!this._ytext || !this.editor) {
       return;
     }
 
-    const cursorElement = document.createElement('div');
-    cursorElement.className = 'jp-CollaborativeCell-remoteCursor';
-    cursorElement.style.backgroundColor = state.user.color || '#000';
-    cursorElement.setAttribute('data-user-id', clientId.toString());
-    
-    const cursorLabel = document.createElement('div');
-    cursorLabel.className = 'jp-CollaborativeCell-remoteCursorLabel';
-    cursorLabel.textContent = state.user.name || `User ${clientId}`;
-    cursorLabel.style.backgroundColor = state.user.color || '#000';
-    
-    cursorElement.appendChild(cursorLabel);
-    
-    // Position the cursor based on state.cursor.position
-    const editor = this.editor;
-    if (editor && state.cursor.position !== undefined) {
-      try {
-        // Convert position index to editor coordinates
-        const position = this._positionToCoordinates(state.cursor.position);
-        if (position) {
-          cursorElement.style.left = `${position.left}px`;
-          cursorElement.style.top = `${position.top}px`;
-          cursorElement.style.height = `${position.height}px`;
-        }
-      } catch (error) {
-        console.error('Error positioning remote cursor:', error);
+    // This is a placeholder for the actual binding implementation
+    // In a real implementation, this would use a CodeMirror binding for Yjs
+    // such as y-codemirror or a custom implementation
+    console.log('Binding editor to Yjs text for cell', this.model.id);
+
+    // For now, we'll just set up change handlers to demonstrate the concept
+    this._editorChangeHandler = (sender: any, args: any) => {
+      // Only update the Yjs text if we have a lock
+      if (this._lockManager && this._lockManager.hasLock(this.model.id)) {
+        const text = this.editor.model.value.text;
+        // Apply the change to the Yjs text
+        this._ytext!.delete(0, this._ytext!.length);
+        this._ytext!.insert(0, text);
       }
-    }
-    
-    this._remoteCursorsContainer.node.appendChild(cursorElement);
-    
-    // If there's a selection, render it
-    if (state.cursor.selection) {
-      this._renderRemoteSelection(clientId, state);
-    }
-  }
-  
-  /**
-   * Convert a text position index to editor coordinates.
-   */
-  private _positionToCoordinates(position: number): { left: number; top: number; height: number } | null {
-    const editor = this.editor;
-    if (!editor) {
-      return null;
-    }
-    
-    try {
-      // For CodeMirror editor
-      if ((editor as any).getDoc) {
-        const doc = (editor as any).getDoc();
-        const pos = doc.posFromIndex(position);
-        const coords = (editor as any).charCoords(pos, 'local');
-        const lineHeight = (editor as any).defaultTextHeight();
-        
-        return {
-          left: coords.left,
-          top: coords.top,
-          height: lineHeight
-        };
+    };
+
+    this._ytextChangeHandler = (event: Y.YTextEvent) => {
+      // Only update the editor if we don't have a lock (i.e., it's a remote change)
+      if (!this._lockManager || !this._lockManager.hasLock(this.model.id)) {
+        const text = this._ytext!.toString();
+        // Apply the change to the editor
+        this.editor.model.value.text = text;
       }
-      
-      // For CodeEditor interface
-      if ((editor as CodeEditor.IEditor).getPositionAt) {
-        const pos = (editor as CodeEditor.IEditor).getPositionAt(position);
-        if (pos) {
-          const coords = (editor as CodeEditor.IEditor).getCoordinateForPosition(pos);
-          if (coords) {
-            return {
-              left: coords.left,
-              top: coords.top,
-              height: (editor as any).lineHeight || 20
-            };
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error converting position to coordinates:', error);
-    }
-    
-    return null;
+    };
+
+    // Connect the handlers
+    this.editor.model.value.changed.connect(this._editorChangeHandler);
+    this._ytext.observe(this._ytextChangeHandler);
   }
 
   /**
-   * Render a remote selection for a specific user.
+   * Unbind the editor from the Yjs text
    */
-  private _renderRemoteSelection(clientId: number, state: any): void {
-    if (!state.user || !state.cursor || !state.cursor.selection) {
+  private _unbindEditor(): void {
+    // Disconnect the editor change handler
+    if (this.editor && this._editorChangeHandler) {
+      this.editor.model.value.changed.disconnect(this._editorChangeHandler);
+      this._editorChangeHandler = null;
+    }
+
+    // Disconnect the Yjs text change handler
+    if (this._ytext && this._ytextChangeHandler) {
+      this._ytext.unobserve(this._ytextChangeHandler);
+      this._ytextChangeHandler = null;
+    }
+  }
+
+  /**
+   * Update the lock indicator
+   */
+  private _updateLockIndicator(): void {
+    if (!this._lockIndicator) {
       return;
     }
-    
-    const selection = state.cursor.selection;
-    const editor = this.editor;
-    
-    if (!editor || selection.start === selection.end) {
-      return; // No selection or no editor
-    }
-    
-    try {
-      // Create selection element with user-specific color
-      const selectionElement = document.createElement('div');
-      selectionElement.className = 'jp-CollaborativeCell-remoteSelection';
-      selectionElement.style.backgroundColor = this._getSelectionColor(state.user.color || '#000');
-      selectionElement.setAttribute('data-user-id', clientId.toString());
-      
-      // For multi-line selections, we need to create multiple elements
-      const startCoords = this._positionToCoordinates(selection.start);
-      const endCoords = this._positionToCoordinates(selection.end);
-      
-      if (startCoords && endCoords) {
-        // Simple case: single-line selection
-        if (startCoords.top === endCoords.top) {
-          selectionElement.style.left = `${startCoords.left}px`;
-          selectionElement.style.top = `${startCoords.top}px`;
-          selectionElement.style.width = `${endCoords.left - startCoords.left}px`;
-          selectionElement.style.height = `${startCoords.height}px`;
-          this._remoteCursorsContainer.node.appendChild(selectionElement);
-        } else {
-          // Complex case: multi-line selection
-          // This is a simplified implementation that would need to be extended
-          // for a complete multi-line selection rendering
-          
-          // First line (from start to end of line)
-          const firstLine = document.createElement('div');
-          firstLine.className = 'jp-CollaborativeCell-remoteSelection';
-          firstLine.style.backgroundColor = this._getSelectionColor(state.user.color || '#000');
-          firstLine.style.left = `${startCoords.left}px`;
-          firstLine.style.top = `${startCoords.top}px`;
-          firstLine.style.right = '0px'; // To end of line
-          firstLine.style.height = `${startCoords.height}px`;
-          
-          // Last line (from start of line to end)
-          const lastLine = document.createElement('div');
-          lastLine.className = 'jp-CollaborativeCell-remoteSelection';
-          lastLine.style.backgroundColor = this._getSelectionColor(state.user.color || '#000');
-          lastLine.style.left = '0px'; // From start of line
-          lastLine.style.top = `${endCoords.top}px`;
-          lastLine.style.width = `${endCoords.left}px`;
-          lastLine.style.height = `${endCoords.height}px`;
-          
-          // Middle area (if more than two lines)
-          if (endCoords.top - startCoords.top > startCoords.height) {
-            const middleArea = document.createElement('div');
-            middleArea.className = 'jp-CollaborativeCell-remoteSelection';
-            middleArea.style.backgroundColor = this._getSelectionColor(state.user.color || '#000');
-            middleArea.style.left = '0px';
-            middleArea.style.top = `${startCoords.top + startCoords.height}px`;
-            middleArea.style.right = '0px';
-            middleArea.style.height = `${endCoords.top - (startCoords.top + startCoords.height)}px`;
-            this._remoteCursorsContainer.node.appendChild(middleArea);
-          }
-          
-          this._remoteCursorsContainer.node.appendChild(firstLine);
-          this._remoteCursorsContainer.node.appendChild(lastLine);
-        }
+
+    const { isLocked, lockInfo } = this._collaborativeState;
+
+    if (isLocked && lockInfo) {
+      // Show the lock indicator
+      this._lockIndicator.style.display = 'block';
+
+      // Update the lock indicator content
+      const isOwnLock = this._lockManager && this._lockManager.hasLock(this.model.id);
+      if (isOwnLock) {
+        this._lockIndicator.textContent = 'Editing';
+        this._lockIndicator.className = 'jp-CollaborativeCell-lockIndicator jp-CollaborativeCell-ownLock';
+      } else {
+        this._lockIndicator.textContent = `Locked by ${lockInfo.userName}`;
+        this._lockIndicator.className = 'jp-CollaborativeCell-lockIndicator jp-CollaborativeCell-remoteLock';
       }
-    } catch (error) {
-      console.error('Error rendering remote selection:', error);
+    } else {
+      // Hide the lock indicator
+      this._lockIndicator.style.display = 'none';
     }
   }
 
   /**
-   * Get the current cursor position in the editor.
-   * This is editor-specific and would need to be implemented
-   * based on the specific editor being used.
+   * Update the remote cursors
    */
-  private _getCurrentCursorPosition(): number | null {
-    // For CodeMirror editor, we would get the cursor position from the editor instance
-    // This is a simplified implementation that would need to be extended based on the editor type
-    const editor = this.editor;
-    if (editor && (editor as any).getCursor) {
-      const cursor = (editor as any).getCursor();
-      const doc = (editor as any).getDoc();
-      return doc.indexFromPos(cursor);
+  private _updateRemoteCursors(): void {
+    if (!this._remoteCursorsContainer) {
+      return;
     }
-    return null;
+
+    // Clear existing cursors
+    this._remoteCursorsContainer.innerHTML = '';
+
+    // Add new cursors
+    const { remoteCursors } = this._collaborativeState;
+    remoteCursors.forEach((cursor, userId) => {
+      // Create cursor element
+      const cursorElement = document.createElement('div');
+      cursorElement.className = 'jp-CollaborativeCell-remoteCursor';
+      cursorElement.dataset.userId = userId;
+
+      // Position the cursor
+      // In a real implementation, this would convert the cursor position to pixel coordinates
+      // For now, we'll just use a placeholder position
+      cursorElement.style.left = `${cursor.offset * 8}px`; // Approximate character width
+
+      // Add user name tooltip
+      cursorElement.title = this._getUserNameFromId(userId);
+
+      // Add selection if present
+      if (cursor.selection && cursor.selection.start !== cursor.selection.end) {
+        const selectionElement = document.createElement('div');
+        selectionElement.className = 'jp-CollaborativeCell-remoteSelection';
+        selectionElement.dataset.userId = userId;
+
+        // Position the selection
+        // In a real implementation, this would convert the selection range to pixel coordinates
+        const start = Math.min(cursor.selection.start, cursor.selection.end);
+        const end = Math.max(cursor.selection.start, cursor.selection.end);
+        selectionElement.style.left = `${start * 8}px`; // Approximate character width
+        selectionElement.style.width = `${(end - start) * 8}px`; // Approximate character width
+
+        this._remoteCursorsContainer.appendChild(selectionElement);
+      }
+
+      this._remoteCursorsContainer.appendChild(cursorElement);
+    });
   }
 
   /**
-   * Get the current selection in the editor.
-   * This is editor-specific and would need to be implemented
-   * based on the specific editor being used.
+   * Update cell CSS classes based on collaborative state
    */
-  private _getCurrentSelection(): { start: number; end: number } | null {
-    // For CodeMirror editor, we would get the selection range from the editor instance
-    // This is a simplified implementation that would need to be extended based on the editor type
-    const editor = this.editor;
-    if (editor && (editor as any).getDoc) {
-      const doc = (editor as any).getDoc();
-      const selection = doc.getSelection();
-      if (selection) {
-        const range = doc.getSelection();
-        const from = doc.indexFromPos(range.from);
-        const to = doc.indexFromPos(range.to);
-        return { start: from, end: to };
+  private _updateCellClasses(): void {
+    const { isLocked, isRemotelyEdited } = this._collaborativeState;
+    const hasLock = this._lockManager && this._lockManager.hasLock(this.model.id);
+
+    // Update locked class
+    this.toggleClass('jp-CollaborativeCell-locked', isLocked);
+    this.toggleClass('jp-CollaborativeCell-ownLock', isLocked && hasLock);
+    this.toggleClass('jp-CollaborativeCell-remoteLock', isLocked && !hasLock);
+
+    // Update remote editing class
+    this.toggleClass('jp-CollaborativeCell-remotelyEdited', isRemotelyEdited);
+  }
+
+  /**
+   * Get a user's display name from their ID
+   * 
+   * @param userId - The user ID
+   * @returns The user's display name
+   */
+  private _getUserNameFromId(userId: string): string {
+    if (!this._awareness) {
+      return userId;
+    }
+
+    // Look up the user in the awareness states
+    const states = this._awareness.getStates();
+    for (const [clientId, state] of states.entries()) {
+      if (state.user && (state.user.id === userId || `user-${clientId}` === userId)) {
+        return state.user.name || `User ${clientId}`;
       }
     }
-    return null;
-  }
 
-  /**
-   * Get the current user ID.
-   */
-  private _getCurrentUserId(): string {
-    if (!this._collaborativeState.awareness) {
-      return 'local';
-    }
-    return this._collaborativeState.awareness.clientID.toString();
-  }
-
-  /**
-   * Get a semi-transparent color for selection highlighting.
-   */
-  private _getSelectionColor(color: string): string {
-    // Convert hex color to rgba with transparency
-    if (color.startsWith('#')) {
-      const hex = color.slice(1);
-      const r = parseInt(hex.slice(0, 2), 16);
-      const g = parseInt(hex.slice(2, 4), 16);
-      const b = parseInt(hex.slice(4, 6), 16);
-      return `rgba(${r}, ${g}, ${b}, 0.3)`;
-    }
-    return color;
-  }
-
-  /**
-   * Check if a model implements the ICollaborativeCellModel interface.
-   */
-  private _isCollaborativeModel(model: ICellModel): model is ICollaborativeCellModel {
-    return (
-      (model as any).ydoc !== undefined &&
-      (model as any).ytext !== undefined &&
-      (model as any).ydocChanged !== undefined
-    );
+    return userId;
   }
 
   private _collaborativeState: ICollaborativeCellState;
   private _collaborativeStateChanged = new Signal<ICollaborativeCell, void>(this);
+  private _ydoc: Y.Doc | null = null;
+  private _awareness: IYjsAwareness | null = null;
   private _lockManager: ILockManager | null = null;
-  private _lockStatusIndicator: Widget;
-  private _remoteCursorsContainer: Widget;
+  private _ytext: Y.Text | null = null;
+  private _cellIndex: number = -1;
+  private _remoteCursorsContainer: HTMLElement | null;
+  private _lockIndicator: HTMLElement | null;
+  private _awarenessChangeHandler: ((changes: any) => void) | null = null;
+  private _lockAcquiredHandler: ((info: ILockInfo) => void) | null = null;
+  private _lockReleasedHandler: ((info: ILockInfo) => void) | null = null;
+  private _editorChangeHandler: ((sender: any, args: any) => void) | null = null;
+  private _ytextChangeHandler: ((event: Y.YTextEvent) => void) | null = null;
 }
 
 /**
- * The default implementation of a cell with collaborative editing capabilities.
+ * Create a collaborative cell from a regular cell
+ * 
+ * @param cell - The cell to convert
+ * @returns A collaborative cell
  */
-export class DefaultCell extends CollaborativeCell {
-  /**
-   * Construct a new default cell.
-   */
-  constructor(options: Cell.IOptions) {
-    super(options);
-    this.addClass('jp-DefaultCell');
-    
-    // Set up editor event listeners for cursor/selection tracking
-    this._setupEditorListeners();
+export function createCollaborativeCell(cell: Cell): ICollaborativeCell {
+  // If the cell is already a collaborative cell, return it
+  if ((cell as any).collaborativeState) {
+    return cell as ICollaborativeCell;
   }
-  
+
+  // Create a new collaborative cell with the same options
+  const options = {
+    model: cell.model,
+    rendermime: (cell as any).rendermime,
+    contentFactory: (cell as any).contentFactory
+  };
+
+  const collaborativeCell = new CollaborativeCell(options);
+
+  // Copy any additional properties or state as needed
+  // ...
+
+  return collaborativeCell;
+}
+
+/**
+ * Default implementation of a cell factory that creates collaborative cells
+ */
+export namespace CollaborativeCellFactory {
   /**
-   * Set up listeners for editor events to track cursor and selection changes.
+   * Create a new collaborative cell
+   * 
+   * @param options - The cell creation options
+   * @returns A new collaborative cell
    */
-  private _setupEditorListeners(): void {
-    const editor = this.editor;
-    if (!editor) {
-      return;
-    }
-    
-    // For CodeMirror editor
-    if ((editor as any).on) {
-      (editor as any).on('cursorActivity', () => {
-        this._onEditorCursorActivity();
-      });
-    }
-    
-    // For CodeEditor interface
-    if ((editor as CodeEditor.IEditor).model) {
-      const model = (editor as CodeEditor.IEditor).model;
-      model.selections.changed.connect(() => {
-        this._onEditorCursorActivity();
-      });
-      model.value.changed.connect(() => {
-        this._onEditorCursorActivity();
-      });
-    }
+  export function createCell(options: Cell.IOptions): ICollaborativeCell {
+    return new CollaborativeCell(options);
   }
-  
+
   /**
-   * Handle cursor activity in the editor.
+   * Convert an existing cell to a collaborative cell
+   * 
+   * @param cell - The cell to convert
+   * @returns A collaborative cell
    */
-  private _onEditorCursorActivity(): void {
-    // Only update awareness if we have the lock and awareness is set up
-    if (this._collaborativeState.awareness && this._collaborativeState.locked) {
-      const cursorPos = this._getCurrentCursorPosition();
-      if (cursorPos !== null) {
-        this._collaborativeState.awareness.setLocalStateField('cursor', {
-          cellId: this.model.id,
-          position: cursorPos,
-          selection: this._getCurrentSelection()
-        });
-      }
-    }
+  export function convertCell(cell: Cell): ICollaborativeCell {
+    return createCollaborativeCell(cell);
   }
 }
