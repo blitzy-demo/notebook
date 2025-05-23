@@ -6,6 +6,7 @@
 import '@jupyterlab/application/style/index.js';
 import '@jupyterlab/mainmenu/style/index.js';
 import '@jupyterlab/ui-components/style/index.js';
+import '@jupyterlab/notebook-extension/style/collaboration/index.css';
 
 import './base.css';
 import './sidepanel.css';
