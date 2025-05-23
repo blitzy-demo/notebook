@@ -1,232 +1,367 @@
-// Copyright (c) Jupyter Development Team.
-// Distributed under the terms of the Modified BSD License.
+/**
+ * User presence and awareness UI component for real-time collaboration in Jupyter notebooks.
+ * This component displays avatars, cursor positions, and active cell indicators for all connected users.
+ * It subscribes to the Yjs awareness protocol events via the IAwarenessService to track user locations
+ * and status changes.
+ */
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { ReactWidget } from '@jupyterlab/apputils';
 import { ITranslator, nullTranslator } from '@jupyterlab/translation';
 import { Notebook, NotebookPanel } from '@jupyterlab/notebook';
-import { IAwarenessService } from '../../tokens';
+import { IAwarenessService } from '../../../notebook/src/collab/awareness';
+import { IAwarenessState, IUserMetadata, ICursorPosition } from '../../../notebook/src/collab/awareness';
 
 /**
- * Interface for user awareness state
- */
-interface IUserState {
-  id: number;
-  name: string;
-  color: string;
-  avatar?: string;
-  cursor?: {
-    cellId: string;
-    position: number;
-  };
-  selection?: {
-    cellId: string;
-    start: number;
-    end: number;
-  };
-  activeCell?: string;
-  status?: 'active' | 'idle' | 'away';
-  lastActive?: number;
-}
-
-/**
- * Props for the UserPresence component
+ * Properties for the UserPresenceComponent
  */
 interface IUserPresenceProps {
-  /**
-   * The notebook panel containing the notebook
-   */
-  notebookPanel: NotebookPanel;
-
   /**
    * The awareness service for tracking user presence
    */
   awarenessService: IAwarenessService;
 
   /**
+   * The notebook panel containing the notebook
+   */
+  notebookPanel: NotebookPanel;
+
+  /**
    * The translator for internationalization
    */
   translator?: ITranslator;
+
+  /**
+   * Maximum number of avatars to display before showing a +N indicator
+   */
+  maxVisibleAvatars?: number;
 }
 
 /**
- * A React component for displaying user presence in a collaborative notebook
+ * Generate a consistent color for a user based on their ID
+ * 
+ * @param userId - The user ID to generate a color for
+ * @returns A hex color string
  */
-const UserPresence = ({
-  notebookPanel,
-  awarenessService,
-  translator = nullTranslator
-}: IUserPresenceProps): JSX.Element => {
-  const trans = translator.load('notebook');
-  const [users, setUsers] = useState<IUserState[]>([]);
-  const [currentUserId, setCurrentUserId] = useState<number>(0);
+function generateUserColor(userId: string): string {
+  // Simple hash function to generate a number from a string
+  let hash = 0;
+  for (let i = 0; i < userId.length; i++) {
+    hash = ((hash << 5) - hash) + userId.charCodeAt(i);
+    hash |= 0; // Convert to 32bit integer
+  }
 
-  // Get the current user's ID from the awareness service
-  useEffect(() => {
-    if (awarenessService) {
-      setCurrentUserId(awarenessService.getLocalClientId());
-    }
+  // Use a predefined palette of colors that work well for user interfaces
+  const colors = [
+    '#4285F4', // Blue
+    '#EA4335', // Red
+    '#FBBC05', // Yellow
+    '#34A853', // Green
+    '#8E44AD', // Purple
+    '#F39C12', // Orange
+    '#16A085', // Teal
+    '#E74C3C', // Bright Red
+    '#3498DB', // Light Blue
+    '#1ABC9C', // Turquoise
+    '#2ECC71', // Emerald
+    '#E67E22', // Carrot
+    '#9B59B6'  // Amethyst
+  ];
+
+  // Use the hash to select a color from the palette
+  const index = Math.abs(hash) % colors.length;
+  return colors[index];
+}
+
+/**
+ * Get user initials from their name
+ * 
+ * @param name - The user's full name
+ * @returns The user's initials (up to 2 characters)
+ */
+function getUserInitials(name: string): string {
+  if (!name) return '?';
+  
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) {
+    return parts[0].substring(0, 2).toUpperCase();
+  }
+  
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+/**
+ * Format time elapsed since a timestamp
+ * 
+ * @param timestamp - The timestamp in milliseconds
+ * @returns A human-readable string representing the elapsed time
+ */
+function formatTimeElapsed(timestamp: number): string {
+  const now = Date.now();
+  const elapsed = now - timestamp;
+  
+  if (elapsed < 60000) { // Less than a minute
+    return 'just now';
+  } else if (elapsed < 3600000) { // Less than an hour
+    const minutes = Math.floor(elapsed / 60000);
+    return `${minutes} min ago`;
+  } else if (elapsed < 86400000) { // Less than a day
+    const hours = Math.floor(elapsed / 3600000);
+    return `${hours} hr ago`;
+  } else {
+    const days = Math.floor(elapsed / 86400000);
+    return `${days} day${days > 1 ? 's' : ''} ago`;
+  }
+}
+
+/**
+ * User avatar component that displays a user's avatar or initials
+ */
+const UserAvatar: React.FC<{
+  user: IUserMetadata;
+  isIdle: boolean;
+  onClick?: () => void;
+}> = ({ user, isIdle, onClick }) => {
+  const userColor = useMemo(() => generateUserColor(user.id), [user.id]);
+  const initials = useMemo(() => getUserInitials(user.name), [user.name]);
+  
+  return (
+    <div 
+      className={`jp-CollabAvatar ${isIdle ? 'jp-mod-idle' : ''}`}
+      style={{ borderColor: userColor, backgroundColor: userColor }}
+      onClick={onClick}
+      data-user-id={user.id}
+    >
+      {user.avatar ? (
+        <img src={user.avatar} alt={user.name} />
+      ) : (
+        <span>{initials}</span>
+      )}
+    </div>
+  );
+};
+
+/**
+ * Tooltip component that displays user information on hover
+ */
+const UserTooltip: React.FC<{
+  user: IUserMetadata;
+  activity?: { type: string; timestamp: number };
+}> = ({ user, activity }) => {
+  return (
+    <div className="jp-CollabTooltip">
+      <div className="jp-CollabTooltip-user">
+        <span className="jp-CollabTooltip-name">{user.name}</span>
+        {activity && (
+          <span className="jp-CollabTooltip-status">
+            {activity.type === 'editing' ? 'editing' : 
+             activity.type === 'viewing' ? 'viewing' : 
+             activity.type}
+          </span>
+        )}
+      </div>
+      {activity && (
+        <div className="jp-CollabTooltip-time">
+          {formatTimeElapsed(activity.timestamp)}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * Component that displays a group of user avatars
+ */
+const UserAvatarGroup: React.FC<{
+  users: Map<number, IAwarenessState>;
+  maxVisible: number;
+  onAvatarClick: (clientId: number) => void;
+}> = ({ users, maxVisible, onAvatarClick }) => {
+  // Convert users map to array and sort by activity timestamp (most recent first)
+  const sortedUsers = useMemo(() => {
+    return Array.from(users.entries())
+      .filter(([_, state]) => state.user) // Filter out users without user metadata
+      .sort(([_, stateA], [_, stateB]) => {
+        const timeA = stateA.activity?.timestamp || 0;
+        const timeB = stateB.activity?.timestamp || 0;
+        return timeB - timeA;
+      });
+  }, [users]);
+
+  // Determine which users to show and how many are hidden
+  const visibleUsers = sortedUsers.slice(0, maxVisible);
+  const hiddenCount = Math.max(0, sortedUsers.length - maxVisible);
+
+  return (
+    <div className="jp-CollabAvatarGroup">
+      {hiddenCount > 0 && (
+        <>
+          <div className="jp-CollabAvatarMore">
+            +{hiddenCount}
+          </div>
+          <UserTooltip 
+            user={{ name: `${hiddenCount} more user${hiddenCount > 1 ? 's' : ''}` } as IUserMetadata} 
+          />
+        </>
+      )}
+      
+      {visibleUsers.map(([clientId, state]) => {
+        const isIdle = state.activity?.type === 'idle' || 
+                      (Date.now() - (state.activity?.timestamp || 0) > 60000); // Idle after 1 minute
+        
+        return (
+          <React.Fragment key={clientId}>
+            <UserAvatar 
+              user={state.user} 
+              isIdle={isIdle}
+              onClick={() => onAvatarClick(clientId)} 
+            />
+            <UserTooltip user={state.user} activity={state.activity} />
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+};
+
+/**
+ * Main component for user presence in collaborative notebooks
+ */
+export const UserPresenceComponent: React.FC<IUserPresenceProps> = ({
+  awarenessService,
+  notebookPanel,
+  translator = nullTranslator,
+  maxVisibleAvatars = 3
+}) => {
+  const [users, setUsers] = useState<Map<number, IAwarenessState>>(new Map());
+  const trans = translator.load('notebook');
+  
+  // Handle awareness state changes
+  const handleAwarenessChange = useCallback((changes: { added: number[]; updated: number[]; removed: number[] }) => {
+    setUsers(new Map(awarenessService.getStates()));
   }, [awarenessService]);
 
-  // Update the users state when awareness changes
-  const handleAwarenessUpdate = useCallback(() => {
-    if (!awarenessService) {
+  // Focus on a user's cursor position
+  const focusOnUser = useCallback((clientId: number) => {
+    const state = users.get(clientId);
+    if (!state || !state.cursor || !notebookPanel.content) {
       return;
     }
 
-    const states = awarenessService.getStates();
-    const userStates: IUserState[] = [];
+    const { cellIndex } = state.cursor;
+    const cells = notebookPanel.content.widgets;
+    
+    if (cellIndex >= 0 && cellIndex < cells.length) {
+      // Activate the cell
+      notebookPanel.content.activeCellIndex = cellIndex;
+      
+      // Scroll to the cell
+      const cell = cells[cellIndex];
+      cell.node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [users, notebookPanel]);
 
-    // Convert the awareness states to our user state format
-    states.forEach((state, clientId) => {
-      if (state && state.user) {
-        userStates.push({
-          id: clientId,
-          name: state.user.name || trans.__('Anonymous'),
-          color: state.user.color || '#1976d2',
-          avatar: state.user.avatar,
-          cursor: state.cursor,
-          selection: state.selection,
-          activeCell: state.activeCell,
-          status: state.status || 'active',
-          lastActive: state.lastActive || Date.now()
-        });
+  // Set up event listeners when the component mounts
+  useEffect(() => {
+    // Subscribe to awareness changes
+    awarenessService.stateChanged.connect(handleAwarenessChange);
+    
+    // Initialize with current state
+    setUsers(new Map(awarenessService.getStates()));
+    
+    return () => {
+      // Clean up event listeners when the component unmounts
+      awarenessService.stateChanged.disconnect(handleAwarenessChange);
+    };
+  }, [awarenessService, handleAwarenessChange]);
+
+  // Render remote cursors and selections
+  useEffect(() => {
+    const notebook = notebookPanel.content;
+    if (!notebook) return;
+
+    // Clean up function to remove all cursor elements
+    const cleanup = () => {
+      document.querySelectorAll('.jp-CollabCursor, .jp-CollabSelection').forEach(el => el.remove());
+    };
+
+    // Create cursor and selection elements for each user
+    users.forEach((state, clientId) => {
+      // Skip if this is the local user or if there's no cursor information
+      if (clientId === awarenessService.clientID || !state.cursor) return;
+      
+      const { cellIndex, offset, selection } = state.cursor;
+      const cells = notebook.widgets;
+      
+      if (cellIndex >= 0 && cellIndex < cells.length) {
+        const cell = cells[cellIndex];
+        const editor = cell.editor;
+        
+        if (editor) {
+          const userColor = generateUserColor(state.user.id);
+          const initials = getUserInitials(state.user.name);
+          
+          // Create cursor element
+          if (offset !== undefined) {
+            const pos = editor.getPositionAt(offset);
+            if (pos) {
+              const coords = editor.getCoordinateForPosition(pos);
+              
+              // Create cursor element
+              const cursor = document.createElement('div');
+              cursor.className = 'jp-CollabCursor';
+              cursor.style.color = userColor;
+              cursor.style.left = `${coords.left}px`;
+              cursor.style.top = `${coords.top}px`;
+              cursor.setAttribute('data-user-initials', initials);
+              cursor.setAttribute('data-user-id', state.user.id);
+              
+              cell.node.appendChild(cursor);
+            }
+          }
+          
+          // Create selection element if there's a selection
+          if (selection && selection.start !== selection.end) {
+            const startPos = editor.getPositionAt(selection.start);
+            const endPos = editor.getPositionAt(selection.end);
+            
+            if (startPos && endPos) {
+              // Get all the line segments that need to be highlighted
+              const ranges = editor.getLineSegmentsForRange({
+                start: startPos,
+                end: endPos
+              });
+              
+              // Create selection elements for each range
+              ranges.forEach(range => {
+                const selElement = document.createElement('div');
+                selElement.className = 'jp-CollabSelection';
+                selElement.style.color = userColor;
+                selElement.style.left = `${range.left}px`;
+                selElement.style.top = `${range.top}px`;
+                selElement.style.width = `${range.width}px`;
+                selElement.style.height = `${range.height}px`;
+                selElement.setAttribute('data-user-id', state.user.id);
+                
+                cell.node.appendChild(selElement);
+              });
+            }
+          }
+        }
       }
     });
 
-    setUsers(userStates);
-  }, [awarenessService, trans]);
-
-  // Subscribe to awareness updates
-  useEffect(() => {
-    if (!awarenessService) {
-      return;
-    }
-
-    // Initial update
-    handleAwarenessUpdate();
-
-    // Subscribe to awareness changes
-    awarenessService.on('change', handleAwarenessUpdate);
-
-    return () => {
-      awarenessService.off('change', handleAwarenessUpdate);
-    };
-  }, [awarenessService, handleAwarenessUpdate]);
-
-  // Filter out the current user from the displayed list
-  const otherUsers = useMemo(() => {
-    return users.filter(user => user.id !== currentUserId);
-  }, [users, currentUserId]);
-
-  // Handle clicking on a user avatar to focus on their position
-  const handleUserClick = useCallback(
-    (user: IUserState) => {
-      if (!notebookPanel || !user.activeCell) {
-        return;
-      }
-
-      // Find the cell by ID and scroll to it
-      const notebook = notebookPanel.content;
-      const cells = notebook.widgets;
-      for (let i = 0; i < cells.length; i++) {
-        const cell = cells[i];
-        if (cell.model.id === user.activeCell) {
-          notebook.activeCellIndex = i;
-          notebook.scrollToCell(cell);
-          break;
-        }
-      }
-    },
-    [notebookPanel]
-  );
-
-  // Generate initials for avatar fallback
-  const getInitials = (name: string): string => {
-    return name
-      .split(' ')
-      .map(part => part.charAt(0))
-      .join('')
-      .toUpperCase()
-      .substring(0, 2);
-  };
-
-  // Format the time since last activity
-  const formatTimeSince = (timestamp: number): string => {
-    const seconds = Math.floor((Date.now() - timestamp) / 1000);
-    if (seconds < 60) {
-      return trans.__('just now');
-    } else if (seconds < 3600) {
-      const minutes = Math.floor(seconds / 60);
-      return trans.__('%1 minutes ago', minutes);
-    } else if (seconds < 86400) {
-      const hours = Math.floor(seconds / 3600);
-      return trans.__('%1 hours ago', hours);
-    } else {
-      const days = Math.floor(seconds / 86400);
-      return trans.__('%1 days ago', days);
-    }
-  };
-
-  // Render the status text based on user status
-  const getStatusText = (user: IUserState): string => {
-    switch (user.status) {
-      case 'active':
-        return user.cursor
-          ? trans.__('typing')
-          : trans.__('viewing');
-      case 'idle':
-        return trans.__('idle');
-      case 'away':
-        return trans.__('away');
-      default:
-        return trans.__('online');
-    }
-  };
+    // Clean up cursors and selections when component updates
+    return cleanup;
+  }, [users, notebookPanel, awarenessService.clientID]);
 
   return (
-    <div className="jp-UserPresence">
-      {otherUsers.length > 0 ? (
-        <div className="jp-UserPresence-container">
-          {otherUsers.map(user => (
-            <div
-              key={user.id}
-              className={`jp-UserPresence-user jp-UserPresence-status-${user.status}`}
-              onClick={() => handleUserClick(user)}
-              style={{ borderColor: user.color }}
-              title={trans.__('%1 (%2) - %3', user.name, getStatusText(user), formatTimeSince(user.lastActive || Date.now()))}
-            >
-              {user.avatar ? (
-                <img
-                  src={user.avatar}
-                  alt={user.name}
-                  className="jp-UserPresence-avatar"
-                />
-              ) : (
-                <div
-                  className="jp-UserPresence-initials"
-                  style={{ backgroundColor: user.color }}
-                >
-                  {getInitials(user.name)}
-                </div>
-              )}
-              <div className="jp-UserPresence-tooltip">
-                <div className="jp-UserPresence-tooltipName">{user.name}</div>
-                <div className="jp-UserPresence-tooltipStatus">
-                  {getStatusText(user)}
-                </div>
-                <div className="jp-UserPresence-tooltipTime">
-                  {formatTimeSince(user.lastActive || Date.now())}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="jp-UserPresence-empty">
-          {trans.__('No other users currently online')}
-        </div>
-      )}
+    <div className="jp-CollabPresence">
+      <UserAvatarGroup 
+        users={users} 
+        maxVisible={maxVisibleAvatars} 
+        onAvatarClick={focusOnUser} 
+      />
     </div>
   );
 };
@@ -236,162 +371,24 @@ const UserPresence = ({
  */
 export namespace UserPresenceComponent {
   /**
-   * Create a new UserPresenceComponent.
+   * Create a new UserPresenceComponent widget
    *
-   * @param notebookPanel - The notebook panel
-   * @param awarenessService - The awareness service
-   * @param translator - The translator
+   * @param options - The options for creating the component
+   * @returns A new UserPresenceComponent widget
    */
-  export const create = ({
-    notebookPanel,
-    awarenessService,
-    translator
-  }: {
-    notebookPanel: NotebookPanel;
+  export function createWidget(options: {
     awarenessService: IAwarenessService;
+    notebookPanel: NotebookPanel;
     translator?: ITranslator;
-  }): ReactWidget => {
+  }): ReactWidget {
+    const { awarenessService, notebookPanel, translator } = options;
+    
     return ReactWidget.create(
-      <UserPresence
-        notebookPanel={notebookPanel}
+      <UserPresenceComponent
         awarenessService={awarenessService}
+        notebookPanel={notebookPanel}
         translator={translator}
       />
     );
-  };
-}
-
-/**
- * A class for rendering user cursor positions in the notebook.
- */
-export class UserCursorManager {
-  /**
-   * Create a new UserCursorManager.
-   *
-   * @param notebook - The notebook
-   * @param awarenessService - The awareness service
-   */
-  constructor(
-    private notebook: Notebook,
-    private awarenessService: IAwarenessService
-  ) {
-    this._initialize();
-  }
-
-  /**
-   * Initialize the cursor manager.
-   */
-  private _initialize(): void {
-    // Subscribe to awareness changes
-    this.awarenessService.on('change', this._handleAwarenessUpdate);
-
-    // Clean up when the notebook is disposed
-    this.notebook.disposed.connect(this.dispose);
-  }
-
-  /**
-   * Handle awareness updates.
-   */
-  private _handleAwarenessUpdate = (): void => {
-    // Clear existing cursor elements
-    this._clearCursors();
-
-    // Get the current user's ID
-    const currentUserId = this.awarenessService.getLocalClientId();
-
-    // Get all user states
-    const states = this.awarenessService.getStates();
-
-    // Render cursors for each user (except the current user)
-    states.forEach((state, clientId) => {
-      if (clientId !== currentUserId && state && state.cursor) {
-        this._renderCursor(clientId, state);
-      }
-    });
-  };
-
-  /**
-   * Render a cursor for a user.
-   *
-   * @param clientId - The client ID
-   * @param state - The user's state
-   */
-  private _renderCursor(clientId: number, state: any): void {
-    if (!state.cursor || !state.cursor.cellId) {
-      return;
-    }
-
-    // Find the cell by ID
-    const cells = this.notebook.widgets;
-    for (let i = 0; i < cells.length; i++) {
-      const cell = cells[i];
-      if (cell.model.id === state.cursor.cellId) {
-        // Create cursor element
-        const cursorElement = document.createElement('div');
-        cursorElement.className = 'jp-UserCursor';
-        cursorElement.dataset.clientId = String(clientId);
-        cursorElement.style.backgroundColor = state.user?.color || '#1976d2';
-
-        // Add user name tooltip
-        const tooltip = document.createElement('div');
-        tooltip.className = 'jp-UserCursor-tooltip';
-        tooltip.textContent = state.user?.name || 'Anonymous';
-        tooltip.style.backgroundColor = state.user?.color || '#1976d2';
-        cursorElement.appendChild(tooltip);
-
-        // Position the cursor in the cell
-        // This is a simplified approach - actual implementation would need to
-        // work with the specific editor used in the cell
-        const editor = cell.editor;
-        if (editor) {
-          // Add the cursor to the editor's node
-          editor.node.appendChild(cursorElement);
-
-          // Position would need to be calculated based on the editor's layout
-          // This is a placeholder for the actual positioning logic
-          cursorElement.style.left = '0px';
-          cursorElement.style.top = '0px';
-        }
-
-        // If there's a selection, render it
-        if (state.selection && state.selection.cellId === state.cursor.cellId) {
-          this._renderSelection(cell, state.selection, state.user?.color || '#1976d2');
-        }
-
-        break;
-      }
-    }
-  }
-
-  /**
-   * Render a selection for a user.
-   *
-   * @param cell - The cell
-   * @param selection - The selection
-   * @param color - The user's color
-   */
-  private _renderSelection(cell: any, selection: any, color: string): void {
-    // This is a placeholder for the actual selection rendering logic
-    // Actual implementation would need to work with the specific editor used in the cell
-    // and create appropriate DOM elements to highlight the selection
-  }
-
-  /**
-   * Clear all cursor elements.
-   */
-  private _clearCursors(): void {
-    // Remove all cursor elements
-    document.querySelectorAll('.jp-UserCursor').forEach(el => el.remove());
-
-    // Remove all selection highlights
-    document.querySelectorAll('.jp-UserSelection').forEach(el => el.remove());
-  }
-
-  /**
-   * Dispose of the cursor manager.
-   */
-  dispose(): void {
-    this.awarenessService.off('change', this._handleAwarenessUpdate);
-    this._clearCursors();
   }
 }
