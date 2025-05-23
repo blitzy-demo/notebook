@@ -1,568 +1,1017 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { IHistoryManager, HistoryManager, IDocumentSnapshot, IDocumentDiff, IHistoryStorageProvider } from '../../src/collab/history';
+import {
+  HistoryManager,
+  IHistoryManager,
+  IHistorySnapshot,
+  INotebookDiff,
+  IRestoreResult,
+  HistoryManagerStatus,
+  IHistoryFilter
+} from '../../src/collab/history';
+
+import { INotebookModel } from '../../src/model';
 import * as Y from 'yjs';
 
 /**
- * Mock implementation of IHistoryStorageProvider for testing
+ * Mock notebook model for testing
  */
-class MockHistoryStorageProvider implements IHistoryStorageProvider {
-  private snapshots: Map<string, IDocumentSnapshot> = new Map();
-
-  async storeSnapshot(snapshot: IDocumentSnapshot): Promise<void> {
-    this.snapshots.set(snapshot.id, { ...snapshot });
+class MockNotebookModel implements Partial<INotebookModel> {
+  constructor() {
+    this._cells = [];
+    this._metadata = {};
   }
 
-  async getSnapshot(id: string): Promise<IDocumentSnapshot | null> {
-    return this.snapshots.get(id) || null;
+  /**
+   * Convert the model to a JSON representation.
+   */
+  toJSON(): any {
+    return {
+      cells: this._cells,
+      metadata: this._metadata,
+      nbformat: 4,
+      nbformat_minor: 5
+    };
   }
 
-  async getSnapshots(options: any = {}): Promise<IDocumentSnapshot[]> {
-    let snapshots = Array.from(this.snapshots.values());
-    
-    // Apply filters
-    if (options.authorId) {
-      snapshots = snapshots.filter(s => s.author.id === options.authorId);
-    }
-    
-    if (options.tags && options.tags.length > 0) {
-      snapshots = snapshots.filter(s => 
-        s.tags && options.tags.some((tag: string) => s.tags!.includes(tag))
-      );
-    }
-    
-    if (options.majorVersionsOnly) {
-      snapshots = snapshots.filter(s => s.isMajorVersion);
-    }
-    
-    if (options.startTime) {
-      snapshots = snapshots.filter(s => s.timestamp >= options.startTime);
-    }
-    
-    if (options.endTime) {
-      snapshots = snapshots.filter(s => s.timestamp <= options.endTime);
-    }
-    
-    // Sort by timestamp (newest first)
-    snapshots.sort((a, b) => b.timestamp - a.timestamp);
-    
-    // Apply pagination
-    if (options.skip) {
-      snapshots = snapshots.slice(options.skip);
-    }
-    
-    if (options.limit) {
-      snapshots = snapshots.slice(0, options.limit);
-    }
-    
-    return snapshots;
+  /**
+   * Deserialize the model from JSON.
+   *
+   * @param data - The JSON data to deserialize.
+   */
+  fromJSON(data: any): void {
+    this._cells = data.cells || [];
+    this._metadata = data.metadata || {};
   }
 
-  async deleteSnapshot(id: string): Promise<void> {
-    this.snapshots.delete(id);
+  /**
+   * Add a cell to the model for testing
+   */
+  addCell(cell: any): void {
+    this._cells.push(cell);
   }
 
-  async pruneSnapshots(options: { maxAge?: number; maxCount?: number; exceptIds?: string[] }): Promise<number> {
-    const now = Date.now();
-    const snapshotsToDelete: string[] = [];
-    const snapshots = Array.from(this.snapshots.values()).sort((a, b) => a.timestamp - b.timestamp);
-    
-    // Mark old snapshots for deletion
-    if (options.maxAge) {
-      for (const snapshot of snapshots) {
-        if (now - snapshot.timestamp > options.maxAge && 
-            (!options.exceptIds || !options.exceptIds.includes(snapshot.id))) {
-          snapshotsToDelete.push(snapshot.id);
-        }
-      }
+  /**
+   * Update a cell in the model for testing
+   */
+  updateCell(id: string, content: string): void {
+    const index = this._cells.findIndex(cell => cell.id === id);
+    if (index !== -1) {
+      this._cells[index].source = content;
     }
-    
-    // If we have more snapshots than the maximum, mark the oldest for deletion
-    if (options.maxCount && snapshots.length - snapshotsToDelete.length > options.maxCount) {
-      const excessCount = snapshots.length - snapshotsToDelete.length - options.maxCount;
-      let deleted = 0;
-      
-      for (const snapshot of snapshots) {
-        if (deleted >= excessCount) break;
-        
-        if (!snapshotsToDelete.includes(snapshot.id) && 
-            (!options.exceptIds || !options.exceptIds.includes(snapshot.id))) {
-          snapshotsToDelete.push(snapshot.id);
-          deleted++;
-        }
-      }
-    }
-    
-    // Delete the marked snapshots
-    for (const id of snapshotsToDelete) {
-      this.snapshots.delete(id);
-    }
-    
-    return snapshotsToDelete.length;
   }
 
-  // Helper method for tests to clear all snapshots
-  clear(): void {
-    this.snapshots.clear();
+  /**
+   * Remove a cell from the model for testing
+   */
+  removeCell(id: string): void {
+    const index = this._cells.findIndex(cell => cell.id === id);
+    if (index !== -1) {
+      this._cells.splice(index, 1);
+    }
   }
 
-  // Helper method for tests to get snapshot count
-  get size(): number {
-    return this.snapshots.size;
+  /**
+   * Set metadata for testing
+   */
+  setMetadata(key: string, value: any): void {
+    this._metadata[key] = value;
   }
+
+  private _cells: any[];
+  private _metadata: any;
 }
 
 /**
- * Helper function to create a test Yjs document with notebook structure
+ * Helper function to create a mock cell for testing
  */
-function createTestNotebookDoc(): Y.Doc {
-  const doc = new Y.Doc();
-  
-  // Create cells array
-  const cells = doc.getArray('cells');
-  
-  // Add some test cells
-  const cell1 = new Y.Map();
-  cell1.set('id', 'cell1');
-  cell1.set('cell_type', 'code');
-  cell1.set('source', 'print("Hello World")');
-  cell1.set('metadata', new Y.Map());
-  
-  const cell2 = new Y.Map();
-  cell2.set('id', 'cell2');
-  cell2.set('cell_type', 'markdown');
-  cell2.set('source', '# Heading\nSome markdown content');
-  cell2.set('metadata', new Y.Map());
-  
-  cells.push([cell1, cell2]);
-  
-  // Create notebook metadata
-  const metadata = doc.getMap('metadata');
-  metadata.set('kernelspec', { name: 'python3', display_name: 'Python 3' });
-  
-  return doc;
+function createMockCell(id: string, content: string, cellType: string = 'code'): any {
+  return {
+    id,
+    cell_type: cellType,
+    source: content,
+    metadata: {},
+    execution_count: null,
+    outputs: []
+  };
 }
 
 /**
- * Helper function to modify a test document to create a new version
+ * Helper function to create a history manager for testing
  */
-function modifyTestNotebookDoc(doc: Y.Doc): void {
-  // Modify a cell
-  const cells = doc.getArray('cells');
-  const cell1 = cells.get(0);
-  cell1.set('source', 'print("Hello Modified World")');
+function createHistoryManager(): { 
+  ydoc: Y.Doc; 
+  notebookModel: MockNotebookModel; 
+  historyManager: IHistoryManager 
+} {
+  const ydoc = new Y.Doc();
+  const notebookModel = new MockNotebookModel();
   
-  // Add a new cell
-  const cell3 = new Y.Map();
-  cell3.set('id', 'cell3');
-  cell3.set('cell_type', 'code');
-  cell3.set('source', 'print("New cell")');
-  cell3.set('metadata', new Y.Map());
+  // Add some initial cells
+  notebookModel.addCell(createMockCell('cell1', 'print("Hello World")', 'code'));
+  notebookModel.addCell(createMockCell('cell2', '# Markdown cell', 'markdown'));
   
-  cells.push([cell3]);
+  const historyManager = new HistoryManager({
+    notebookModel: notebookModel as INotebookModel,
+    ydoc,
+    userId: 'user1',
+    userName: 'Test User',
+    userAvatarUrl: 'https://example.com/avatar.png',
+    createInitialSnapshot: false, // Disable automatic initial snapshot for testing
+    enableAutoSnapshots: false // Disable auto snapshots for testing
+  });
   
-  // Modify metadata
-  const metadata = doc.getMap('metadata');
-  metadata.set('title', 'Modified Notebook');
+  return { ydoc, notebookModel, historyManager };
+}
+
+/**
+ * Helper function to connect two Yjs documents
+ */
+function connectYjsDocs(doc1: Y.Doc, doc2: Y.Doc): void {
+  // Create update handlers to sync the documents
+  const doc1UpdateHandler = (update: Uint8Array) => {
+    Y.applyUpdate(doc2, update);
+  };
+  
+  const doc2UpdateHandler = (update: Uint8Array) => {
+    Y.applyUpdate(doc1, update);
+  };
+  
+  // Set up event listeners
+  doc1.on('update', doc1UpdateHandler);
+  doc2.on('update', doc2UpdateHandler);
+  
+  // Sync the initial state
+  doc1UpdateHandler(Y.encodeStateAsUpdate(doc1));
 }
 
 describe('HistoryManager', () => {
-  let doc: Y.Doc;
-  let historyManager: IHistoryManager;
-  let storageProvider: MockHistoryStorageProvider;
-  
-  beforeEach(() => {
-    // Create a fresh document and history manager for each test
-    doc = createTestNotebookDoc();
-    storageProvider = new MockHistoryStorageProvider();
-    historyManager = new HistoryManager(doc, {
-      maxSnapshots: 10,
-      autoSnapshotInterval: 0, // Disable auto snapshots for testing
-      snapshotOnLoad: false, // Disable initial snapshot for testing
-      storageProvider
+  describe('constructor', () => {
+    it('should create a history manager with the correct initial state', () => {
+      const { historyManager } = createHistoryManager();
+      
+      expect(historyManager.status).toBe(HistoryManagerStatus.Ready);
+      expect(historyManager.getSnapshots()).resolves.toHaveLength(0);
+    });
+    
+    it('should create an initial snapshot when configured', async () => {
+      const { ydoc, notebookModel } = createHistoryManager();
+      
+      // Create a history manager with initial snapshot enabled
+      const historyManager = new HistoryManager({
+        notebookModel: notebookModel as INotebookModel,
+        ydoc,
+        userId: 'user1',
+        userName: 'Test User',
+        createInitialSnapshot: true,
+        enableAutoSnapshots: false
+      });
+      
+      // Verify an initial snapshot was created
+      const snapshots = await historyManager.getSnapshots();
+      expect(snapshots).toHaveLength(1);
+      expect(snapshots[0].automatic).toBe(true);
+      expect(snapshots[0].label).toBe('Initial snapshot');
     });
   });
   
-  afterEach(() => {
-    // Clean up
-    historyManager.dispose();
-    doc.destroy();
-  });
-
-  describe('Snapshot creation and retrieval', () => {
-    it('should create a snapshot with the current document state', async () => {
+  describe('snapshot management', () => {
+    it('should create a snapshot', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Create a snapshot
       const snapshot = await historyManager.createSnapshot({
-        description: 'Test snapshot',
-        author: { id: 'user1', name: 'Test User' },
-        isMajorVersion: true
+        label: 'Test Snapshot',
+        description: 'A test snapshot',
+        tags: ['test']
       });
       
+      // Verify the snapshot was created with the correct properties
       expect(snapshot).toBeDefined();
       expect(snapshot.id).toBeDefined();
-      expect(snapshot.timestamp).toBeGreaterThan(0);
-      expect(snapshot.description).toBe('Test snapshot');
-      expect(snapshot.author).toEqual({ id: 'user1', name: 'Test User' });
-      expect(snapshot.isMajorVersion).toBe(true);
-      expect(snapshot.state).toBeInstanceOf(Uint8Array);
-      expect(snapshot.stateVector).toBeInstanceOf(Uint8Array);
+      expect(snapshot.timestamp).toBeDefined();
+      expect(snapshot.author.id).toBe('user1');
+      expect(snapshot.author.name).toBe('Test User');
+      expect(snapshot.label).toBe('Test Snapshot');
+      expect(snapshot.description).toBe('A test snapshot');
+      expect(snapshot.automatic).toBe(false);
+      expect(snapshot.tags).toEqual(['test']);
+      
+      // Verify the snapshot is in the history manager
+      const snapshots = await historyManager.getSnapshots();
+      expect(snapshots).toHaveLength(1);
+      expect(snapshots[0].id).toBe(snapshot.id);
     });
-
-    it('should retrieve a snapshot by ID', async () => {
-      const createdSnapshot = await historyManager.createSnapshot({
-        description: 'Test snapshot'
+    
+    it('should get a snapshot by ID', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Create a snapshot
+      const snapshot = await historyManager.createSnapshot({
+        label: 'Test Snapshot'
       });
       
-      const retrievedSnapshot = await historyManager.getSnapshot(createdSnapshot.id);
+      // Get the snapshot by ID
+      const retrievedSnapshot = await historyManager.getSnapshot(snapshot.id);
       
-      expect(retrievedSnapshot).not.toBeNull();
-      expect(retrievedSnapshot!.id).toBe(createdSnapshot.id);
-      expect(retrievedSnapshot!.description).toBe('Test snapshot');
+      // Verify the snapshot was retrieved correctly
+      expect(retrievedSnapshot).toBeDefined();
+      expect(retrievedSnapshot?.id).toBe(snapshot.id);
+      expect(retrievedSnapshot?.label).toBe('Test Snapshot');
     });
-
-    it('should return null when retrieving a non-existent snapshot', async () => {
+    
+    it('should return undefined for non-existent snapshot ID', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Try to get a non-existent snapshot
       const snapshot = await historyManager.getSnapshot('non-existent-id');
-      expect(snapshot).toBeNull();
+      
+      // Verify the result is undefined
+      expect(snapshot).toBeUndefined();
     });
-
-    it('should retrieve history with filtering options', async () => {
-      // Create snapshots with different authors and tags
-      await historyManager.createSnapshot({
-        description: 'Snapshot 1',
-        author: { id: 'user1', name: 'User 1' },
-        tags: ['test', 'important'],
-        isMajorVersion: true
+    
+    it('should update a snapshot', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Create a snapshot
+      const snapshot = await historyManager.createSnapshot({
+        label: 'Original Label',
+        description: 'Original description',
+        tags: ['original']
       });
       
-      await historyManager.createSnapshot({
-        description: 'Snapshot 2',
-        author: { id: 'user2', name: 'User 2' },
-        tags: ['test'],
-        isMajorVersion: false
+      // Update the snapshot
+      const updatedSnapshot = await historyManager.updateSnapshot(snapshot.id, {
+        label: 'Updated Label',
+        description: 'Updated description',
+        tags: ['updated']
       });
       
-      await historyManager.createSnapshot({
-        description: 'Snapshot 3',
-        author: { id: 'user1', name: 'User 1' },
-        tags: ['draft'],
-        isMajorVersion: false
-      });
+      // Verify the snapshot was updated
+      expect(updatedSnapshot).toBeDefined();
+      expect(updatedSnapshot?.label).toBe('Updated Label');
+      expect(updatedSnapshot?.description).toBe('Updated description');
+      expect(updatedSnapshot?.tags).toEqual(['updated']);
       
-      // Test filtering by author
-      let history = await historyManager.getHistory({ authorId: 'user1' });
-      expect(history.length).toBe(2);
-      expect(history[0].description).toBe('Snapshot 3');
-      expect(history[1].description).toBe('Snapshot 1');
+      // Verify the update is persistent
+      const retrievedSnapshot = await historyManager.getSnapshot(snapshot.id);
+      expect(retrievedSnapshot?.label).toBe('Updated Label');
+    });
+    
+    it('should delete a snapshot', async () => {
+      const { historyManager } = createHistoryManager();
       
-      // Test filtering by tags
-      history = await historyManager.getHistory({ tags: ['test'] });
-      expect(history.length).toBe(2);
-      expect(history[0].description).toBe('Snapshot 2');
-      expect(history[1].description).toBe('Snapshot 1');
+      // Create a snapshot
+      const snapshot = await historyManager.createSnapshot();
       
-      // Test filtering by major versions
-      history = await historyManager.getHistory({ majorVersionsOnly: true });
-      expect(history.length).toBe(1);
-      expect(history[0].description).toBe('Snapshot 1');
+      // Verify the snapshot exists
+      expect(await historyManager.getSnapshots()).toHaveLength(1);
       
-      // Test pagination
-      history = await historyManager.getHistory({ limit: 1 });
-      expect(history.length).toBe(1);
-      expect(history[0].description).toBe('Snapshot 3');
+      // Delete the snapshot
+      const result = await historyManager.deleteSnapshot(snapshot.id);
       
-      history = await historyManager.getHistory({ skip: 1, limit: 1 });
-      expect(history.length).toBe(1);
-      expect(history[0].description).toBe('Snapshot 2');
+      // Verify the deletion was successful
+      expect(result).toBe(true);
+      expect(await historyManager.getSnapshots()).toHaveLength(0);
+      expect(await historyManager.getSnapshot(snapshot.id)).toBeUndefined();
+    });
+    
+    it('should return false when deleting a non-existent snapshot', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Try to delete a non-existent snapshot
+      const result = await historyManager.deleteSnapshot('non-existent-id');
+      
+      // Verify the result is false
+      expect(result).toBe(false);
     });
   });
-
-  describe('Diff generation', () => {
-    let snapshot1Id: string;
-    let snapshot2Id: string;
-    
-    beforeEach(async () => {
-      // Create initial snapshot
-      const snapshot1 = await historyManager.createSnapshot({
-        description: 'Initial state',
-        author: { id: 'user1', name: 'User 1' }
-      });
-      snapshot1Id = snapshot1.id;
+  
+  describe('snapshot filtering', () => {
+    it('should filter snapshots by author ID', async () => {
+      const { historyManager } = createHistoryManager();
       
-      // Modify the document
-      modifyTestNotebookDoc(doc);
+      // Create snapshots
+      await historyManager.createSnapshot();
       
-      // Create second snapshot
-      const snapshot2 = await historyManager.createSnapshot({
-        description: 'Modified state',
-        author: { id: 'user2', name: 'User 2' }
-      });
-      snapshot2Id = snapshot2.id;
+      // Filter by author ID
+      const snapshots = await historyManager.getSnapshots({ authorId: 'user1' });
+      expect(snapshots).toHaveLength(1);
+      
+      // Filter by non-existent author ID
+      const noSnapshots = await historyManager.getSnapshots({ authorId: 'non-existent-user' });
+      expect(noSnapshots).toHaveLength(0);
     });
-
-    it('should generate a diff between two snapshots', async () => {
-      const diff = await historyManager.getDiff(snapshot1Id, snapshot2Id);
+    
+    it('should filter snapshots by tag', async () => {
+      const { historyManager } = createHistoryManager();
       
-      expect(diff).toBeDefined();
-      expect(diff.fromId).toBe(snapshot1Id);
-      expect(diff.toId).toBe(snapshot2Id);
+      // Create snapshots with different tags
+      await historyManager.createSnapshot({ tags: ['tag1'] });
+      await historyManager.createSnapshot({ tags: ['tag2'] });
+      await historyManager.createSnapshot({ tags: ['tag1', 'tag3'] });
       
-      // Check summary
-      expect(diff.summary.cellsAdded).toBe(1);
-      expect(diff.summary.cellsModified).toBe(1);
+      // Filter by tag1
+      const tag1Snapshots = await historyManager.getSnapshots({ tag: 'tag1' });
+      expect(tag1Snapshots).toHaveLength(2);
+      
+      // Filter by tag2
+      const tag2Snapshots = await historyManager.getSnapshots({ tag: 'tag2' });
+      expect(tag2Snapshots).toHaveLength(1);
+      
+      // Filter by non-existent tag
+      const noSnapshots = await historyManager.getSnapshots({ tag: 'non-existent-tag' });
+      expect(noSnapshots).toHaveLength(0);
+    });
+    
+    it('should filter snapshots by time range', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Create snapshots at different times
+      const snapshot1 = await historyManager.createSnapshot();
+      
+      // Wait a bit to ensure different timestamps
+      await new Promise(resolve => setTimeout(resolve, 10));
+      
+      const snapshot2 = await historyManager.createSnapshot();
+      
+      // Filter by start time
+      const laterSnapshots = await historyManager.getSnapshots({ 
+        startTime: snapshot1.timestamp + 1 
+      });
+      expect(laterSnapshots).toHaveLength(1);
+      expect(laterSnapshots[0].id).toBe(snapshot2.id);
+      
+      // Filter by end time
+      const earlierSnapshots = await historyManager.getSnapshots({ 
+        endTime: snapshot2.timestamp - 1 
+      });
+      expect(earlierSnapshots).toHaveLength(1);
+      expect(earlierSnapshots[0].id).toBe(snapshot1.id);
+      
+      // Filter by time range that includes both
+      const allSnapshots = await historyManager.getSnapshots({ 
+        startTime: snapshot1.timestamp - 1,
+        endTime: snapshot2.timestamp + 1 
+      });
+      expect(allSnapshots).toHaveLength(2);
+    });
+    
+    it('should filter snapshots by automatic flag', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Create manual and automatic snapshots
+      await historyManager.createSnapshot({ automatic: false });
+      await historyManager.createSnapshot({ automatic: true });
+      
+      // Filter by automatic = true
+      const autoSnapshots = await historyManager.getSnapshots({ automatic: true });
+      expect(autoSnapshots).toHaveLength(1);
+      expect(autoSnapshots[0].automatic).toBe(true);
+      
+      // Filter by automatic = false
+      const manualSnapshots = await historyManager.getSnapshots({ automatic: false });
+      expect(manualSnapshots).toHaveLength(1);
+      expect(manualSnapshots[0].automatic).toBe(false);
+    });
+    
+    it('should filter snapshots by search text', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Create snapshots with different labels and descriptions
+      await historyManager.createSnapshot({ 
+        label: 'Python Notebook', 
+        description: 'A notebook about Python' 
+      });
+      await historyManager.createSnapshot({ 
+        label: 'JavaScript Notebook', 
+        description: 'A notebook about JavaScript' 
+      });
+      
+      // Search for Python
+      const pythonSnapshots = await historyManager.getSnapshots({ searchText: 'Python' });
+      expect(pythonSnapshots).toHaveLength(1);
+      expect(pythonSnapshots[0].label).toBe('Python Notebook');
+      
+      // Search for JavaScript
+      const jsSnapshots = await historyManager.getSnapshots({ searchText: 'JavaScript' });
+      expect(jsSnapshots).toHaveLength(1);
+      expect(jsSnapshots[0].label).toBe('JavaScript Notebook');
+      
+      // Search for Notebook (should find both)
+      const notebookSnapshots = await historyManager.getSnapshots({ searchText: 'Notebook' });
+      expect(notebookSnapshots).toHaveLength(2);
+      
+      // Search for non-existent text
+      const noSnapshots = await historyManager.getSnapshots({ searchText: 'non-existent-text' });
+      expect(noSnapshots).toHaveLength(0);
+    });
+    
+    it('should limit the number of snapshots returned', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Create multiple snapshots
+      await historyManager.createSnapshot();
+      await historyManager.createSnapshot();
+      await historyManager.createSnapshot();
+      
+      // Limit to 2 snapshots
+      const limitedSnapshots = await historyManager.getSnapshots({ limit: 2 });
+      expect(limitedSnapshots).toHaveLength(2);
+    });
+    
+    it('should sort snapshots by timestamp', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Create snapshots at different times
+      const snapshot1 = await historyManager.createSnapshot();
+      
+      // Wait a bit to ensure different timestamps
+      await new Promise(resolve => setTimeout(resolve, 10));
+      
+      const snapshot2 = await historyManager.createSnapshot();
+      
+      // Sort in ascending order
+      const ascSnapshots = await historyManager.getSnapshots({ order: 'asc' });
+      expect(ascSnapshots).toHaveLength(2);
+      expect(ascSnapshots[0].id).toBe(snapshot1.id);
+      expect(ascSnapshots[1].id).toBe(snapshot2.id);
+      
+      // Sort in descending order (default)
+      const descSnapshots = await historyManager.getSnapshots();
+      expect(descSnapshots).toHaveLength(2);
+      expect(descSnapshots[0].id).toBe(snapshot2.id);
+      expect(descSnapshots[1].id).toBe(snapshot1.id);
+    });
+  });
+  
+  describe('snapshot comparison', () => {
+    it('should compare two snapshots with no changes', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Create two identical snapshots
+      const snapshot1 = await historyManager.createSnapshot();
+      const snapshot2 = await historyManager.createSnapshot();
+      
+      // Compare the snapshots
+      const diff = await historyManager.compareSnapshots(snapshot1.id, snapshot2.id);
+      
+      // Verify the diff shows no changes
+      expect(diff.fromId).toBe(snapshot1.id);
+      expect(diff.toId).toBe(snapshot2.id);
+      expect(diff.cellDiffs).toHaveLength(2); // Two cells in the notebook
+      expect(diff.cellDiffs.every(cell => cell.changeType === 'unchanged')).toBe(true);
+      expect(diff.summary.cellsAdded).toBe(0);
       expect(diff.summary.cellsRemoved).toBe(0);
-      expect(diff.summary.totalMetadataChanges).toBeGreaterThan(0);
-      
-      // Check cell changes
-      expect(diff.cellChanges['cell1'].type).toBe('modified');
-      expect(diff.cellChanges['cell1'].contentChanges).toBeDefined();
-      expect(diff.cellChanges['cell1'].contentChanges![0].oldContent).toContain('Hello World');
-      expect(diff.cellChanges['cell1'].contentChanges![0].newContent).toContain('Hello Modified World');
-      
-      expect(diff.cellChanges['cell2'].type).toBe('unchanged');
-      
-      expect(diff.cellChanges['cell3'].type).toBe('added');
-      
-      // Check metadata changes
-      expect(diff.metadataChanges).toBeDefined();
-      expect(diff.metadataChanges!.some(change => change.path === 'title')).toBe(true);
+      expect(diff.summary.cellsModified).toBe(0);
+      expect(diff.summary.cellsUnchanged).toBe(2);
     });
-
-    it('should throw an error when diffing with a non-existent snapshot', async () => {
-      await expect(historyManager.getDiff('non-existent-id', snapshot2Id))
-        .rejects.toThrow('Snapshot not found');
+    
+    it('should compare snapshots with added cells', async () => {
+      const { historyManager, notebookModel } = createHistoryManager();
       
-      await expect(historyManager.getDiff(snapshot1Id, 'non-existent-id'))
-        .rejects.toThrow('Snapshot not found');
+      // Create a snapshot of the initial state
+      const snapshot1 = await historyManager.createSnapshot();
+      
+      // Add a new cell
+      notebookModel.addCell(createMockCell('cell3', 'print("New cell")', 'code'));
+      
+      // Create a snapshot of the updated state
+      const snapshot2 = await historyManager.createSnapshot();
+      
+      // Compare the snapshots
+      const diff = await historyManager.compareSnapshots(snapshot1.id, snapshot2.id);
+      
+      // Verify the diff shows the added cell
+      expect(diff.cellDiffs).toHaveLength(3); // Three cells in total
+      expect(diff.cellDiffs.filter(cell => cell.changeType === 'added')).toHaveLength(1);
+      expect(diff.cellDiffs.filter(cell => cell.changeType === 'unchanged')).toHaveLength(2);
+      expect(diff.summary.cellsAdded).toBe(1);
+      expect(diff.summary.cellsUnchanged).toBe(2);
+      
+      // Verify the added cell has the correct content
+      const addedCell = diff.cellDiffs.find(cell => cell.changeType === 'added');
+      expect(addedCell?.cellId).toBe('cell3');
+      expect(addedCell?.newContent).toBe('print("New cell")');
+    });
+    
+    it('should compare snapshots with removed cells', async () => {
+      const { historyManager, notebookModel } = createHistoryManager();
+      
+      // Create a snapshot of the initial state
+      const snapshot1 = await historyManager.createSnapshot();
+      
+      // Remove a cell
+      notebookModel.removeCell('cell2');
+      
+      // Create a snapshot of the updated state
+      const snapshot2 = await historyManager.createSnapshot();
+      
+      // Compare the snapshots
+      const diff = await historyManager.compareSnapshots(snapshot1.id, snapshot2.id);
+      
+      // Verify the diff shows the removed cell
+      expect(diff.cellDiffs).toHaveLength(2); // Two cells in total (one removed, one unchanged)
+      expect(diff.cellDiffs.filter(cell => cell.changeType === 'removed')).toHaveLength(1);
+      expect(diff.cellDiffs.filter(cell => cell.changeType === 'unchanged')).toHaveLength(1);
+      expect(diff.summary.cellsRemoved).toBe(1);
+      expect(diff.summary.cellsUnchanged).toBe(1);
+      
+      // Verify the removed cell has the correct ID
+      const removedCell = diff.cellDiffs.find(cell => cell.changeType === 'removed');
+      expect(removedCell?.cellId).toBe('cell2');
+      expect(removedCell?.oldContent).toBe('# Markdown cell');
+    });
+    
+    it('should compare snapshots with modified cells', async () => {
+      const { historyManager, notebookModel } = createHistoryManager();
+      
+      // Create a snapshot of the initial state
+      const snapshot1 = await historyManager.createSnapshot();
+      
+      // Modify a cell
+      notebookModel.updateCell('cell1', 'print("Modified cell")');
+      
+      // Create a snapshot of the updated state
+      const snapshot2 = await historyManager.createSnapshot();
+      
+      // Compare the snapshots
+      const diff = await historyManager.compareSnapshots(snapshot1.id, snapshot2.id);
+      
+      // Verify the diff shows the modified cell
+      expect(diff.cellDiffs).toHaveLength(2); // Two cells in total
+      expect(diff.cellDiffs.filter(cell => cell.changeType === 'modified')).toHaveLength(1);
+      expect(diff.cellDiffs.filter(cell => cell.changeType === 'unchanged')).toHaveLength(1);
+      expect(diff.summary.cellsModified).toBe(1);
+      expect(diff.summary.cellsUnchanged).toBe(1);
+      
+      // Verify the modified cell has the correct content
+      const modifiedCell = diff.cellDiffs.find(cell => cell.changeType === 'modified');
+      expect(modifiedCell?.cellId).toBe('cell1');
+      expect(modifiedCell?.oldContent).toBe('print("Hello World")');
+      expect(modifiedCell?.newContent).toBe('print("Modified cell")');
+      
+      // Verify line diffs are included
+      expect(modifiedCell?.lineDiffs).toBeDefined();
+      expect(modifiedCell?.lineDiffs?.length).toBeGreaterThan(0);
+    });
+    
+    it('should compare snapshots with metadata changes', async () => {
+      const { historyManager, notebookModel } = createHistoryManager();
+      
+      // Create a snapshot of the initial state
+      const snapshot1 = await historyManager.createSnapshot();
+      
+      // Add metadata
+      notebookModel.setMetadata('kernelspec', { name: 'python3', display_name: 'Python 3' });
+      
+      // Create a snapshot of the updated state
+      const snapshot2 = await historyManager.createSnapshot();
+      
+      // Compare the snapshots
+      const diff = await historyManager.compareSnapshots(snapshot1.id, snapshot2.id);
+      
+      // Verify the diff shows the metadata changes
+      expect(diff.metadataChanges).toBeDefined();
+      expect(diff.metadataChanges?.length).toBeGreaterThan(0);
+      
+      // Verify the metadata change has the correct key and values
+      const metadataChange = diff.metadataChanges?.find(change => change.key === 'kernelspec');
+      expect(metadataChange).toBeDefined();
+      expect(metadataChange?.oldValue).toBeUndefined();
+      expect(metadataChange?.newValue).toEqual({ name: 'python3', display_name: 'Python 3' });
+    });
+    
+    it('should throw an error when comparing non-existent snapshots', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Create a snapshot
+      const snapshot = await historyManager.createSnapshot();
+      
+      // Try to compare with a non-existent snapshot
+      await expect(historyManager.compareSnapshots(snapshot.id, 'non-existent-id'))
+        .rejects.toThrow('One or both snapshots not found');
+      
+      await expect(historyManager.compareSnapshots('non-existent-id', snapshot.id))
+        .rejects.toThrow('One or both snapshots not found');
     });
   });
-
-  describe('Content restoration', () => {
-    let snapshot1Id: string;
-    let modifiedDoc: Y.Doc;
+  
+  describe('snapshot restoration', () => {
+    it('should restore a notebook to a previous snapshot', async () => {
+      const { historyManager, notebookModel } = createHistoryManager();
+      
+      // Create a snapshot of the initial state
+      const snapshot1 = await historyManager.createSnapshot();
+      
+      // Modify the notebook
+      notebookModel.updateCell('cell1', 'print("Modified cell")');
+      notebookModel.removeCell('cell2');
+      notebookModel.addCell(createMockCell('cell3', 'print("New cell")', 'code'));
+      
+      // Verify the notebook has changed
+      const modifiedNotebook = notebookModel.toJSON();
+      expect(modifiedNotebook.cells).toHaveLength(2);
+      expect(modifiedNotebook.cells[0].source).toBe('print("Modified cell")');
+      expect(modifiedNotebook.cells[1].id).toBe('cell3');
+      
+      // Restore to the first snapshot
+      const result = await historyManager.restoreSnapshot(snapshot1.id);
+      
+      // Verify the restoration was successful
+      expect(result.success).toBe(true);
+      
+      // Verify the notebook was restored to its original state
+      const restoredNotebook = notebookModel.toJSON();
+      expect(restoredNotebook.cells).toHaveLength(2);
+      expect(restoredNotebook.cells[0].source).toBe('print("Hello World")');
+      expect(restoredNotebook.cells[1].source).toBe('# Markdown cell');
+    });
     
-    beforeEach(async () => {
-      // Create initial snapshot
-      const snapshot1 = await historyManager.createSnapshot({
-        description: 'Initial state',
-        author: { id: 'user1', name: 'User 1' }
+    it('should restore selected cells from a snapshot', async () => {
+      const { historyManager, notebookModel } = createHistoryManager();
+      
+      // Create a snapshot of the initial state
+      const snapshot1 = await historyManager.createSnapshot();
+      
+      // Modify the notebook
+      notebookModel.updateCell('cell1', 'print("Modified cell")');
+      notebookModel.updateCell('cell2', '# Modified markdown');
+      
+      // Restore only cell1 from the snapshot
+      const result = await historyManager.restoreSnapshot(snapshot1.id, {
+        mode: 'selective',
+        cellIds: ['cell1']
       });
-      snapshot1Id = snapshot1.id;
       
-      // Save the initial state
-      modifiedDoc = new Y.Doc();
-      Y.applyUpdate(modifiedDoc, Y.encodeStateAsUpdate(doc));
+      // Verify the restoration was successful
+      expect(result.success).toBe(true);
+      expect(result.restoredCells).toContain('cell1');
       
-      // Modify the document
-      modifyTestNotebookDoc(doc);
+      // Verify only cell1 was restored
+      const restoredNotebook = notebookModel.toJSON();
+      expect(restoredNotebook.cells[0].source).toBe('print("Hello World")');
+      expect(restoredNotebook.cells[1].source).toBe('# Modified markdown');
     });
-
-    afterEach(() => {
-      modifiedDoc.destroy();
-    });
-
-    it('should restore the entire document from a snapshot', async () => {
-      // Verify the document has been modified
-      const cellsBefore = doc.getArray('cells');
-      expect(cellsBefore.length).toBe(3); // We added a cell in modifyTestNotebookDoc
+    
+    it('should create a pre-restoration snapshot when requested', async () => {
+      const { historyManager, notebookModel } = createHistoryManager();
       
-      // Restore from the initial snapshot
-      await historyManager.restoreSnapshot(snapshot1Id);
+      // Create a snapshot of the initial state
+      const snapshot1 = await historyManager.createSnapshot();
       
-      // Verify the document has been restored
-      const cellsAfter = doc.getArray('cells');
-      expect(cellsAfter.length).toBe(2); // Back to the original 2 cells
-      
-      const cell1 = cellsAfter.get(0);
-      expect(cell1.get('source')).toBe('print("Hello World")');
-      
-      // Verify metadata is restored
-      const metadata = doc.getMap('metadata');
-      expect(metadata.get('title')).toBeUndefined(); // This was added in the modification
-    });
-
-    it('should restore specific cells from a snapshot', async () => {
-      // Verify the document has been modified
-      const cellsBefore = doc.getArray('cells');
-      const cell1Before = cellsBefore.get(0);
-      expect(cell1Before.get('source')).toBe('print("Hello Modified World")');
-      
-      // Restore only cell1 from the initial snapshot
-      await historyManager.restoreCells(snapshot1Id, ['cell1']);
-      
-      // Verify only cell1 has been restored
-      const cellsAfter = doc.getArray('cells');
-      expect(cellsAfter.length).toBe(3); // Still have 3 cells
-      
-      const cell1After = cellsAfter.get(0);
-      expect(cell1After.get('source')).toBe('print("Hello World")');
-      
-      // Verify cell3 is still there (wasn't restored)
-      const cell3 = cellsAfter.get(2);
-      expect(cell3.get('id')).toBe('cell3');
-    });
-
-    it('should emit contentRestored signal when restoring content', async () => {
-      // Set up a spy on the contentRestored signal
-      const spy = jest.fn();
-      historyManager.contentRestored.connect(spy);
-      
-      // Restore from the initial snapshot
-      await historyManager.restoreSnapshot(snapshot1Id);
-      
-      // Verify the signal was emitted
-      expect(spy).toHaveBeenCalledTimes(1);
-      expect(spy.mock.calls[0][1].snapshot.id).toBe(snapshot1Id);
-    });
-
-    it('should create a new snapshot after restoring if requested', async () => {
-      // Get the current number of snapshots
-      const beforeCount = (await historyManager.getHistory()).length;
+      // Modify the notebook
+      notebookModel.updateCell('cell1', 'print("Modified cell")');
       
       // Restore with createSnapshot option
-      await historyManager.restoreSnapshot(snapshot1Id, { createSnapshot: true });
+      const result = await historyManager.restoreSnapshot(snapshot1.id, {
+        mode: 'full',
+        createSnapshot: true
+      });
       
-      // Verify a new snapshot was created
-      const afterCount = (await historyManager.getHistory()).length;
-      expect(afterCount).toBe(beforeCount + 1);
+      // Verify a pre-restoration snapshot was created
+      expect(result.success).toBe(true);
+      expect(result.snapshotId).toBeDefined();
       
-      // Verify the new snapshot has the correct description
-      const history = await historyManager.getHistory({ limit: 1 });
-      expect(history[0].description).toContain('Restored from snapshot');
+      // Verify the pre-restoration snapshot contains the modified state
+      const preRestoreSnapshot = await historyManager.getSnapshot(result.snapshotId!);
+      expect(preRestoreSnapshot).toBeDefined();
+      expect(preRestoreSnapshot?.automatic).toBe(true);
+      
+      // Verify the notebook was restored
+      const restoredNotebook = notebookModel.toJSON();
+      expect(restoredNotebook.cells[0].source).toBe('print("Hello World")');
+    });
+    
+    it('should fail gracefully when restoring a non-existent snapshot', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Try to restore a non-existent snapshot
+      const result = await historyManager.restoreSnapshot('non-existent-id');
+      
+      // Verify the restoration failed
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+      expect(result.error).toContain('Snapshot not found');
+    });
+    
+    it('should fail gracefully with invalid restoration options', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Create a snapshot
+      const snapshot = await historyManager.createSnapshot();
+      
+      // Try to restore with invalid options
+      const result = await historyManager.restoreSnapshot(snapshot.id, {
+        mode: 'selective',
+        cellIds: [] // Empty cell IDs array
+      });
+      
+      // Verify the restoration failed
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+      expect(result.error).toContain('Invalid restoration mode or missing cell IDs');
     });
   });
-
-  describe('History management', () => {
-    it('should update configuration', () => {
-      historyManager.updateConfig({ maxSnapshots: 20, autoSnapshotInterval: 60000 });
+  
+  describe('snapshot content and export', () => {
+    it('should get the content of a snapshot', async () => {
+      const { historyManager } = createHistoryManager();
       
-      const config = historyManager.getConfig();
-      expect(config.maxSnapshots).toBe(20);
-      expect(config.autoSnapshotInterval).toBe(60000);
-    });
-
-    it('should prune history based on retention policy', async () => {
-      // Create snapshots with different timestamps
-      const now = Date.now();
-      
-      // Create an old snapshot (30 days old)
-      const oldSnapshot = await historyManager.createSnapshot({
-        description: 'Old snapshot'
-      });
-      
-      // Manually update the timestamp to make it old
-      const oldSnapshotObj = await historyManager.getSnapshot(oldSnapshot.id);
-      oldSnapshotObj!.timestamp = now - 31 * 24 * 60 * 60 * 1000; // 31 days old
-      await storageProvider.storeSnapshot(oldSnapshotObj!);
-      
-      // Create some recent snapshots
-      for (let i = 0; i < 5; i++) {
-        await historyManager.createSnapshot({
-          description: `Recent snapshot ${i}`
-        });
-      }
-      
-      // Update config to keep only 3 snapshots and max age of 30 days
-      historyManager.updateConfig({ maxSnapshots: 3, maxSnapshotAge: 30 * 24 * 60 * 60 * 1000 });
-      
-      // Prune history
-      const prunedCount = await historyManager.pruneHistory();
-      
-      // Should have pruned the old snapshot and the oldest 3 recent ones (total 4)
-      expect(prunedCount).toBe(4);
-      
-      // Verify we have only 3 snapshots left
-      const history = await historyManager.getHistory();
-      expect(history.length).toBe(3);
-      
-      // Verify the old snapshot was pruned
-      const oldSnapshotAfter = await historyManager.getSnapshot(oldSnapshot.id);
-      expect(oldSnapshotAfter).toBeNull();
-    });
-
-    it('should delete a specific snapshot', async () => {
       // Create a snapshot
-      const snapshot = await historyManager.createSnapshot({
-        description: 'Test snapshot'
+      const snapshot = await historyManager.createSnapshot();
+      
+      // Get the snapshot content
+      const content = await historyManager.getSnapshotContent(snapshot.id);
+      
+      // Verify the content is a valid notebook
+      expect(content).toBeDefined();
+      expect(content.cells).toHaveLength(2);
+      expect(content.nbformat).toBe(4);
+      expect(content.nbformat_minor).toBe(5);
+    });
+    
+    it('should return undefined for non-existent snapshot content', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Try to get content for a non-existent snapshot
+      const content = await historyManager.getSnapshotContent('non-existent-id');
+      
+      // Verify the result is undefined
+      expect(content).toBeUndefined();
+    });
+    
+    it('should export a snapshot as ipynb', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Create a snapshot
+      const snapshot = await historyManager.createSnapshot();
+      
+      // Export the snapshot as ipynb
+      const exported = await historyManager.exportSnapshot(snapshot.id, 'ipynb');
+      
+      // Verify the export is a valid JSON string
+      expect(exported).toBeDefined();
+      const parsed = JSON.parse(exported);
+      expect(parsed.cells).toHaveLength(2);
+      expect(parsed.nbformat).toBe(4);
+    });
+    
+    it('should export a snapshot as json with metadata', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Create a snapshot
+      const snapshot = await historyManager.createSnapshot();
+      
+      // Export the snapshot as json
+      const exported = await historyManager.exportSnapshot(snapshot.id, 'json');
+      
+      // Verify the export is a valid JSON string with metadata
+      expect(exported).toBeDefined();
+      const parsed = JSON.parse(exported);
+      expect(parsed.snapshot).toBeDefined();
+      expect(parsed.snapshot.id).toBe(snapshot.id);
+      expect(parsed.content).toBeDefined();
+      expect(parsed.content.cells).toHaveLength(2);
+    });
+    
+    it('should throw an error when exporting a non-existent snapshot', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Try to export a non-existent snapshot
+      await expect(historyManager.exportSnapshot('non-existent-id', 'ipynb'))
+        .rejects.toThrow('Snapshot not found');
+    });
+    
+    it('should throw an error for unsupported export format', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Create a snapshot
+      const snapshot = await historyManager.createSnapshot();
+      
+      // Try to export with an unsupported format
+      // @ts-ignore - Testing invalid format
+      await expect(historyManager.exportSnapshot(snapshot.id, 'invalid-format'))
+        .rejects.toThrow('Unsupported export format');
+    });
+  });
+  
+  describe('retention policy', () => {
+    it('should set and get the retention policy', () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Set a new retention policy
+      historyManager.setRetentionPolicy({
+        maxSnapshots: 10,
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        minInterval: 10 * 60 * 1000 // 10 minutes
       });
       
-      // Verify it exists
-      expect(await historyManager.getSnapshot(snapshot.id)).not.toBeNull();
+      // Get the retention policy
+      const policy = historyManager.getRetentionPolicy();
       
-      // Delete it
+      // Verify the policy was set correctly
+      expect(policy.maxSnapshots).toBe(10);
+      expect(policy.maxAge).toBe(7 * 24 * 60 * 60 * 1000);
+      expect(policy.minInterval).toBe(10 * 60 * 1000);
+    });
+    
+    it('should apply the retention policy based on count', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Set a retention policy with a low max count
+      historyManager.setRetentionPolicy({
+        maxSnapshots: 2,
+        maxAge: 0 // Disable age-based retention for this test
+      });
+      
+      // Create automatic snapshots
+      await historyManager.createSnapshot({ automatic: true });
+      await historyManager.createSnapshot({ automatic: true });
+      await historyManager.createSnapshot({ automatic: true });
+      
+      // Apply the retention policy
+      const removed = await historyManager.applyRetentionPolicy();
+      
+      // Verify snapshots were removed
+      expect(removed).toBe(1); // One snapshot should be removed
+      
+      // Verify only 2 snapshots remain
+      const snapshots = await historyManager.getSnapshots();
+      expect(snapshots).toHaveLength(2);
+    });
+    
+    it('should not apply retention policy to manual snapshots', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Set a retention policy with a low max count
+      historyManager.setRetentionPolicy({
+        maxSnapshots: 1,
+        maxAge: 0 // Disable age-based retention for this test
+      });
+      
+      // Create automatic and manual snapshots
+      await historyManager.createSnapshot({ automatic: true });
+      await historyManager.createSnapshot({ automatic: false });
+      await historyManager.createSnapshot({ automatic: true });
+      
+      // Apply the retention policy
+      const removed = await historyManager.applyRetentionPolicy();
+      
+      // Verify automatic snapshots were removed
+      expect(removed).toBe(1); // One automatic snapshot should be removed
+      
+      // Verify the manual snapshot remains
+      const manualSnapshots = await historyManager.getSnapshots({ automatic: false });
+      expect(manualSnapshots).toHaveLength(1);
+    });
+  });
+  
+  describe('multi-user collaboration', () => {
+    it('should synchronize snapshots between users', async () => {
+      // Create two history managers with connected Yjs docs
+      const { ydoc: ydoc1, notebookModel: model1, historyManager: manager1 } = createHistoryManager();
+      const { ydoc: ydoc2, historyManager: manager2 } = createHistoryManager();
+      
+      // Connect the Yjs documents
+      connectYjsDocs(ydoc1, ydoc2);
+      
+      // User 1 creates a snapshot
+      const snapshot = await manager1.createSnapshot({
+        label: 'Snapshot from User 1'
+      });
+      
+      // Verify User 2 can see the snapshot
+      const snapshotsForUser2 = await manager2.getSnapshots();
+      expect(snapshotsForUser2).toHaveLength(1);
+      expect(snapshotsForUser2[0].id).toBe(snapshot.id);
+      expect(snapshotsForUser2[0].label).toBe('Snapshot from User 1');
+      
+      // User 2 updates the snapshot
+      await manager2.updateSnapshot(snapshot.id, {
+        label: 'Updated by User 2'
+      });
+      
+      // Verify User 1 sees the updated snapshot
+      const updatedSnapshotForUser1 = await manager1.getSnapshot(snapshot.id);
+      expect(updatedSnapshotForUser1?.label).toBe('Updated by User 2');
+    });
+    
+    it('should synchronize snapshot deletions between users', async () => {
+      // Create two history managers with connected Yjs docs
+      const { ydoc: ydoc1, historyManager: manager1 } = createHistoryManager();
+      const { ydoc: ydoc2, historyManager: manager2 } = createHistoryManager();
+      
+      // Connect the Yjs documents
+      connectYjsDocs(ydoc1, ydoc2);
+      
+      // User 1 creates a snapshot
+      const snapshot = await manager1.createSnapshot();
+      
+      // Verify both users can see the snapshot
+      expect(await manager1.getSnapshots()).toHaveLength(1);
+      expect(await manager2.getSnapshots()).toHaveLength(1);
+      
+      // User 2 deletes the snapshot
+      await manager2.deleteSnapshot(snapshot.id);
+      
+      // Verify the snapshot is deleted for both users
+      expect(await manager1.getSnapshots()).toHaveLength(0);
+      expect(await manager2.getSnapshots()).toHaveLength(0);
+    });
+  });
+  
+  describe('event handling', () => {
+    it('should emit events when snapshots are created', () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Set up event listener
+      const snapshotCreatedHandler = jest.fn();
+      historyManager.snapshotCreated.connect(snapshotCreatedHandler);
+      
+      // Create a snapshot
+      historyManager.createSnapshot();
+      
+      // Verify the event was emitted
+      expect(snapshotCreatedHandler).toHaveBeenCalled();
+      expect(snapshotCreatedHandler.mock.calls[0][1]).toBeDefined();
+      expect(snapshotCreatedHandler.mock.calls[0][1].id).toBeDefined();
+    });
+    
+    it('should emit events when snapshots are updated', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Create a snapshot
+      const snapshot = await historyManager.createSnapshot();
+      
+      // Set up event listener
+      const snapshotUpdatedHandler = jest.fn();
+      historyManager.snapshotUpdated.connect(snapshotUpdatedHandler);
+      
+      // Update the snapshot
+      await historyManager.updateSnapshot(snapshot.id, { label: 'Updated' });
+      
+      // Verify the event was emitted
+      expect(snapshotUpdatedHandler).toHaveBeenCalled();
+      expect(snapshotUpdatedHandler.mock.calls[0][1].id).toBe(snapshot.id);
+      expect(snapshotUpdatedHandler.mock.calls[0][1].label).toBe('Updated');
+    });
+    
+    it('should emit events when snapshots are deleted', async () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Create a snapshot
+      const snapshot = await historyManager.createSnapshot();
+      
+      // Set up event listener
+      const snapshotDeletedHandler = jest.fn();
+      historyManager.snapshotDeleted.connect(snapshotDeletedHandler);
+      
+      // Delete the snapshot
       await historyManager.deleteSnapshot(snapshot.id);
       
-      // Verify it's gone
-      expect(await historyManager.getSnapshot(snapshot.id)).toBeNull();
+      // Verify the event was emitted
+      expect(snapshotDeletedHandler).toHaveBeenCalled();
+      expect(snapshotDeletedHandler.mock.calls[0][1]).toBe(snapshot.id);
+    });
+    
+    it('should emit events when status changes', () => {
+      const { historyManager } = createHistoryManager();
+      
+      // Set up event listener
+      const statusChangedHandler = jest.fn();
+      historyManager.statusChanged.connect(statusChangedHandler);
+      
+      // Dispose the history manager (should change status)
+      historyManager.dispose();
+      
+      // Verify the event was emitted
+      // Note: This test might be flaky if the implementation doesn't change status on dispose
+      // In a real implementation, this would be more robust
+      expect(statusChangedHandler).toHaveBeenCalled();
     });
   });
-
-  describe('Signal emissions', () => {
-    it('should emit snapshotCreated signal when creating a snapshot', async () => {
-      // Set up a spy on the snapshotCreated signal
-      const spy = jest.fn();
-      historyManager.snapshotCreated.connect(spy);
+  
+  describe('cleanup', () => {
+    it('should dispose resources properly', () => {
+      const { historyManager } = createHistoryManager();
       
-      // Create a snapshot
-      const snapshot = await historyManager.createSnapshot({
-        description: 'Test snapshot'
-      });
+      // Create some data
+      historyManager.createSnapshot();
       
-      // Verify the signal was emitted
-      expect(spy).toHaveBeenCalledTimes(1);
-      expect(spy.mock.calls[0][1].id).toBe(snapshot.id);
+      // Set up event listeners
+      const snapshotCreatedHandler = jest.fn();
+      const statusChangedHandler = jest.fn();
+      historyManager.snapshotCreated.connect(snapshotCreatedHandler);
+      historyManager.statusChanged.connect(statusChangedHandler);
+      
+      // Dispose the history manager
+      historyManager.dispose();
+      
+      // Verify the signals are disconnected
+      expect(historyManager.snapshotCreated.hasConnections).toBe(false);
+      expect(historyManager.statusChanged.hasConnections).toBe(false);
     });
-  });
-
-  describe('Error handling', () => {
-    it('should handle errors when storage provider fails', async () => {
-      // Create a failing storage provider
-      const failingProvider: IHistoryStorageProvider = {
-        storeSnapshot: jest.fn().mockRejectedValue(new Error('Storage failure')),
-        getSnapshot: jest.fn().mockRejectedValue(new Error('Storage failure')),
-        getSnapshots: jest.fn().mockRejectedValue(new Error('Storage failure')),
-        deleteSnapshot: jest.fn().mockRejectedValue(new Error('Storage failure')),
-        pruneSnapshots: jest.fn().mockRejectedValue(new Error('Storage failure'))
-      };
-      
-      // Create a history manager with the failing provider
-      const errorHistoryManager = new HistoryManager(doc, {
-        storageProvider: failingProvider
-      });
-      
-      // Attempt to create a snapshot and expect it to fail
-      await expect(errorHistoryManager.createSnapshot())
-        .rejects.toThrow('Storage failure');
-      
-      // Clean up
-      errorHistoryManager.dispose();
-    });
-  });
-});
-
-describe('UI Integration', () => {
-  // These tests would typically be in a separate file that tests the UI components
-  // Here we're just providing a skeleton to show what would be tested
-  
-  it('should render timeline visualization correctly', () => {
-    // This would test that the UI component for timeline visualization
-    // correctly renders the history data
-    expect(true).toBe(true); // Placeholder
-  });
-  
-  it('should display diff visualization between versions', () => {
-    // This would test that the UI component for diff visualization
-    // correctly renders the diff between two snapshots
-    expect(true).toBe(true); // Placeholder
-  });
-  
-  it('should allow restoring content from the UI', () => {
-    // This would test that the UI provides functionality to restore
-    // content from a snapshot
-    expect(true).toBe(true); // Placeholder
-  });
-  
-  it('should show author information for changes', () => {
-    // This would test that the UI displays author information for changes
-    expect(true).toBe(true); // Placeholder
   });
 });
