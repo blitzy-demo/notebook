@@ -1,82 +1,87 @@
 /*-----------------------------------------------------------------------------
 | Copyright (c) Jupyter Development Team.
+|
 | Distributed under the terms of the Modified BSD License.
 |----------------------------------------------------------------------------*/
 
-/*
- * CSS variables for the notebook component
+/**
+ * CSS Variables for Jupyter Notebook
+ * 
+ * This file defines custom properties (CSS variables) for the notebook component,
+ * establishing a consistent set of values for spacing, sizing, colors, and other
+ * visual attributes. These variables can be referenced throughout the notebook styles.
  */
 
 :root {
-  /* Base notebook layout */
-  --jp-notebook-padding: 10px;
-  --jp-notebook-max-width: 1000px;
-  --jp-notebook-toolbar-margin-bottom: 20px;
-  --jp-notebook-padding-offset: 20px;
-  --jp-kernel-status-padding: 5px;
-  --jp-notebook-cell-spacing: 12px;
-  --jp-notebook-cell-padding: 5px;
-  --jp-notebook-border-width: 1px;
-  --jp-notebook-border-color: var(--jp-border-color1);
+  /*
+   * Notebook Layout Variables
+   */
   
-  /* Collaboration elements */
-  --jp-collab-avatar-size: 28px;
-  --jp-collab-avatar-border-width: 2px;
-  --jp-collab-avatar-stacking-offset: -8px;
-  --jp-collab-avatar-font-size: calc(var(--jp-collab-avatar-size) * 0.5);
-  --jp-collab-avatar-idle-opacity: 0.7;
+  /* Basic layout and spacing */
+  --jp-notebook-padding: 10px;                /* Padding around the notebook content */
+  --jp-notebook-padding-offset: 20px;         /* Offset for padding calculations */
+  --jp-notebook-max-width: 1000px;            /* Maximum width of notebook content */
+  --jp-notebook-min-width: 240px;             /* Minimum width of notebook content */
   
-  /* Lock icons */
-  --jp-collab-lock-icon-size: 16px;
-  --jp-collab-lock-icon-padding: 4px;
-  --jp-collab-lock-icon-color: rgba(62, 62, 62, 0.8);
-  --jp-collab-lock-icon-opacity: 0.6;
-  --jp-collab-lock-icon-opacity-hover: 1.0;
-  --jp-collab-locked-cell-overlay-opacity: 0.05;
+  /* Toolbar and header spacing */
+  --jp-notebook-toolbar-margin-bottom: 20px;   /* Space below the notebook toolbar */
   
-  /* Comment badges */
-  --jp-collab-comment-badge-size: 16px;
-  --jp-collab-comment-badge-color: rgba(33, 150, 243, 0.9);
-  --jp-collab-comment-badge-resolved-color: var(--jp-success-color1);
-  --jp-collab-comment-badge-font-size: 10px;
-  --jp-collab-comment-badge-padding: 0 4px;
-  --jp-collab-comment-badge-right-margin: 4px;
+  /* Cell spacing */
+  --jp-notebook-cell-spacing: 12px;           /* Vertical space between cells */
+  --jp-notebook-cell-padding: 5px;            /* Padding within cells */
+  --jp-notebook-cell-prompt-width: 64px;      /* Width of the cell prompt area */
   
-  /* Comment panel */
-  --jp-collab-comment-panel-width: 300px;
-  --jp-collab-comment-thread-margin: 8px;
-  --jp-collab-comment-thread-padding: 8px;
-  --jp-collab-comment-avatar-size: 20px;
-  --jp-collab-comment-avatar-margin: 8px;
+  /* Kernel status indicator */
+  --jp-kernel-status-padding: 5px;            /* Padding around kernel status indicator */
+  --jp-kernel-status-diameter: 10px;          /* Diameter of kernel status indicator dot */
   
-  /* Version history */
-  --jp-collab-history-panel-width: 300px;
-  --jp-collab-history-item-padding: 8px 12px;
-  --jp-collab-diff-added-color: rgba(0, 255, 0, 0.2);
-  --jp-collab-diff-removed-color: rgba(255, 0, 0, 0.2);
-  --jp-collab-diff-changed-color: rgba(255, 255, 0, 0.2);
+  /* Execution count */
+  --jp-execution-count-width: 64px;           /* Width of execution count area */
+  --jp-execution-count-padding: 8px;          /* Padding around execution count */
   
-  /* Permissions and access control */
-  --jp-collab-permissions-dialog-min-width: 400px;
-  --jp-collab-permissions-dialog-max-width: 600px;
-  --jp-collab-permissions-user-avatar-size: 24px;
-  --jp-collab-permissions-user-avatar-margin: 8px;
-  --jp-collab-permissions-role-padding: 2px 8px;
-  --jp-collab-permissions-role-border-radius: 4px;
-  --jp-collab-permissions-role-font-size: 0.8em;
+  /*
+   * Collaboration-specific Variables
+   */
   
-  /* Collaboration bar */
-  --jp-collab-bar-padding: 4px 8px;
-  --jp-collab-status-indicator-size: 8px;
-  --jp-collab-status-indicator-margin: 4px;
+  /* User avatars and presence */
+  --jp-collab-avatar-size: 28px;              /* Size of user avatar circles */
+  --jp-collab-avatar-border-width: 2px;       /* Border width for avatars */
+  --jp-collab-avatar-spacing: 4px;            /* Spacing between avatars */
+  --jp-collab-avatar-active-opacity: 1;       /* Opacity for active users */
+  --jp-collab-avatar-idle-opacity: 0.7;       /* Opacity for idle users */
   
-  /* Animation durations and transitions */
-  --jp-collab-avatar-transition: opacity 200ms ease-in;
-  --jp-collab-lock-transition: all 300ms ease;
-  --jp-collab-comment-badge-transition: transform 150ms ease, box-shadow 150ms ease;
-  --jp-collab-comment-pulse-duration: 3s;
-  --jp-collab-status-pulse-duration: 2s;
+  /* Cell lock indicators */
+  --jp-collab-lock-icon-size: 16px;           /* Size of lock icons */
+  --jp-collab-lock-icon-padding: 4px;         /* Padding around lock icons */
+  --jp-collab-lock-icon-color: rgba(62, 62, 62, 0.8); /* Default color for lock icons */
+  --jp-collab-lock-unlocked-opacity: 0.6;     /* Opacity for unlocked state */
+  --jp-collab-lock-locked-opacity: 1;         /* Opacity for locked state */
   
-  /* Responsive breakpoints */
-  --jp-collab-mobile-breakpoint: 760px;
+  /* Comment badges and indicators */
+  --jp-collab-comment-badge-color: rgba(33, 150, 243, 0.9); /* Color for comment badges */
+  --jp-collab-comment-badge-size: 16px;       /* Size of comment badges */
+  --jp-collab-comment-badge-padding: 4px;     /* Padding inside comment badges */
+  --jp-collab-comment-resolved-color: rgba(76, 175, 80, 0.9); /* Color for resolved comments */
+  
+  /* User presence indicators */
+  --jp-collab-presence-active: rgba(76, 175, 80, 0.9); /* Color for active presence */
+  --jp-collab-presence-idle: rgba(255, 152, 0, 0.9);   /* Color for idle presence */
+  --jp-collab-user-color-1: #3f51b5;          /* Default user color 1 */
+  --jp-collab-user-color-2: #e91e63;          /* Default user color 2 */
+  --jp-collab-user-color-3: #009688;          /* Default user color 3 */
+  --jp-collab-user-color-4: #ff5722;          /* Default user color 4 */
+  
+  /* Animation and transition timing */
+  --jp-collab-transition: 300ms ease;         /* Standard transition timing */
+  --jp-collab-avatar-fade-in-time: 200ms;     /* Fade-in time for avatars */
+  --jp-collab-comment-transition: 200ms ease; /* Transition for comment elements */
+  --jp-collab-highlight-pulse-duration: 3s;   /* Duration of highlight pulse animation */
+  
+  /* Tooltip styling for collaboration elements */
+  --jp-collab-tooltip-background: var(--jp-layout-color2); /* Tooltip background */
+  --jp-collab-tooltip-color: var(--jp-ui-font-color1);     /* Tooltip text color */
+  --jp-collab-tooltip-border-radius: 4px;     /* Tooltip corner radius */
+  --jp-collab-tooltip-padding: 8px;           /* Tooltip padding */
+  --jp-collab-tooltip-font-size: 12px;        /* Tooltip font size */
+  --jp-collab-tooltip-shadow: 0 1px 6px rgba(0, 0, 0, 0.2); /* Tooltip shadow */
 }
