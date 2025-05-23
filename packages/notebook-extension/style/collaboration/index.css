@@ -1,0 +1,11 @@
+/*
+ * Main entry point for all collaboration-specific styles
+ */
+
+/* Import all collaboration component styles */
+@import './userPresence.css';
+@import './cellLock.css';
+@import './comments.css';
+@import './history.css';
+@import './permissions.css';
+@import './collaborationBar.css';
