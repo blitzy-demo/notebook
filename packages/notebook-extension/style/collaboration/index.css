@@ -1,26 +1,26 @@
 /**
- * JupyterLab Notebook Collaboration Styles
- *
+ * Jupyter Notebook v7 - Collaboration Styles
+ * 
  * This file serves as the main entry point for all collaboration-specific styles.
  * It imports individual component stylesheets to ensure they're bundled together,
  * enabling centralized loading of all collaboration UI styles through a single
  * import statement in the parent index.css.
  */
 
-/* User presence and avatars */
+/* User presence and awareness styles */
 @import url('./userPresence.css');
 
 /* Cell-level locking visualization */
 @import url('./cellLock.css');
 
-/* Comment and review system */
+/* Comment and review system styling */
 @import url('./comments.css');
 
-/* Version history viewer */
+/* Version history viewer styles */
 @import url('./history.css');
 
-/* Permissions and access control UI */
+/* Access control UI styles */
 @import url('./permissions.css');
 
-/* Collaboration status bar and activity feed */
+/* Collaboration status bar styles */
 @import url('./collaborationBar.css');
