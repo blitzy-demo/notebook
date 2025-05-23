@@ -1,332 +1,399 @@
-/*
- * Styles for the HistoryViewer component
+/*-----------------------------------------------------------------------------
+| Copyright (c) Jupyter Development Team.
+|
+| Distributed under the terms of the Modified BSD License.
+|----------------------------------------------------------------------------*/
+
+/**
+ * CSS styles for the version history viewer and diff visualization in collaborative notebooks.
+ * This file implements the UI for viewing change history, comparing versions, and navigating
+ * through document revisions.
  */
 
+/* History Viewer Panel Layout */
 .jp-HistoryViewer {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  overflow: hidden;
   background-color: var(--jp-layout-color1);
   color: var(--jp-ui-font-color1);
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+  border-left: var(--jp-border-width) solid var(--jp-border-color1);
+}
+
+.jp-HistoryViewer-header {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  font-weight: 600;
+  border-bottom: var(--jp-border-width) solid var(--jp-border-color1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.jp-HistoryViewer-title {
+  font-size: var(--jp-ui-font-size1);
+  flex: 1 1 auto;
 }
 
 .jp-HistoryViewer-controls {
-  display: flex;
-  flex-direction: column;
-  padding: 8px;
-  border-bottom: 1px solid var(--jp-border-color2);
-  background-color: var(--jp-layout-color2);
-}
-
-.jp-HistoryViewer-search {
-  margin-bottom: 8px;
-}
-
-.jp-HistoryViewer-searchInput {
-  width: 100%;
-  padding: 4px 8px;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 3px;
-  background-color: var(--jp-input-background);
-  color: var(--jp-ui-font-color1);
-}
-
-.jp-HistoryViewer-filters {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.jp-HistoryViewer-userFilter {
-  padding: 4px 8px;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 3px;
-  background-color: var(--jp-input-background);
-  color: var(--jp-ui-font-color1);
-}
-
-.jp-HistoryViewer-diffOption {
-  padding: 4px 8px;
-  border-radius: 3px;
-}
-
-.jp-HistoryViewer-diffOption.jp-mod-selected {
-  background-color: var(--jp-brand-color1);
-  color: var(--jp-ui-inverse-font-color1);
-}
-
-.jp-HistoryViewer-optionLabel {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--jp-ui-font-size1);
 }
 
 .jp-HistoryViewer-content {
   display: flex;
-  flex: 1;
+  flex: 1 1 auto;
   overflow: hidden;
 }
 
-.jp-HistoryViewer-timeline {
-  width: 300px;
-  border-right: 1px solid var(--jp-border-color2);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.jp-HistoryViewer-timelineHeader {
-  padding: 8px;
-  border-bottom: 1px solid var(--jp-border-color2);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.jp-HistoryViewer-timelineHeader h3 {
-  margin: 0;
-  font-size: var(--jp-ui-font-size2);
-  font-weight: 600;
-}
-
+/* Version List Styles */
 .jp-HistoryViewer-versionList {
-  flex: 1;
+  flex: 0 0 250px;
   overflow-y: auto;
-  padding: 8px;
+  border-right: var(--jp-border-width) solid var(--jp-border-color1);
+  background-color: var(--jp-layout-color0);
 }
 
-.jp-HistoryViewer-version {
-  margin-bottom: 12px;
-  padding: 8px;
-  border-radius: 4px;
-  border: 1px solid var(--jp-border-color2);
+.jp-HistoryViewer-versionItem {
+  padding: 8px 12px;
+  border-bottom: var(--jp-border-width) solid var(--jp-border-color1);
   cursor: pointer;
-  transition: background-color 0.2s ease;
+  transition: background-color 0.1s ease;
 }
 
-.jp-HistoryViewer-version:hover {
+.jp-HistoryViewer-versionItem:hover {
   background-color: var(--jp-layout-color2);
 }
 
-.jp-HistoryViewer-version.jp-mod-selected {
-  background-color: var(--jp-brand-color3);
-  border-color: var(--jp-brand-color1);
+.jp-HistoryViewer-versionItem.jp-mod-selected {
+  background-color: var(--jp-brand-color1);
+  color: var(--jp-ui-inverse-font-color1);
 }
 
-.jp-HistoryViewer-version.jp-mod-fromVersion {
-  border-left: 4px solid var(--jp-warn-color0);
-}
-
-.jp-HistoryViewer-version.jp-mod-toVersion {
-  border-left: 4px solid var(--jp-success-color0);
-}
-
-.jp-HistoryViewer-versionHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 4px;
-}
-
-.jp-HistoryViewer-versionDate {
-  font-size: var(--jp-ui-font-size1);
-  color: var(--jp-ui-font-color2);
-}
-
-.jp-HistoryViewer-versionLabel {
-  font-weight: bold;
-  font-size: var(--jp-ui-font-size1);
-  color: var(--jp-ui-font-color0);
-  margin-left: 8px;
-}
-
-.jp-HistoryViewer-versionDescription {
-  font-size: var(--jp-ui-font-size1);
-  color: var(--jp-ui-font-color2);
-  margin-bottom: 8px;
-  white-space: pre-line;
-}
-
-.jp-HistoryViewer-versionActions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.jp-HistoryViewer-restoreButton {
-  font-size: var(--jp-ui-font-size1);
-  padding: 2px 8px;
-}
-
-.jp-HistoryViewer-diffContainer {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.jp-HistoryViewer-diffHeader {
-  padding: 8px;
-  border-bottom: 1px solid var(--jp-border-color2);
-}
-
-.jp-HistoryViewer-diffHeader h3 {
-  margin: 0;
-  font-size: var(--jp-ui-font-size2);
-  font-weight: 600;
-}
-
-.jp-HistoryViewer-diffView {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px;
-}
-
-.jp-HistoryViewer-diffPlaceholder,
-.jp-HistoryViewer-diffLoading,
-.jp-HistoryViewer-diffError,
-.jp-HistoryViewer-diffEmpty,
-.jp-HistoryViewer-loading,
-.jp-HistoryViewer-error,
-.jp-HistoryViewer-empty {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100%;
-  color: var(--jp-ui-font-color2);
-  font-style: italic;
-}
-
-.jp-HistoryViewer-diffChange {
-  margin-bottom: 16px;
-  border: 1px solid var(--jp-border-color2);
-  border-radius: 4px;
-  overflow: hidden;
-}
-
-.jp-HistoryViewer-diffChange.jp-mod-insert {
-  border-left: 4px solid var(--jp-success-color0);
-}
-
-.jp-HistoryViewer-diffChange.jp-mod-delete {
-  border-left: 4px solid var(--jp-error-color0);
-}
-
-.jp-HistoryViewer-diffChange.jp-mod-update {
-  border-left: 4px solid var(--jp-warn-color0);
-}
-
-.jp-HistoryViewer-diffPath {
-  padding: 4px 8px;
-  background-color: var(--jp-layout-color2);
-  font-family: var(--jp-code-font-family);
-  font-size: var(--jp-ui-font-size1);
-  border-bottom: 1px solid var(--jp-border-color2);
-}
-
-.jp-HistoryViewer-diffUnified {
-  padding: 8px;
-}
-
-.jp-HistoryViewer-diffSideBySide {
-  display: flex;
-}
-
-.jp-HistoryViewer-diffSideBySide .jp-HistoryViewer-diffOld,
-.jp-HistoryViewer-diffSideBySide .jp-HistoryViewer-diffNew {
-  flex: 1;
-  padding: 8px;
-  overflow-x: auto;
-}
-
-.jp-HistoryViewer-diffSideBySide .jp-HistoryViewer-diffOld {
-  border-right: 1px solid var(--jp-border-color2);
-  background-color: var(--jp-error-color3);
-}
-
-.jp-HistoryViewer-diffSideBySide .jp-HistoryViewer-diffNew {
-  background-color: var(--jp-success-color3);
-}
-
-.jp-HistoryViewer-diffOld {
-  background-color: var(--jp-error-color3);
-  padding: 8px;
-  margin-bottom: 4px;
-}
-
-.jp-HistoryViewer-diffNew {
-  background-color: var(--jp-success-color3);
-  padding: 8px;
-}
-
-.jp-HistoryViewer-diffOld pre,
-.jp-HistoryViewer-diffNew pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-all;
-  font-family: var(--jp-code-font-family);
-  font-size: var(--jp-code-font-size);
-}
-
-.jp-HistoryViewer-diffMeta {
-  padding: 4px 8px;
+.jp-HistoryViewer-versionTimestamp {
   font-size: var(--jp-ui-font-size0);
   color: var(--jp-ui-font-color2);
-  background-color: var(--jp-layout-color2);
-  border-top: 1px solid var(--jp-border-color2);
+  margin-top: 4px;
 }
 
-.jp-HistoryViewer-createSnapshot {
+.jp-HistoryViewer-versionItem.jp-mod-selected .jp-HistoryViewer-versionTimestamp {
+  color: var(--jp-ui-inverse-font-color2);
+}
+
+.jp-HistoryViewer-versionAuthor {
+  display: flex;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.jp-HistoryViewer-authorAvatar {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  margin-right: 6px;
+  background-color: var(--jp-brand-color2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 10px;
+  font-weight: bold;
+}
+
+.jp-HistoryViewer-authorName {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-HistoryViewer-versionItem.jp-mod-selected .jp-HistoryViewer-authorName {
+  color: var(--jp-ui-inverse-font-color2);
+}
+
+/* Timeline View Styles */
+.jp-HistoryViewer-timeline {
+  height: 60px;
+  flex: 0 0 auto;
+  border-bottom: var(--jp-border-width) solid var(--jp-border-color1);
+  padding: 8px 12px;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.jp-HistoryViewer-timelineTrack {
+  height: 4px;
+  background-color: var(--jp-border-color2);
+  flex: 1 1 auto;
   position: relative;
 }
 
-.jp-HistoryViewer-snapshotForm {
+.jp-HistoryViewer-timelineMarker {
   position: absolute;
-  top: 100%;
-  right: 0;
-  width: 300px;
-  padding: 12px;
-  background-color: var(--jp-layout-color1);
-  border: 1px solid var(--jp-border-color2);
-  border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  z-index: 10;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: var(--jp-brand-color1);
+  top: 50%;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  z-index: 1;
+  border: 2px solid var(--jp-layout-color1);
 }
 
-.jp-HistoryViewer-formField {
-  margin-bottom: 8px;
+.jp-HistoryViewer-timelineMarker:hover {
+  background-color: var(--jp-brand-color0);
 }
 
-.jp-HistoryViewer-formField label {
-  display: block;
-  margin-bottom: 4px;
-  font-weight: 500;
+.jp-HistoryViewer-timelineMarker.jp-mod-selected {
+  background-color: var(--jp-brand-color0);
+  border-color: var(--jp-brand-color2);
 }
 
-.jp-HistoryViewer-formField input,
-.jp-HistoryViewer-formField textarea {
-  width: 100%;
+.jp-HistoryViewer-timelineBranch {
+  position: absolute;
+  height: 8px;
+  background-color: var(--jp-warn-color1);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.jp-HistoryViewer-timelineTooltip {
+  position: absolute;
+  background-color: var(--jp-layout-color2);
+  border: var(--jp-border-width) solid var(--jp-border-color1);
+  border-radius: var(--jp-border-radius);
   padding: 4px 8px;
-  border: 1px solid var(--jp-border-color1);
-  border-radius: 3px;
-  background-color: var(--jp-input-background);
-  color: var(--jp-ui-font-color1);
+  font-size: var(--jp-ui-font-size0);
+  pointer-events: none;
+  z-index: 10;
+  white-space: nowrap;
+  box-shadow: var(--jp-elevation-z2);
+  top: -30px;
+  transform: translateX(-50%);
 }
 
-.jp-HistoryViewer-formActions {
+/* Diff Visualization Styles */
+.jp-HistoryViewer-diffContainer {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 16px;
+  background-color: var(--jp-layout-color1);
+}
+
+.jp-HistoryViewer-diffHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: var(--jp-border-width) solid var(--jp-border-color1);
+}
+
+.jp-HistoryViewer-diffTitle {
+  font-weight: 600;
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-HistoryViewer-diffStats {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-HistoryViewer-diffContent {
+  font-family: var(--jp-code-font-family);
+  font-size: var(--jp-code-font-size);
+  line-height: var(--jp-code-line-height);
+  border: var(--jp-border-width) solid var(--jp-border-color1);
+  border-radius: var(--jp-border-radius);
+  overflow: hidden;
+}
+
+.jp-HistoryViewer-diffLine {
+  display: flex;
+  min-height: calc(var(--jp-code-line-height) * 1em);
+}
+
+.jp-HistoryViewer-diffLineNumber {
+  flex: 0 0 40px;
+  text-align: right;
+  padding: 0 8px;
+  color: var(--jp-ui-font-color2);
+  background-color: var(--jp-layout-color2);
+  border-right: var(--jp-border-width) solid var(--jp-border-color1);
+  user-select: none;
+}
+
+.jp-HistoryViewer-diffLineContent {
+  flex: 1 1 auto;
+  padding: 0 8px;
+  white-space: pre;
+  overflow: visible;
+}
+
+/* Diff highlighting styles */
+.jp-HistoryViewer-diffLine-added {
+  background-color: rgba(0, 255, 0, 0.1);
+}
+
+.jp-HistoryViewer-diffLine-removed {
+  background-color: rgba(255, 0, 0, 0.1);
+}
+
+.jp-HistoryViewer-diffLine-changed {
+  background-color: rgba(255, 255, 0, 0.1);
+}
+
+.jp-HistoryViewer-diffSpan-added {
+  background-color: rgba(0, 255, 0, 0.3);
+}
+
+.jp-HistoryViewer-diffSpan-removed {
+  background-color: rgba(255, 0, 0, 0.3);
+  text-decoration: line-through;
+}
+
+.jp-HistoryViewer-diffSpan-changed {
+  background-color: rgba(255, 255, 0, 0.3);
+}
+
+/* Version Restore Controls */
+.jp-HistoryViewer-restoreControls {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  margin-top: 12px;
+  padding: 8px 16px;
+  border-top: var(--jp-border-width) solid var(--jp-border-color1);
 }
 
-.jp-HistoryViewer-restorationError {
-  margin-top: 8px;
-  padding: 8px;
-  background-color: var(--jp-error-color3);
-  color: var(--jp-error-color1);
-  border-radius: 4px;
+.jp-HistoryViewer-restoreButton {
+  background-color: var(--jp-brand-color1);
+  color: var(--jp-ui-inverse-font-color1);
+  border: none;
+  border-radius: var(--jp-border-radius);
+  padding: 4px 12px;
   font-size: var(--jp-ui-font-size1);
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.jp-HistoryViewer-restoreButton:hover {
+  background-color: var(--jp-brand-color0);
+}
+
+.jp-HistoryViewer-restoreButton:disabled {
+  background-color: var(--jp-layout-color3);
+  cursor: not-allowed;
+}
+
+.jp-HistoryViewer-cancelButton {
+  background-color: transparent;
+  color: var(--jp-ui-font-color1);
+  border: var(--jp-border-width) solid var(--jp-border-color1);
+  border-radius: var(--jp-border-radius);
+  padding: 4px 12px;
+  font-size: var(--jp-ui-font-size1);
+  margin-right: 8px;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.jp-HistoryViewer-cancelButton:hover {
+  background-color: var(--jp-layout-color2);
+}
+
+/* Branch Visualization Styles */
+.jp-HistoryViewer-branchContainer {
+  margin-top: 16px;
+  border: var(--jp-border-width) solid var(--jp-border-color1);
+  border-radius: var(--jp-border-radius);
+  overflow: hidden;
+}
+
+.jp-HistoryViewer-branchHeader {
+  background-color: var(--jp-layout-color2);
+  padding: 8px 12px;
+  font-weight: 600;
+  border-bottom: var(--jp-border-width) solid var(--jp-border-color1);
+}
+
+.jp-HistoryViewer-branchGraph {
+  padding: 16px;
+  background-color: var(--jp-layout-color0);
+  min-height: 100px;
+  position: relative;
+}
+
+.jp-HistoryViewer-branchNode {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: var(--jp-brand-color1);
+  border: 2px solid var(--jp-layout-color0);
+  z-index: 2;
+  cursor: pointer;
+}
+
+.jp-HistoryViewer-branchNode:hover {
+  background-color: var(--jp-brand-color0);
+}
+
+.jp-HistoryViewer-branchNode.jp-mod-selected {
+  background-color: var(--jp-brand-color0);
+  border-color: var(--jp-brand-color2);
+}
+
+.jp-HistoryViewer-branchLine {
+  position: absolute;
+  height: 2px;
+  background-color: var(--jp-border-color2);
+  z-index: 1;
+}
+
+.jp-HistoryViewer-branchDivergent {
+  background-color: var(--jp-warn-color1);
+}
+
+.jp-HistoryViewer-branchMerged {
+  background-color: var(--jp-success-color1);
+}
+
+/* Empty state */
+.jp-HistoryViewer-emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 16px;
+  text-align: center;
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-HistoryViewer-emptyStateIcon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.jp-HistoryViewer-emptyStateText {
+  font-size: var(--jp-ui-font-size1);
+  max-width: 300px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 760px) {
+  .jp-HistoryViewer-content {
+    flex-direction: column;
+  }
+  
+  .jp-HistoryViewer-versionList {
+    flex: 0 0 auto;
+    max-height: 200px;
+    width: 100%;
+    border-right: none;
+    border-bottom: var(--jp-border-width) solid var(--jp-border-color1);
+  }
 }
