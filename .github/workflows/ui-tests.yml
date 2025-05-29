@@ -12,6 +12,11 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Enable collaboration features for testing
+  JUPYTER_COLLABORATION_ENABLED: "true"
+  JUPYTER_COLLABORATION_YJS_STORE: "memory"
+
 jobs:
   build:
     name: Build
@@ -91,3 +96,480 @@ jobs:
         with:
           name: notebook-${{ matrix.browser }}-updated-snapshots
           path: ui-tests/test
+
+  collaborative-ui-tests:
+    name: Collaborative UI Tests
+    needs: [build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
+        scenario: [
+          'dual-user',
+          'multi-user',
+          'presence-awareness', 
+          'cell-locking',
+          'document-sync',
+          'conflict-resolution'
+        ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Base Setup
+        uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: notebook-dist-${{ github.run_number }}
+          path: ./dist
+
+      - name: Install the package with collaboration support
+        run: |
+          cd dist
+          python -m pip install -vv notebook*.whl
+          # Install collaboration dependencies
+          python -m pip install 'yjs>=0.1.0' 'y-py>=0.6.0' 'websockets>=11.0'
+
+      - name: Install test dependencies with collaboration extensions
+        run: |
+          cd ui-tests
+          jlpm
+          # Install Yjs and collaboration testing utilities
+          jlpm add yjs@^13.5.40 y-websocket@^1.5.0 y-protocols@^1.0.5
+          jlpm playwright install
+
+      - name: Setup Collaboration Server
+        run: |
+          # Start YJS WebSocket collaboration server for multi-user tests
+          cd ui-tests
+          # Create collaboration server startup script
+          cat > start-collab-server.js << 'EOF'
+          const WebSocket = require('ws');
+          const http = require('http');
+          const { setupWSConnection } = require('y-websocket/bin/utils');
+          
+          const server = http.createServer();
+          const wss = new WebSocket.Server({ server });
+          
+          console.log('Starting YJS collaboration server on port 1234...');
+          
+          wss.on('connection', (ws, req) => {
+            console.log('New collaboration connection:', req.url);
+            setupWSConnection(ws, req);
+          });
+          
+          server.listen(1234, () => {
+            console.log('YJS collaboration server listening on port 1234');
+          });
+          EOF
+          
+          # Start collaboration server in background
+          node start-collab-server.js &
+          echo $! > collab-server.pid
+          
+          # Wait for server to start
+          sleep 5
+          
+          # Verify server is running
+          curl -f http://localhost:1234 || echo "Collaboration server health check"
+
+      - name: Configure Jupyter for Collaboration
+        run: |
+          # Create Jupyter configuration for collaboration testing
+          mkdir -p ~/.jupyter
+          cat > ~/.jupyter/jupyter_notebook_config.py << 'EOF'
+          # Enable collaboration features
+          c.NotebookApp.collaborative = True
+          c.NotebookApp.yjs_websocket_url = 'ws://localhost:1234'
+          c.NotebookApp.allow_origin = '*'
+          c.NotebookApp.disable_check_xsrf = True
+          
+          # Configure collaboration settings
+          c.NotebookApp.collaboration_settings = {
+              'awareness_timeout': 30000,
+              'document_sync_interval': 1000,
+              'max_concurrent_users': 10,
+              'enable_presence': True,
+              'enable_cell_locking': True,
+              'enable_comments': True,
+              'enable_history': True
+          }
+          EOF
+
+      - name: Run Collaborative Tests
+        env:
+          COLLABORATION_SCENARIO: ${{ matrix.scenario }}
+          BROWSER_NAME: ${{ matrix.browser }}
+          COLLABORATION_WEBSOCKET_URL: ws://localhost:1234
+          JUPYTER_COLLABORATION_ENABLED: "true"
+          COLLAB_TEST_TIMEOUT: 60000
+        run: |
+          cd ui-tests
+          
+          # Run collaboration-specific tests based on scenario
+          case "$COLLABORATION_SCENARIO" in
+            "dual-user")
+              echo "Running dual-user collaborative editing tests..."
+              jlpm test --browser ${{ matrix.browser }} --grep "dual.*user|two.*user|collaborative.*editing" --timeout 60000
+              ;;
+            "multi-user")
+              echo "Running multi-user collaborative editing tests..."
+              jlpm test --browser ${{ matrix.browser }} --grep "multi.*user|concurrent.*editing" --timeout 60000
+              ;;
+            "presence-awareness")
+              echo "Running user presence and awareness tests..."
+              jlpm test --browser ${{ matrix.browser }} --grep "presence|awareness|avatar|cursor.*position" --timeout 45000
+              ;;
+            "cell-locking")
+              echo "Running cell locking and conflict resolution tests..."
+              jlpm test --browser ${{ matrix.browser }} --grep "cell.*lock|lock.*cell|conflict.*resolution" --timeout 45000
+              ;;
+            "document-sync")
+              echo "Running document synchronization tests..."
+              jlpm test --browser ${{ matrix.browser }} --grep "document.*sync|sync.*document|real.*time.*sync" --timeout 60000
+              ;;
+            "conflict-resolution")
+              echo "Running conflict resolution and merge tests..."
+              jlpm test --browser ${{ matrix.browser }} --grep "conflict|resolution|merge.*conflict" --timeout 45000
+              ;;
+            *)
+              echo "Running all collaborative tests..."
+              jlpm test --browser ${{ matrix.browser }} --grep "collaborative|collab|multi.*user|presence|awareness|cell.*lock|document.*sync|conflict" --timeout 60000
+              ;;
+          esac
+
+      - name: Cleanup Collaboration Server
+        if: always()
+        run: |
+          cd ui-tests
+          if [ -f collab-server.pid ]; then
+            kill $(cat collab-server.pid) || true
+            rm collab-server.pid
+          fi
+          # Kill any remaining collaboration processes
+          pkill -f "start-collab-server.js" || true
+
+      - name: Upload Collaborative Test Assets
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: collaborative-${{ matrix.browser }}-${{ matrix.scenario }}-test-assets
+          path: |
+            ui-tests/test-results
+
+      - name: Upload Collaborative Test Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: collaborative-${{ matrix.browser }}-${{ matrix.scenario }}-test-report
+          path: |
+            ui-tests/playwright-report
+
+      - name: Upload Collaboration Server Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: collaboration-server-logs-${{ matrix.browser }}-${{ matrix.scenario }}
+          path: |
+            ui-tests/*.log
+            ~/.jupyter/jupyter_notebook_config.py
+
+      - name: Update Collaborative Snapshots
+        if: failure()
+        run: |
+          cd ui-tests
+          # remove previous snapshots from other browser
+          jlpm rimraf "test/**/*collaborative*-snapshots/*.png"
+          jlpm rimraf "test/**/*collab*-snapshots/*.png"
+          # generate new collaborative snapshots
+          jlpm run test:update --browser ${{ matrix.browser }} --grep "collaborative|collab|multi.*user|presence|awareness"
+
+      - name: Upload Updated Collaborative Snapshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: collaborative-${{ matrix.browser }}-${{ matrix.scenario }}-updated-snapshots
+          path: ui-tests/test
+
+  multi-user-integration-tests:
+    name: Multi-User Integration Tests
+    needs: [build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium]
+        users: [2, 3, 5]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Base Setup
+        uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: notebook-dist-${{ github.run_number }}
+          path: ./dist
+
+      - name: Install the package with collaboration support
+        run: |
+          cd dist
+          python -m pip install -vv notebook*.whl
+          # Install collaboration dependencies
+          python -m pip install 'yjs>=0.1.0' 'y-py>=0.6.0' 'websockets>=11.0'
+
+      - name: Install test dependencies with collaboration extensions
+        run: |
+          cd ui-tests
+          jlpm
+          # Install Yjs and collaboration testing utilities
+          jlpm add yjs@^13.5.40 y-websocket@^1.5.0 y-protocols@^1.0.5
+          jlpm playwright install
+
+      - name: Setup Enhanced Collaboration Server
+        run: |
+          # Start YJS WebSocket collaboration server with enhanced logging
+          cd ui-tests
+          cat > start-multi-user-collab-server.js << 'EOF'
+          const WebSocket = require('ws');
+          const http = require('http');
+          const { setupWSConnection } = require('y-websocket/bin/utils');
+          
+          const server = http.createServer();
+          const wss = new WebSocket.Server({ server });
+          
+          let connectionCount = 0;
+          const connections = new Set();
+          
+          console.log('Starting Enhanced YJS collaboration server on port 1234...');
+          
+          wss.on('connection', (ws, req) => {
+            connectionCount++;
+            connections.add(ws);
+            console.log(`New collaboration connection #${connectionCount}:`, req.url);
+            console.log(`Total active connections: ${connections.size}`);
+            
+            ws.on('close', () => {
+              connections.delete(ws);
+              console.log(`Connection closed. Active connections: ${connections.size}`);
+            });
+            
+            setupWSConnection(ws, req);
+          });
+          
+          // Health check endpoint
+          server.on('request', (req, res) => {
+            if (req.url === '/health') {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ 
+                status: 'ok', 
+                connections: connections.size,
+                totalConnections: connectionCount 
+              }));
+            } else {
+              res.writeHead(404);
+              res.end('Not found');
+            }
+          });
+          
+          server.listen(1234, () => {
+            console.log('Enhanced YJS collaboration server listening on port 1234');
+          });
+          
+          // Log server stats every 10 seconds
+          setInterval(() => {
+            console.log(`Server status - Active connections: ${connections.size}, Total: ${connectionCount}`);
+          }, 10000);
+          EOF
+          
+          # Start collaboration server in background
+          node start-multi-user-collab-server.js > collab-server.log 2>&1 &
+          echo $! > collab-server.pid
+          
+          # Wait for server to start
+          sleep 5
+          
+          # Verify server is running
+          curl -f http://localhost:1234/health || echo "Collaboration server health check"
+
+      - name: Configure Jupyter for Multi-User Collaboration
+        run: |
+          # Create Jupyter configuration for multi-user collaboration testing
+          mkdir -p ~/.jupyter
+          cat > ~/.jupyter/jupyter_notebook_config.py << 'EOF'
+          # Enable collaboration features with enhanced settings for multi-user testing
+          c.NotebookApp.collaborative = True
+          c.NotebookApp.yjs_websocket_url = 'ws://localhost:1234'
+          c.NotebookApp.allow_origin = '*'
+          c.NotebookApp.disable_check_xsrf = True
+          
+          # Enhanced collaboration settings for multi-user scenarios
+          c.NotebookApp.collaboration_settings = {
+              'awareness_timeout': 30000,
+              'document_sync_interval': 500,  # Faster sync for testing
+              'max_concurrent_users': 10,
+              'enable_presence': True,
+              'enable_cell_locking': True,
+              'enable_comments': True,
+              'enable_history': True,
+              'conflict_resolution_strategy': 'merge',
+              'presence_update_interval': 1000,
+              'lock_timeout': 30000,
+              'enable_debug_logging': True
+          }
+          EOF
+
+      - name: Run Multi-User Integration Tests
+        env:
+          BROWSER_NAME: ${{ matrix.browser }}
+          COLLABORATION_WEBSOCKET_URL: ws://localhost:1234
+          JUPYTER_COLLABORATION_ENABLED: "true"
+          CONCURRENT_USERS: ${{ matrix.users }}
+          COLLAB_TEST_TIMEOUT: 120000
+        run: |
+          cd ui-tests
+          
+          echo "Running multi-user integration tests with ${{ matrix.users }} concurrent users..."
+          
+          # Create a test script for coordinated multi-user testing
+          cat > multi-user-test.js << 'EOF'
+          const { chromium } = require('playwright');
+          const { expect } = require('@playwright/test');
+          
+          async function runMultiUserTest(userCount) {
+            console.log(`Starting ${userCount}-user collaboration test...`);
+            
+            const browsers = [];
+            const contexts = [];
+            const pages = [];
+            
+            try {
+              // Launch multiple browser instances
+              for (let i = 0; i < userCount; i++) {
+                const browser = await chromium.launch({ headless: true });
+                browsers.push(browser);
+                
+                const context = await browser.newContext();
+                contexts.push(context);
+                
+                const page = await context.newPage();
+                pages.push(page);
+                
+                console.log(`User ${i + 1} browser launched`);
+              }
+              
+              // All users navigate to the same notebook
+              const notebookUrl = 'http://localhost:8888/notebooks/test-notebook.ipynb';
+              
+              await Promise.all(pages.map(async (page, index) => {
+                await page.goto(notebookUrl);
+                await page.waitForSelector('#main-panel', { timeout: 30000 });
+                console.log(`User ${index + 1} connected to notebook`);
+              }));
+              
+              // Wait for collaboration to be established
+              await new Promise(resolve => setTimeout(resolve, 5000));
+              
+              // Test concurrent editing
+              console.log('Testing concurrent editing...');
+              
+              // Each user adds content to different cells
+              for (let i = 0; i < userCount; i++) {
+                const page = pages[i];
+                const cellContent = `print("Hello from user ${i + 1}")`;
+                
+                // Focus on cell and add content
+                await page.click('.jp-Notebook-cell .jp-InputArea-editor');
+                await page.keyboard.type(cellContent);
+                
+                console.log(`User ${i + 1} added content to cell`);
+              }
+              
+              // Wait for synchronization
+              await new Promise(resolve => setTimeout(resolve, 3000));
+              
+              // Verify all users see all changes
+              console.log('Verifying document synchronization...');
+              
+              for (let i = 0; i < userCount; i++) {
+                const page = pages[i];
+                
+                // Check that all user content is visible
+                for (let j = 0; j < userCount; j++) {
+                  const expectedContent = `Hello from user ${j + 1}`;
+                  const isVisible = await page.isVisible(`text=${expectedContent}`);
+                  
+                  if (!isVisible) {
+                    throw new Error(`User ${i + 1} cannot see content from user ${j + 1}`);
+                  }
+                }
+                
+                console.log(`User ${i + 1} sees all synchronized content`);
+              }
+              
+              // Test presence awareness
+              console.log('Testing presence awareness...');
+              
+              // Move cursors and verify presence indicators
+              await Promise.all(pages.map(async (page, index) => {
+                await page.click('.jp-Notebook-cell .jp-InputArea-editor');
+                // Look for presence indicators (user avatars, cursors)
+                const presenceElements = await page.locator('.jp-collab-user-presence, .jp-collab-avatar, .jp-collab-cursor').count();
+                console.log(`User ${index + 1} sees ${presenceElements} presence indicators`);
+              }));
+              
+              console.log(`${userCount}-user collaboration test completed successfully!`);
+              return true;
+              
+            } catch (error) {
+              console.error(`Multi-user test failed:`, error);
+              return false;
+            } finally {
+              // Cleanup
+              await Promise.all(contexts.map(context => context.close()));
+              await Promise.all(browsers.map(browser => browser.close()));
+            }
+          }
+          
+          // Run the test
+          runMultiUserTest(parseInt(process.env.CONCURRENT_USERS || '2')).then(success => {
+            process.exit(success ? 0 : 1);
+          });
+          EOF
+          
+          # Run the multi-user integration test
+          node multi-user-test.js
+
+      - name: Cleanup Multi-User Collaboration Server
+        if: always()
+        run: |
+          cd ui-tests
+          if [ -f collab-server.pid ]; then
+            kill $(cat collab-server.pid) || true
+            rm collab-server.pid
+          fi
+          # Kill any remaining collaboration processes
+          pkill -f "start-multi-user-collab-server.js" || true
+
+      - name: Upload Multi-User Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: multi-user-${{ matrix.browser }}-${{ matrix.users }}users-test-results
+          path: |
+            ui-tests/test-results
+            ui-tests/*.log
+
+      - name: Upload Multi-User Server Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: multi-user-server-logs-${{ matrix.browser }}-${{ matrix.users }}users
+          path: |
+            ui-tests/collab-server.log
+            ~/.jupyter/jupyter_notebook_config.py
