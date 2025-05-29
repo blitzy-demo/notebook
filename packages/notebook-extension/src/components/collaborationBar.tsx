@@ -1,1283 +1,1596 @@
-/**
- * Collaboration Bar Component for Jupyter Notebook v7
- * 
- * React component displaying collaboration status, user avatars, activity feed, 
- * and sharing controls in the top area. Provides central hub for collaboration 
- * features including document sharing, permission controls, collaboration mode 
- * toggle, and sync status indicators.
- * 
- * Integration with YjsNotebookProvider enables real-time synchronization of
- * user presence, document state, and collaboration metadata across all connected
- * clients through Yjs CRDT technology.
- * 
- * @author Jupyter Development Team
- * @version 7.0.0
- */
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Widget } from '@lumino/widgets';
-import { IDisposable } from '@lumino/disposable';
+import { ReactWidget } from '@jupyterlab/ui-components';
+import { INotebookShell } from '@jupyter-notebook/application';
+import { DocumentRegistry } from '@jupyterlab/docregistry';
+import { INotebookModel } from '@jupyterlab/notebook';
+import { Token } from '@lumino/coreutils';
+import { ISignal, Signal } from '@lumino/signaling';
+import { Message } from '@lumino/messaging';
 
-// Future imports for actual collaboration integration
-// import { IYjsNotebookProvider } from '@jupyter-notebook/application:IYjsNotebookProvider';
-// import { IAwarenessRegistry } from '@jupyter-notebook/application:IAwarenessRegistry';
-// import { IPermissionsManager } from '@jupyter-notebook/application:IPermissionsManager';
+// Import collaboration modules
+import { YjsNotebookProvider } from '../../../notebook/src/collab/provider';
+import { IAwarenessProvider, UserInfo, PresenceState } from '../../../notebook/src/collab/awareness';
+import { IPermissionsProvider, UserRole, PermissionLevel } from '../../../notebook/src/collab/permissions';
 
-// Collaboration module interfaces (to be defined in actual modules)
-interface IAwarenessState {
-  user: {
-    id: string;
-    name: string;
-    avatar?: string;
-    color: string;
-  };
-  cursor?: {
-    cellId: string;
-    position: number;
-  };
-  selection?: {
-    cellId: string;
-    range: [number, number];
-  };
-  status: 'active' | 'idle' | 'away';
-  lastSeen: Date;
-}
-
-interface IConnectionStatus {
+/**
+ * Interface for collaboration status information
+ */
+interface ICollaborationStatus {
   isConnected: boolean;
-  isSynced: boolean;
-  connectionType: 'websocket' | 'webrtc' | 'offline';
-  latency?: number;
-  lastSyncTime?: Date;
-  syncErrors?: string[];
+  syncState: 'syncing' | 'synced' | 'offline' | 'error' | 'initializing';
+  lastSyncTime: Date | null;
+  connectionQuality: 'excellent' | 'good' | 'poor' | 'disconnected';
+  conflictCount: number;
+  retryCount: number;
+  maxRetries: number;
 }
 
-interface IActivityItem {
+/**
+ * Interface for notification messages
+ */
+interface INotification {
   id: string;
-  type: 'edit' | 'comment' | 'permission' | 'join' | 'leave';
-  userId: string;
-  userName: string;
-  timestamp: Date;
-  description: string;
-  cellId?: string;
-  metadata?: Record<string, any>;
-}
-
-interface IPermissionInfo {
-  currentUserRole: 'owner' | 'editor' | 'viewer';
-  canEdit: boolean;
-  canComment: boolean;
-  canShare: boolean;
-  canManagePermissions: boolean;
-}
-
-interface ICollaborationMode {
-  mode: 'view' | 'edit';
-  canToggle: boolean;
-}
-
-// Main component props interface
-interface ICollaborationBarProps {
-  className?: string;
-  onPermissionsClick?: () => void;
-  onHistoryClick?: () => void;
-  onShareClick?: () => void;
-  onModeToggle?: (mode: 'view' | 'edit') => void;
-}
-
-// Error handling interface
-interface ICollaborationError {
-  code: string;
+  type: 'info' | 'warning' | 'error' | 'success';
   message: string;
   timestamp: Date;
-  recoverable: boolean;
-}
-
-// Loading state interface  
-interface ILoadingState {
-  isLoading: boolean;
-  operation?: 'connecting' | 'syncing' | 'permissions' | 'sharing';
-  progress?: number;
-}
-
-// Internal component state interface
-interface ICollaborationBarState {
-  connectedUsers: IAwarenessState[];
-  connectionStatus: IConnectionStatus;
-  activityFeed: IActivityItem[];
-  permissions: IPermissionInfo;
-  collaborationMode: ICollaborationMode;
-  isActivityExpanded: boolean;
-  isUsersExpanded: boolean;
-  showConnectionDetails: boolean;
-  error: ICollaborationError | null;
-  loading: ILoadingState;
-  lastUpdateTime: Date;
-}
-
-// Mock collaboration provider interface (will be replaced with actual YjsNotebookProvider)
-interface ICollaborationProvider {
-  awareness: {
-    getStates: () => Map<number, IAwarenessState>;
-    on: (event: string, callback: Function) => void;
-    off: (event: string, callback: Function) => void;
-  };
-  connection: {
-    getStatus: () => IConnectionStatus;
-    on: (event: string, callback: Function) => void;
-    off: (event: string, callback: Function) => void;
-  };
-  permissions: {
-    getInfo: () => IPermissionInfo;
-    on: (event: string, callback: Function) => void;
-    off: (event: string, callback: Function) => void;
-  };
-  activity: {
-    getRecent: (limit?: number) => IActivityItem[];
-    on: (event: string, callback: Function) => void;
-    off: (event: string, callback: Function) => void;
-  };
+  autoHide?: boolean;
+  duration?: number;
 }
 
 /**
- * Collaboration Bar Component
- * 
- * Central hub for collaboration features located in the collaboration-top shell area.
- * Displays real-time user presence, connection status, activity feed, and provides
- * controls for document sharing, permissions, and collaboration mode toggling.
+ * Interface for activity feed items
  */
-export const CollaborationBar: React.FC<ICollaborationBarProps> = ({
-  className = '',
-  onPermissionsClick,
-  onHistoryClick,
-  onShareClick,
-  onModeToggle
+interface IActivityItem {
+  id: string;
+  timestamp: Date;
+  user: UserInfo;
+  action: 'joined' | 'left' | 'edit' | 'comment' | 'lock' | 'unlock' | 'permission_change';
+  target?: string; // cell ID or notebook level
+  description: string;
+}
+
+/**
+ * Props interface for the CollaborationBar component
+ */
+interface ICollaborationBarProps {
+  shell: INotebookShell;
+  notebook?: INotebookModel;
+  yjsProvider?: YjsNotebookProvider;
+  awarenessProvider?: IAwarenessProvider;
+  permissionsProvider?: IPermissionsProvider;
+  onModeChange?: (mode: 'view' | 'edit') => void;
+  onPermissionsOpen?: () => void;
+  onHistoryOpen?: () => void;
+}
+
+/**
+ * CollaborationBar component for displaying collaboration status and controls
+ */
+const CollaborationBar: React.FC<ICollaborationBarProps> = ({
+  shell,
+  notebook,
+  yjsProvider,
+  awarenessProvider,
+  permissionsProvider,
+  onModeChange,
+  onPermissionsOpen,
+  onHistoryOpen
 }) => {
-  // Component state management
-  const [state, setState] = useState<ICollaborationBarState>({
-    connectedUsers: [],
-    connectionStatus: {
-      isConnected: false,
-      isSynced: false,
-      connectionType: 'offline'
-    },
-    activityFeed: [],
-    permissions: {
-      currentUserRole: 'viewer',
-      canEdit: false,
-      canComment: false,
-      canShare: false,
-      canManagePermissions: false
-    },
-    collaborationMode: {
-      mode: 'view',
-      canToggle: false
-    },
-    isActivityExpanded: false,
-    isUsersExpanded: false,
-    showConnectionDetails: false,
-    error: null,
-    loading: { isLoading: false },
-    lastUpdateTime: new Date()
+  // State management for collaboration features
+  const [collaborationStatus, setCollaborationStatus] = useState<ICollaborationStatus>({
+    isConnected: false,
+    syncState: 'initializing',
+    lastSyncTime: null,
+    connectionQuality: 'disconnected',
+    conflictCount: 0,
+    retryCount: 0,
+    maxRetries: 5
   });
 
-  // Mock provider - will be replaced with actual YjsNotebookProvider injection
-  const provider = useMemo<ICollaborationProvider>(() => ({
-    awareness: {
-      getStates: () => new Map(),
-      on: () => {},
-      off: () => {}
-    },
-    connection: {
-      getStatus: () => ({
-        isConnected: true,
-        isSynced: true,
-        connectionType: 'websocket' as const,
-        latency: 45,
-        lastSyncTime: new Date()
-      }),
-      on: () => {},
-      off: () => {}
-    },
-    permissions: {
-      getInfo: () => ({
-        currentUserRole: 'editor' as const,
-        canEdit: true,
-        canComment: true,
-        canShare: true,
-        canManagePermissions: false
-      }),
-      on: () => {},
-      off: () => {}
-    },
-    activity: {
-      getRecent: () => [
-        {
-          id: '1',
-          type: 'edit' as const,
-          userId: 'user1',
-          userName: 'Alice Johnson',
-          timestamp: new Date(Date.now() - 300000),
-          description: 'Modified cell 3',
-          cellId: 'cell-3'
-        },
-        {
-          id: '2',
-          type: 'comment' as const,
-          userId: 'user2',
-          userName: 'Bob Smith',
-          timestamp: new Date(Date.now() - 600000),
-          description: 'Added comment to cell 1',
-          cellId: 'cell-1'
-        }
-      ],
-      on: () => {},
-      off: () => {}
-    }
-  }), []);
+  const [notifications, setNotifications] = useState<INotification[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Initialize collaboration data and event listeners
-  useEffect(() => {
-    const updateAwareness = () => {
-      const users = Array.from(provider.awareness.getStates().values());
-      setState(prev => ({ ...prev, connectedUsers: users }));
+  const [connectedUsers, setConnectedUsers] = useState<UserInfo[]>([]);
+  const [currentUser, setCurrentUser] = useState<UserInfo | null>(null);
+  const [collaborationMode, setCollaborationMode] = useState<'view' | 'edit'>('edit');
+  const [activityFeed, setActivityFeed] = useState<IActivityItem[]>([]);
+  const [showActivityFeed, setShowActivityFeed] = useState(false);
+  const [isShareMenuOpen, setIsShareMenuOpen] = useState(false);
+  const [userPermissions, setUserPermissions] = useState<PermissionLevel>('view');
+
+  /**
+   * Add a notification to the system
+   */
+  const addNotification = useCallback((notification: Omit<INotification, 'id' | 'timestamp'>) => {
+    const newNotification: INotification = {
+      ...notification,
+      id: `notification-${Date.now()}-${Math.random()}`,
+      timestamp: new Date()
     };
-
-    const updateConnection = () => {
-      const status = provider.connection.getStatus();
-      setState(prev => ({ ...prev, connectionStatus: status }));
-    };
-
-    const updatePermissions = () => {
-      const permissions = provider.permissions.getInfo();
-      const mode = permissions.canEdit ? 'edit' : 'view';
-      setState(prev => ({
-        ...prev,
-        permissions,
-        collaborationMode: {
-          mode,
-          canToggle: permissions.canEdit
-        }
-      }));
-    };
-
-    const updateActivity = () => {
-      const activityFeed = provider.activity.getRecent(10);
-      setState(prev => ({ ...prev, activityFeed }));
-    };
-
-    // Initial data load
-    updateAwareness();
-    updateConnection();
-    updatePermissions();
-    updateActivity();
-
-    // Set up event listeners
-    provider.awareness.on('update', updateAwareness);
-    provider.connection.on('statusChange', updateConnection);
-    provider.permissions.on('change', updatePermissions);
-    provider.activity.on('newActivity', updateActivity);
-
-    // Cleanup on unmount
-    return () => {
-      provider.awareness.off('update', updateAwareness);
-      provider.connection.off('statusChange', updateConnection);
-      provider.permissions.off('change', updatePermissions);
-      provider.activity.off('newActivity', updateActivity);
-    };
-  }, [provider]);
-
-  // Event handlers
-  const handleModeToggle = useCallback(() => {
-    if (!state.collaborationMode.canToggle) return;
     
-    const newMode = state.collaborationMode.mode === 'edit' ? 'view' : 'edit';
-    setState(prev => ({
-      ...prev,
-      collaborationMode: { ...prev.collaborationMode, mode: newMode }
-    }));
+    setNotifications(prev => [newNotification, ...prev].slice(0, 10)); // Keep only latest 10
     
-    onModeToggle?.(newMode);
-  }, [state.collaborationMode, onModeToggle]);
-
-  const handleUsersToggle = useCallback(() => {
-    setState(prev => ({ ...prev, isUsersExpanded: !prev.isUsersExpanded }));
-  }, []);
-
-  const handleActivityToggle = useCallback(() => {
-    setState(prev => ({ ...prev, isActivityExpanded: !prev.isActivityExpanded }));
-  }, []);
-
-  const handleConnectionDetailsToggle = useCallback(() => {
-    setState(prev => ({ ...prev, showConnectionDetails: !prev.showConnectionDetails }));
-  }, []);
-
-  // Error handling and recovery
-  const handleError = useCallback((error: ICollaborationError) => {
-    setState(prev => ({ ...prev, error, loading: { isLoading: false } }));
-    
-    // Auto-recovery for recoverable errors
-    if (error.recoverable) {
+    // Auto-hide notifications if specified
+    if (notification.autoHide !== false) {
+      const duration = notification.duration || (notification.type === 'error' ? 10000 : 5000);
       setTimeout(() => {
-        setState(prev => ({ ...prev, error: null }));
-      }, 5000);
+        setNotifications(prev => prev.filter(n => n.id !== newNotification.id));
+      }, duration);
     }
   }, []);
 
-  const handleReconnect = useCallback(async () => {
-    setState(prev => ({ 
-      ...prev, 
-      loading: { isLoading: true, operation: 'connecting' },
-      error: null 
-    }));
+  /**
+   * Handle connection errors with retry logic
+   */
+  const handleConnectionError = useCallback((error: Error) => {
+    setHasError(true);
+    setErrorMessage(error.message);
+    
+    setCollaborationStatus(prev => {
+      const newRetryCount = prev.retryCount + 1;
+      const shouldRetry = newRetryCount < prev.maxRetries;
+      
+      if (shouldRetry) {
+        addNotification({
+          type: 'warning',
+          message: `Connection failed. Retrying... (${newRetryCount}/${prev.maxRetries})`,
+          autoHide: true
+        });
+        
+        // Exponential backoff retry
+        setTimeout(() => {
+          if (yjsProvider) {
+            yjsProvider.reconnect?.();
+          }
+        }, Math.min(1000 * Math.pow(2, newRetryCount), 30000));
+      } else {
+        addNotification({
+          type: 'error',
+          message: 'Failed to connect to collaboration service. Working in offline mode.',
+          autoHide: false
+        });
+      }
+      
+      return {
+        ...prev,
+        isConnected: false,
+        syncState: shouldRetry ? 'syncing' : 'error',
+        connectionQuality: 'disconnected',
+        retryCount: newRetryCount
+      };
+    });
+  }, [yjsProvider, addNotification]);
+
+  /**
+   * Initialize collaboration providers and subscribe to events
+   */
+  useEffect(() => {
+    if (!yjsProvider || !awarenessProvider) {
+      setIsLoading(false);
+      setHasError(true);
+      setErrorMessage('Collaboration providers not available');
+      addNotification({
+        type: 'warning',
+        message: 'Collaboration features are not available. Working in single-user mode.',
+        autoHide: false
+      });
+      return;
+    }
+
+    setIsLoading(true);
+    setHasError(false);
+    setErrorMessage(null);
+
+    // Subscribe to connection status changes
+    const handleConnectionChange = (connected: boolean) => {
+      setCollaborationStatus(prev => ({
+        ...prev,
+        isConnected: connected,
+        syncState: connected ? 'synced' : 'offline',
+        connectionQuality: connected ? 'excellent' : 'disconnected',
+        lastSyncTime: connected ? new Date() : prev.lastSyncTime,
+        retryCount: connected ? 0 : prev.retryCount // Reset retry count on successful connection
+      }));
+
+      if (connected) {
+        setHasError(false);
+        setErrorMessage(null);
+        addNotification({
+          type: 'success',
+          message: 'Connected to collaboration service',
+          autoHide: true,
+          duration: 3000
+        });
+      } else {
+        addNotification({
+          type: 'warning',
+          message: 'Lost connection to collaboration service',
+          autoHide: true,
+          duration: 5000
+        });
+      }
+      
+      setIsLoading(false);
+    };
+
+    // Subscribe to sync state changes
+    const handleSyncStateChange = (state: 'syncing' | 'synced' | 'error') => {
+      setCollaborationStatus(prev => ({
+        ...prev,
+        syncState: state,
+        lastSyncTime: state === 'synced' ? new Date() : prev.lastSyncTime
+      }));
+
+      if (state === 'error') {
+        addNotification({
+          type: 'error',
+          message: 'Synchronization error occurred. Some changes may not be saved.',
+          autoHide: true,
+          duration: 8000
+        });
+      } else if (state === 'synced' && prev.syncState === 'syncing') {
+        // Only show success message when transitioning from syncing to synced
+        addNotification({
+          type: 'success',
+          message: 'All changes synchronized',
+          autoHide: true,
+          duration: 2000
+        });
+      }
+    };
+
+    // Subscribe to user presence changes
+    const handlePresenceChange = (users: UserInfo[], current: UserInfo | null) => {
+      try {
+        setConnectedUsers(users);
+        setCurrentUser(current);
+        
+        // Add activity for user joins/leaves
+        users.forEach(user => {
+          const existingUser = connectedUsers.find(u => u.id === user.id);
+          if (!existingUser && user.id !== current?.id) {
+            addActivityItem({
+              id: `join-${user.id}-${Date.now()}`,
+              timestamp: new Date(),
+              user,
+              action: 'joined',
+              description: `${user.name} joined the session`
+            });
+          }
+        });
+
+        // Detect users who left
+        connectedUsers.forEach(user => {
+          const stillConnected = users.find(u => u.id === user.id);
+          if (!stillConnected && user.id !== current?.id) {
+            addActivityItem({
+              id: `leave-${user.id}-${Date.now()}`,
+              timestamp: new Date(),
+              user,
+              action: 'left',
+              description: `${user.name} left the session`
+            });
+          }
+        });
+      } catch (error) {
+        console.error('Error handling presence change:', error);
+        addNotification({
+          type: 'error',
+          message: 'Error updating user presence information',
+          autoHide: true
+        });
+      }
+    };
+
+    // Subscribe to permission changes
+    const handlePermissionChange = (permissions: PermissionLevel) => {
+      setUserPermissions(permissions);
+    };
 
     try {
-      // await provider.connection.reconnect();
-      setState(prev => ({ 
-        ...prev, 
-        loading: { isLoading: false },
-        lastUpdateTime: new Date()
-      }));
-    } catch (error) {
-      handleError({
-        code: 'RECONNECT_FAILED',
-        message: 'Failed to reconnect to collaboration server',
-        timestamp: new Date(),
-        recoverable: true
-      });
-    }
-  }, [handleError]);
+      // Setup event listeners
+      yjsProvider.connectionStateChanged.connect(handleConnectionChange);
+      yjsProvider.syncStateChanged.connect(handleSyncStateChange);
+      awarenessProvider.presenceChanged.connect(handlePresenceChange);
+      
+      if (permissionsProvider) {
+        permissionsProvider.permissionsChanged.connect(handlePermissionChange);
+      }
 
-  const handleDismissError = useCallback(() => {
-    setState(prev => ({ ...prev, error: null }));
+      // Add error handler for general collaboration errors
+      if (yjsProvider.errorOccurred) {
+        yjsProvider.errorOccurred.connect(handleConnectionError);
+      }
+
+      // Initialize current state
+      setCollaborationStatus(prev => ({
+        ...prev,
+        isConnected: yjsProvider.isConnected || false,
+        syncState: yjsProvider.syncState || 'initializing'
+      }));
+
+      if (awarenessProvider.currentUser) {
+        setCurrentUser(awarenessProvider.currentUser);
+      }
+
+      setConnectedUsers(awarenessProvider.connectedUsers || []);
+      
+      // Mark initialization as complete
+      setIsLoading(false);
+
+    } catch (error) {
+      console.error('Error initializing collaboration:', error);
+      handleConnectionError(error instanceof Error ? error : new Error('Unknown initialization error'));
+    }
+
+    return () => {
+      try {
+        yjsProvider.connectionStateChanged.disconnect(handleConnectionChange);
+        yjsProvider.syncStateChanged.disconnect(handleSyncStateChange);
+        awarenessProvider.presenceChanged.disconnect(handlePresenceChange);
+        
+        if (permissionsProvider) {
+          permissionsProvider.permissionsChanged.disconnect(handlePermissionChange);
+        }
+
+        if (yjsProvider.errorOccurred) {
+          yjsProvider.errorOccurred.disconnect(handleConnectionError);
+        }
+      } catch (error) {
+        console.error('Error during cleanup:', error);
+      }
+    };
+  }, [yjsProvider, awarenessProvider, permissionsProvider, connectedUsers]);
+
+  /**
+   * Add an item to the activity feed
+   */
+  const addActivityItem = useCallback((item: IActivityItem) => {
+    setActivityFeed(prev => [item, ...prev].slice(0, 50)); // Keep only latest 50 items
   }, []);
 
-  // Render error notification
-  const renderError = () => {
-    if (!state.error) return null;
-
-    return (
-      <div className="jp-collab-error">
-        <div className="jp-collab-error-content">
-          <span className="jp-collab-error-icon">⚠️</span>
-          <span className="jp-collab-error-message">{state.error.message}</span>
-          {state.error.recoverable && (
-            <button 
-              className="jp-collab-error-retry"
-              onClick={handleReconnect}
-              disabled={state.loading.isLoading}
-            >
-              Retry
-            </button>
-          )}
-          <button 
-            className="jp-collab-error-dismiss"
-            onClick={handleDismissError}
-          >
-            ✕
-          </button>
-        </div>
-      </div>
-    );
-  };
-
-  // Render loading overlay
-  const renderLoading = () => {
-    if (!state.loading.isLoading) return null;
-
-    return (
-      <div className="jp-collab-loading">
-        <div className="jp-collab-loading-spinner"></div>
-        <span className="jp-collab-loading-text">
-          {state.loading.operation ? `${state.loading.operation}...` : 'Loading...'}
-        </span>
-      </div>
-    );
-  };
-
-  // Render status indicator based on connection state
-  const renderConnectionStatus = () => {
-    const { isConnected, isSynced, connectionType, latency, syncErrors } = state.connectionStatus;
+  /**
+   * Handle collaboration mode toggle
+   */
+  const handleModeToggle = useCallback(() => {
+    const newMode = collaborationMode === 'view' ? 'edit' : 'view';
+    setCollaborationMode(newMode);
+    onModeChange?.(newMode);
     
-    let statusClass = 'jp-collab-status-indicator';
-    let statusText = 'Offline';
-    let statusIcon = '⚫';
+    if (currentUser) {
+      addActivityItem({
+        id: `mode-${Date.now()}`,
+        timestamp: new Date(),
+        user: currentUser,
+        action: 'edit',
+        description: `Switched to ${newMode} mode`
+      });
+    }
+  }, [collaborationMode, onModeChange, currentUser, addActivityItem]);
 
-    if (state.error) {
-      statusClass += ' jp-collab-status-error';
-      statusText = 'Error';
-      statusIcon = '🔴';
-    } else if (isConnected && isSynced) {
-      statusClass += ' jp-collab-status-connected';
-      statusText = 'Connected';
-      statusIcon = '🟢';
-    } else if (isConnected) {
-      statusClass += ' jp-collab-status-syncing';
-      statusText = 'Syncing...';
-      statusIcon = '🟡';
+  /**
+   * Handle share menu toggle
+   */
+  const handleShareToggle = useCallback(() => {
+    setIsShareMenuOpen(prev => !prev);
+  }, []);
+
+  /**
+   * Handle permissions dialog opening
+   */
+  const handlePermissionsClick = useCallback(() => {
+    setIsShareMenuOpen(false);
+    onPermissionsOpen?.();
+  }, [onPermissionsOpen]);
+
+  /**
+   * Generate share link with current permissions
+   */
+  const handleGenerateShareLink = useCallback(async () => {
+    if (!permissionsProvider || !notebook) {
+      addNotification({
+        type: 'error',
+        message: 'Share functionality not available',
+        autoHide: true
+      });
+      return;
+    }
+
+    try {
+      addNotification({
+        type: 'info',
+        message: 'Generating share link...',
+        autoHide: true,
+        duration: 2000
+      });
+
+      const shareUrl = await permissionsProvider.generateShareLink(
+        notebook.path,
+        'edit' // Default to edit permissions for share links
+      );
+      
+      // Copy to clipboard
+      await navigator.clipboard.writeText(shareUrl);
+      
+      addNotification({
+        type: 'success',
+        message: 'Share link copied to clipboard!',
+        autoHide: true,
+        duration: 4000
+      });
+      
+      if (currentUser) {
+        addActivityItem({
+          id: `share-${Date.now()}`,
+          timestamp: new Date(),
+          user: currentUser,
+          action: 'permission_change',
+          description: 'Generated share link'
+        });
+      }
+    } catch (error) {
+      console.error('Failed to generate share link:', error);
+      addNotification({
+        type: 'error',
+        message: `Failed to generate share link: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        autoHide: true,
+        duration: 8000
+      });
+    }
+  }, [permissionsProvider, notebook, currentUser, addActivityItem, addNotification]);
+
+  /**
+   * Render notification system
+   */
+  const renderNotifications = useCallback(() => {
+    if (notifications.length === 0) {
+      return null;
     }
 
     return (
-      <div 
-        className={statusClass}
-        onClick={handleConnectionDetailsToggle}
-        title={`${statusText} (${connectionType}${latency ? `, ${latency}ms` : ''})`}
-      >
-        <span className="jp-collab-status-icon">{statusIcon}</span>
-        <span className="jp-collab-status-text">{statusText}</span>
-        {state.showConnectionDetails && (
-          <div className="jp-collab-connection-details">
-            <div>Type: {connectionType}</div>
-            {latency && <div>Latency: {latency}ms</div>}
-            {state.connectionStatus.lastSyncTime && (
-              <div>Last sync: {state.connectionStatus.lastSyncTime.toLocaleTimeString()}</div>
-            )}
-            {syncErrors && syncErrors.length > 0 && (
-              <div className="jp-collab-sync-errors">
-                <div>Errors:</div>
-                {syncErrors.map((error, index) => (
-                  <div key={index} className="jp-collab-sync-error">{error}</div>
-                ))}
+      <div className="jp-Collab-notifications">
+        {notifications.slice(0, 3).map(notification => (
+          <div
+            key={notification.id}
+            className={`jp-Collab-notification jp-Collab-notification-${notification.type}`}
+            onClick={() => setNotifications(prev => prev.filter(n => n.id !== notification.id))}
+          >
+            <div className="jp-Collab-notification-content">
+              <div className="jp-Collab-notification-icon">
+                {notification.type === 'error' && '❌'}
+                {notification.type === 'warning' && '⚠️'}
+                {notification.type === 'success' && '✅'}
+                {notification.type === 'info' && 'ℹ️'}
               </div>
-            )}
-            {!isConnected && (
-              <button 
-                className="jp-collab-reconnect-button"
-                onClick={handleReconnect}
-                disabled={state.loading.isLoading}
-              >
-                Reconnect
-              </button>
-            )}
+              <div className="jp-Collab-notification-message">{notification.message}</div>
+            </div>
+            <button
+              className="jp-Collab-notification-close"
+              onClick={(e) => {
+                e.stopPropagation();
+                setNotifications(prev => prev.filter(n => n.id !== notification.id));
+              }}
+            >
+              ×
+            </button>
           </div>
-        )}
+        ))}
       </div>
     );
-  };
+  }, [notifications]);
 
-  // Render user presence avatars
-  const renderUserPresence = () => {
-    const visibleUsers = state.isUsersExpanded ? state.connectedUsers : state.connectedUsers.slice(0, 3);
-    const hiddenCount = Math.max(0, state.connectedUsers.length - 3);
+  /**
+   * Get connection status icon and color
+   */
+  const getConnectionStatus = useMemo(() => {
+    const { isConnected, syncState, connectionQuality } = collaborationStatus;
+    
+    if (!isConnected) {
+      return { icon: '⚫', color: '#666', tooltip: 'Disconnected - Working offline' };
+    }
+    
+    switch (syncState) {
+      case 'syncing':
+        return { icon: '🟡', color: '#f59e0b', tooltip: 'Syncing changes...' };
+      case 'synced':
+        return connectionQuality === 'excellent' 
+          ? { icon: '🟢', color: '#10b981', tooltip: 'Connected - All changes synced' }
+          : { icon: '🟡', color: '#f59e0b', tooltip: 'Connected - Slow connection' };
+      case 'error':
+        return { icon: '🔴', color: '#ef4444', tooltip: 'Sync error - Some changes may be lost' };
+      default:
+        return { icon: '⚫', color: '#666', tooltip: 'Connection status unknown' };
+    }
+  }, [collaborationStatus]);
+
+  /**
+   * Format last sync time for display
+   */
+  const formatLastSync = useMemo(() => {
+    if (!collaborationStatus.lastSyncTime) {
+      return 'Never';
+    }
+    
+    const now = new Date();
+    const diff = now.getTime() - collaborationStatus.lastSyncTime.getTime();
+    const minutes = Math.floor(diff / 60000);
+    
+    if (minutes < 1) {
+      return 'Just now';
+    } else if (minutes < 60) {
+      return `${minutes}m ago`;
+    } else {
+      const hours = Math.floor(minutes / 60);
+      return `${hours}h ago`;
+    }
+  }, [collaborationStatus.lastSyncTime]);
+
+  /**
+   * Render user avatar
+   */
+  const renderUserAvatar = useCallback((user: UserInfo, size: 'small' | 'medium' = 'small') => {
+    const sizeClass = size === 'small' ? 'jp-Collab-avatar-small' : 'jp-Collab-avatar-medium';
+    const initials = user.name.split(' ').map(n => n[0]).join('').toUpperCase();
+    
+    return (
+      <div
+        key={user.id}
+        className={`jp-Collab-avatar ${sizeClass}`}
+        style={{ 
+          backgroundColor: user.color || '#666',
+          borderColor: user.isActive ? '#10b981' : 'transparent'
+        }}
+        title={`${user.name} (${user.role})`}
+      >
+        {user.avatar ? (
+          <img src={user.avatar} alt={user.name} />
+        ) : (
+          <span className="jp-Collab-avatar-initials">{initials}</span>
+        )}
+        {user.isActive && <div className="jp-Collab-avatar-active-indicator" />}
+      </div>
+    );
+  }, []);
+
+  /**
+   * Render activity feed
+   */
+  const renderActivityFeed = useCallback(() => {
+    if (!showActivityFeed || activityFeed.length === 0) {
+      return null;
+    }
 
     return (
-      <div className="jp-collab-users">
-        <div className="jp-collab-users-header" onClick={handleUsersToggle}>
-          <span className="jp-collab-users-title">
-            Users ({state.connectedUsers.length})
-          </span>
-          <span className="jp-collab-expand-icon">
-            {state.isUsersExpanded ? '▼' : '▶'}
-          </span>
+      <div className="jp-Collab-activity-feed">
+        <div className="jp-Collab-activity-header">
+          <span>Recent Activity</span>
+          <button
+            className="jp-Collab-activity-close"
+            onClick={() => setShowActivityFeed(false)}
+            title="Close activity feed"
+          >
+            ×
+          </button>
         </div>
-        <div className="jp-collab-users-list">
-          {visibleUsers.map((user, index) => (
-            <div 
-              key={user.user.id} 
-              className={`jp-collab-user-avatar jp-collab-user-${user.status}`}
-              title={`${user.user.name} (${user.status})`}
-              style={{ borderColor: user.user.color }}
-            >
-              {user.user.avatar ? (
-                <img src={user.user.avatar} alt={user.user.name} />
-              ) : (
-                <span className="jp-collab-user-initials">
-                  {user.user.name.split(' ').map(n => n[0]).join('').toUpperCase()}
-                </span>
-              )}
-              <div 
-                className="jp-collab-user-status-dot"
-                style={{ backgroundColor: user.user.color }}
-              />
+        <div className="jp-Collab-activity-list">
+          {activityFeed.slice(0, 10).map(item => (
+            <div key={item.id} className="jp-Collab-activity-item">
+              {renderUserAvatar(item.user, 'small')}
+              <div className="jp-Collab-activity-content">
+                <div className="jp-Collab-activity-description">{item.description}</div>
+                <div className="jp-Collab-activity-time">
+                  {item.timestamp.toLocaleTimeString()}
+                </div>
+              </div>
             </div>
           ))}
-          {!state.isUsersExpanded && hiddenCount > 0 && (
-            <div className="jp-collab-users-more" onClick={handleUsersToggle}>
-              +{hiddenCount}
+        </div>
+      </div>
+    );
+  }, [showActivityFeed, activityFeed, renderUserAvatar]);
+
+  /**
+   * Render share menu
+   */
+  const renderShareMenu = useCallback(() => {
+    if (!isShareMenuOpen) {
+      return null;
+    }
+
+    return (
+      <div className="jp-Collab-share-menu">
+        <div className="jp-Collab-share-header">
+          <span>Share Notebook</span>
+          <button
+            className="jp-Collab-share-close"
+            onClick={() => setIsShareMenuOpen(false)}
+            title="Close share menu"
+          >
+            ×
+          </button>
+        </div>
+        <div className="jp-Collab-share-content">
+          <button
+            className="jp-Collab-share-button"
+            onClick={handleGenerateShareLink}
+            title="Generate shareable link"
+          >
+            📋 Copy Share Link
+          </button>
+          <button
+            className="jp-Collab-share-button"
+            onClick={handlePermissionsClick}
+            title="Manage permissions"
+          >
+            🔒 Manage Permissions
+          </button>
+          <div className="jp-Collab-share-info">
+            <div>Current Permission: <strong>{userPermissions}</strong></div>
+            <div>Connected Users: <strong>{connectedUsers.length}</strong></div>
+          </div>
+        </div>
+      </div>
+    );
+  }, [isShareMenuOpen, handleGenerateShareLink, handlePermissionsClick, userPermissions, connectedUsers.length]);
+
+  // Show loading state during initialization
+  if (isLoading) {
+    return (
+      <div className="jp-Collab-bar jp-Collab-loading">
+        <div className="jp-Collab-loading-indicator">
+          <span>⏳</span>
+          <span>Initializing collaboration...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state if collaboration is not available
+  if (!yjsProvider || !awarenessProvider || hasError) {
+    return (
+      <div className="jp-Collab-bar jp-Collab-error">
+        <div className="jp-Collab-error-indicator">
+          <span>⚠️</span>
+          <span>{errorMessage || 'Collaboration unavailable - working in single-user mode'}</span>
+        </div>
+        {renderNotifications()}
+      </div>
+    );
+  }
+
+  return (
+    <div className="jp-Collab-bar">
+      {/* Notifications */}
+      {renderNotifications()}
+      {/* Connection Status */}
+      <div 
+        className="jp-Collab-status-section"
+        role="status"
+        aria-label="Collaboration connection status"
+      >
+        <div 
+          className="jp-Collab-status-indicator"
+          title={getConnectionStatus.tooltip}
+          style={{ color: getConnectionStatus.color }}
+          aria-label={getConnectionStatus.tooltip}
+        >
+          {getConnectionStatus.icon}
+        </div>
+        <div className="jp-Collab-status-text">
+          <div className="jp-Collab-status-primary">{collaborationStatus.syncState}</div>
+          <div className="jp-Collab-status-secondary">Last sync: {formatLastSync}</div>
+        </div>
+      </div>
+
+      {/* Connected Users */}
+      <div 
+        className="jp-Collab-users-section"
+        role="group"
+        aria-label="Connected users"
+      >
+        <div className="jp-Collab-users-avatars" role="list">
+          {connectedUsers.slice(0, 5).map(user => renderUserAvatar(user))}
+          {connectedUsers.length > 5 && (
+            <div 
+              className="jp-Collab-users-more" 
+              title={`+${connectedUsers.length - 5} more users`}
+              aria-label={`${connectedUsers.length - 5} additional users connected`}
+            >
+              +{connectedUsers.length - 5}
             </div>
           )}
         </div>
-      </div>
-    );
-  };
-
-  // Render activity feed
-  const renderActivityFeed = () => {
-    const visibleActivities = state.isActivityExpanded ? state.activityFeed : state.activityFeed.slice(0, 3);
-
-    return (
-      <div className="jp-collab-activity">
-        <div className="jp-collab-activity-header" onClick={handleActivityToggle}>
-          <span className="jp-collab-activity-title">Recent Activity</span>
-          <span className="jp-collab-expand-icon">
-            {state.isActivityExpanded ? '▼' : '▶'}
-          </span>
+        <div 
+          className="jp-Collab-users-count"
+          aria-live="polite"
+          aria-label={`${connectedUsers.length} user${connectedUsers.length !== 1 ? 's' : ''} connected`}
+        >
+          {connectedUsers.length} user{connectedUsers.length !== 1 ? 's' : ''}
         </div>
-        <div className="jp-collab-activity-list">
-          {visibleActivities.map((activity) => (
-            <div key={activity.id} className="jp-collab-activity-item">
-              <div className="jp-collab-activity-meta">
-                <span className="jp-collab-activity-user">{activity.userName}</span>
-                <span className="jp-collab-activity-time">
-                  {activity.timestamp.toLocaleTimeString()}
-                </span>
-              </div>
-              <div className="jp-collab-activity-description">
-                {activity.description}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-  return (
-    <div className={`jp-collaboration-bar ${className}`}>
-      {/* Error Notification */}
-      {renderError()}
-      
-      {/* Loading Overlay */}
-      {renderLoading()}
-
-      {/* Embedded CSS Styles for Component */}
-      <style>{`
-        .jp-collaboration-bar {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 6px 12px;
-          background: var(--jp-layout-color1);
-          border-bottom: 1px solid var(--jp-border-color1);
-          font-size: var(--jp-ui-font-size1);
-          font-family: var(--jp-ui-font-family);
-          min-height: 36px;
-          overflow: hidden;
-          position: relative;
-        }
-
-        .jp-collab-section {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          position: relative;
-        }
-
-        /* Connection Status Styles */
-        .jp-collab-status-indicator {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          padding: 4px 8px;
-          border-radius: 4px;
-          cursor: pointer;
-          transition: background-color 0.2s;
-          background: var(--jp-layout-color2);
-          border: 1px solid var(--jp-border-color2);
-        }
-
-        .jp-collab-status-indicator:hover {
-          background: var(--jp-layout-color3);
-        }
-
-        .jp-collab-status-connected {
-          border-color: var(--jp-success-color1);
-        }
-
-        .jp-collab-status-syncing {
-          border-color: var(--jp-warn-color1);
-        }
-
-        .jp-collab-status-error {
-          border-color: var(--jp-error-color1);
-          background: var(--jp-error-color3);
-        }
-
-        .jp-collab-status-icon {
-          font-size: 12px;
-        }
-
-        .jp-collab-status-text {
-          font-size: 11px;
-          font-weight: 500;
-        }
-
-        .jp-collab-connection-details {
-          position: absolute;
-          top: 100%;
-          left: 0;
-          z-index: 1000;
-          background: var(--jp-layout-color1);
-          border: 1px solid var(--jp-border-color1);
-          border-radius: 4px;
-          padding: 8px;
-          font-size: 11px;
-          white-space: nowrap;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-        }
-
-        /* User Presence Styles */
-        .jp-collab-users {
-          display: flex;
-          flex-direction: column;
-          position: relative;
-        }
-
-        .jp-collab-users-header {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          cursor: pointer;
-          padding: 2px 4px;
-          border-radius: 3px;
-          transition: background-color 0.2s;
-        }
-
-        .jp-collab-users-header:hover {
-          background: var(--jp-layout-color2);
-        }
-
-        .jp-collab-users-title {
-          font-size: 11px;
-          font-weight: 500;
-          color: var(--jp-ui-font-color1);
-        }
-
-        .jp-collab-expand-icon {
-          font-size: 10px;
-          color: var(--jp-ui-font-color2);
-        }
-
-        .jp-collab-users-list {
-          display: flex;
-          align-items: center;
-          gap: -2px;
-          margin-top: 4px;
-        }
-
-        .jp-collab-user-avatar {
-          position: relative;
-          width: 24px;
-          height: 24px;
-          border-radius: 50%;
-          border: 2px solid;
-          overflow: hidden;
-          background: var(--jp-layout-color2);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 10px;
-          font-weight: bold;
-          color: var(--jp-ui-font-color1);
-          cursor: pointer;
-          transition: transform 0.2s;
-        }
-
-        .jp-collab-user-avatar:hover {
-          transform: scale(1.1);
-          z-index: 10;
-        }
-
-        .jp-collab-user-avatar img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-
-        .jp-collab-user-initials {
-          color: white;
-          text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-        }
-
-        .jp-collab-user-status-dot {
-          position: absolute;
-          bottom: -1px;
-          right: -1px;
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          border: 1px solid var(--jp-layout-color1);
-        }
-
-        .jp-collab-user-active .jp-collab-user-status-dot {
-          background: var(--jp-success-color1);
-        }
-
-        .jp-collab-user-idle .jp-collab-user-status-dot {
-          background: var(--jp-warn-color1);
-        }
-
-        .jp-collab-user-away .jp-collab-user-status-dot {
-          background: var(--jp-error-color1);
-        }
-
-        .jp-collab-users-more {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 24px;
-          height: 24px;
-          border-radius: 50%;
-          background: var(--jp-layout-color3);
-          border: 1px solid var(--jp-border-color1);
-          font-size: 10px;
-          font-weight: bold;
-          cursor: pointer;
-          transition: background-color 0.2s;
-        }
-
-        .jp-collab-users-more:hover {
-          background: var(--jp-layout-color4);
-        }
-
-        /* Mode Toggle Styles */
-        .jp-collab-mode-toggle {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          padding: 4px 8px;
-          border: 1px solid var(--jp-border-color2);
-          border-radius: 4px;
-          background: var(--jp-layout-color2);
-          color: var(--jp-ui-font-color1);
-          cursor: pointer;
-          transition: all 0.2s;
-          font-size: 11px;
-        }
-
-        .jp-collab-mode-toggle:hover:not(.jp-collab-disabled) {
-          background: var(--jp-layout-color3);
-          border-color: var(--jp-border-color3);
-        }
-
-        .jp-collab-mode-toggle.jp-collab-disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-
-        .jp-collab-mode-icon {
-          font-size: 12px;
-        }
-
-        .jp-collab-mode-text {
-          font-weight: 500;
-        }
-
-        /* Control Buttons Styles */
-        .jp-collab-controls {
-          display: flex;
-          gap: 4px;
-        }
-
-        .jp-collab-control-button {
-          padding: 4px 8px;
-          border: 1px solid var(--jp-border-color2);
-          border-radius: 4px;
-          background: var(--jp-layout-color2);
-          color: var(--jp-ui-font-color1);
-          cursor: pointer;
-          font-size: 11px;
-          font-weight: 500;
-          transition: all 0.2s;
-          white-space: nowrap;
-        }
-
-        .jp-collab-control-button:hover:not(:disabled) {
-          background: var(--jp-layout-color3);
-          border-color: var(--jp-border-color3);
-        }
-
-        .jp-collab-control-button:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-
-        /* Activity Feed Styles */
-        .jp-collab-activity {
-          display: flex;
-          flex-direction: column;
-          position: relative;
-          max-width: 200px;
-        }
-
-        .jp-collab-activity-header {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          cursor: pointer;
-          padding: 2px 4px;
-          border-radius: 3px;
-          transition: background-color 0.2s;
-        }
-
-        .jp-collab-activity-header:hover {
-          background: var(--jp-layout-color2);
-        }
-
-        .jp-collab-activity-title {
-          font-size: 11px;
-          font-weight: 500;
-          color: var(--jp-ui-font-color1);
-        }
-
-        .jp-collab-activity-list {
-          margin-top: 4px;
-          max-height: 120px;
-          overflow-y: auto;
-        }
-
-        .jp-collab-activity-item {
-          padding: 4px;
-          border-radius: 3px;
-          margin-bottom: 2px;
-          background: var(--jp-layout-color2);
-          border: 1px solid var(--jp-border-color1);
-        }
-
-        .jp-collab-activity-meta {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 2px;
-        }
-
-        .jp-collab-activity-user {
-          font-size: 10px;
-          font-weight: 600;
-          color: var(--jp-ui-font-color1);
-        }
-
-        .jp-collab-activity-time {
-          font-size: 9px;
-          color: var(--jp-ui-font-color2);
-        }
-
-        .jp-collab-activity-description {
-          font-size: 10px;
-          color: var(--jp-ui-font-color2);
-          line-height: 1.3;
-        }
-
-        /* Responsive Design */
-        @media (max-width: 768px) {
-          .jp-collaboration-bar {
-            gap: 8px;
-            padding: 4px 8px;
-          }
-
-          .jp-collab-section {
-            gap: 4px;
-          }
-
-          .jp-collab-control-button {
-            padding: 3px 6px;
-            font-size: 10px;
-          }
-
-          .jp-collab-activity {
-            max-width: 150px;
-          }
-        }
-
-        /* Dark Theme Support */
-        [data-jp-theme-light="false"] .jp-collaboration-bar {
-          background: var(--jp-layout-color0);
-        }
-
-        [data-jp-theme-light="false"] .jp-collab-connection-details {
-          box-shadow: 0 2px 8px rgba(255, 255, 255, 0.1);
-        }
-
-        /* High Contrast Support */
-        @media (prefers-contrast: high) {
-          .jp-collab-status-indicator,
-          .jp-collab-mode-toggle,
-          .jp-collab-control-button {
-            border-width: 2px;
-          }
-
-          .jp-collab-user-avatar {
-            border-width: 3px;
-          }
-        }
-
-        /* Animation for status changes */
-        @keyframes jp-collab-pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.6; }
-        }
-
-        .jp-collab-status-syncing .jp-collab-status-icon {
-          animation: jp-collab-pulse 2s infinite;
-        }
-
-        /* Error and Loading State Styles */
-        .jp-collab-error {
-          position: absolute;
-          top: 100%;
-          left: 0;
-          right: 0;
-          z-index: 1001;
-          background: var(--jp-error-color3);
-          border: 1px solid var(--jp-error-color1);
-          border-radius: 4px;
-          padding: 8px;
-          margin-top: 4px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-        }
-
-        .jp-collab-error-content {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-
-        .jp-collab-error-icon {
-          font-size: 14px;
-        }
-
-        .jp-collab-error-message {
-          flex: 1;
-          font-size: 11px;
-          color: var(--jp-error-color1);
-        }
-
-        .jp-collab-error-retry,
-        .jp-collab-error-dismiss {
-          padding: 2px 6px;
-          border: 1px solid var(--jp-error-color1);
-          border-radius: 3px;
-          background: var(--jp-layout-color1);
-          color: var(--jp-error-color1);
-          font-size: 10px;
-          cursor: pointer;
-          transition: background-color 0.2s;
-        }
-
-        .jp-collab-error-retry:hover,
-        .jp-collab-error-dismiss:hover {
-          background: var(--jp-error-color2);
-        }
-
-        .jp-collab-error-retry:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-
-        .jp-collab-loading {
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(255, 255, 255, 0.8);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          z-index: 1000;
-          border-radius: 4px;
-        }
-
-        [data-jp-theme-light="false"] .jp-collab-loading {
-          background: rgba(0, 0, 0, 0.8);
-        }
-
-        .jp-collab-loading-spinner {
-          width: 16px;
-          height: 16px;
-          border: 2px solid var(--jp-border-color3);
-          border-top: 2px solid var(--jp-brand-color1);
-          border-radius: 50%;
-          animation: jp-collab-spin 1s linear infinite;
-        }
-
-        .jp-collab-loading-text {
-          font-size: 11px;
-          color: var(--jp-ui-font-color1);
-        }
-
-        @keyframes jp-collab-spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-
-        .jp-collab-sync-errors {
-          margin-top: 6px;
-          padding: 4px;
-          background: var(--jp-error-color3);
-          border-radius: 3px;
-          font-size: 10px;
-        }
-
-        .jp-collab-sync-error {
-          color: var(--jp-error-color1);
-          margin: 2px 0;
-        }
-
-        .jp-collab-reconnect-button {
-          margin-top: 6px;
-          padding: 4px 8px;
-          border: 1px solid var(--jp-brand-color1);
-          border-radius: 3px;
-          background: var(--jp-brand-color1);
-          color: white;
-          font-size: 10px;
-          cursor: pointer;
-          transition: background-color 0.2s;
-          width: 100%;
-        }
-
-        .jp-collab-reconnect-button:hover:not(:disabled) {
-          background: var(--jp-brand-color0);
-        }
-
-        .jp-collab-reconnect-button:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-      `}</style>
-
-      {/* Connection Status Section */}
-      <div className="jp-collab-section jp-collab-connection">
-        {renderConnectionStatus()}
-      </div>
-
-      {/* User Presence Section */}
-      <div className="jp-collab-section jp-collab-presence">
-        {renderUserPresence()}
       </div>
 
       {/* Collaboration Mode Toggle */}
-      <div className="jp-collab-section jp-collab-mode">
+      <div className="jp-Collab-mode-section">
         <button
-          className={`jp-collab-mode-toggle ${state.collaborationMode.canToggle ? '' : 'jp-collab-disabled'}`}
+          className={`jp-Collab-mode-toggle ${collaborationMode === 'edit' ? 'jp-Collab-mode-edit' : 'jp-Collab-mode-view'}`}
           onClick={handleModeToggle}
-          disabled={!state.collaborationMode.canToggle}
-          title={`Switch to ${state.collaborationMode.mode === 'edit' ? 'view' : 'edit'} mode`}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              handleModeToggle();
+            }
+          }}
+          disabled={userPermissions === 'view'}
+          title={`Switch to ${collaborationMode === 'view' ? 'edit' : 'view'} mode`}
+          aria-label={`Current mode: ${collaborationMode}. Click to switch to ${collaborationMode === 'view' ? 'edit' : 'view'} mode`}
+          aria-pressed={collaborationMode === 'edit'}
         >
-          <span className="jp-collab-mode-icon">
-            {state.collaborationMode.mode === 'edit' ? '✏️' : '👁️'}
-          </span>
-          <span className="jp-collab-mode-text">
-            {state.collaborationMode.mode === 'edit' ? 'Edit' : 'View'}
-          </span>
+          {collaborationMode === 'edit' ? '✏️ Edit' : '👁️ View'}
         </button>
       </div>
 
-      {/* Document Controls */}
-      <div className="jp-collab-section jp-collab-controls">
+      {/* Activity Feed Toggle */}
+      <div className="jp-Collab-activity-section">
         <button
-          className="jp-collab-control-button"
-          onClick={onShareClick}
-          disabled={!state.permissions.canShare}
-          title="Share document"
+          className={`jp-Collab-activity-toggle ${showActivityFeed ? 'jp-Collab-active' : ''}`}
+          onClick={() => setShowActivityFeed(prev => !prev)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setShowActivityFeed(prev => !prev);
+            } else if (e.key === 'Escape' && showActivityFeed) {
+              setShowActivityFeed(false);
+            }
+          }}
+          title="Show recent activity"
+          aria-label={`Activity feed. ${activityFeed.length} recent activities. ${showActivityFeed ? 'Press Escape to close' : 'Click to open'}`}
+          aria-expanded={showActivityFeed}
+          aria-haspopup="true"
         >
-          🔗 Share
+          📝 Activity
+          {activityFeed.length > 0 && (
+            <span 
+              className="jp-Collab-activity-badge"
+              aria-label={`${activityFeed.length} unread activities`}
+            >
+              {activityFeed.length}
+            </span>
+          )}
         </button>
-        
-        <button
-          className="jp-collab-control-button"
-          onClick={onPermissionsClick}
-          disabled={!state.permissions.canManagePermissions}
-          title="Manage permissions"
-        >
-          🔒 Permissions
-        </button>
-        
-        <button
-          className="jp-collab-control-button"
-          onClick={onHistoryClick}
-          title="View history"
-        >
-          📜 History
-        </button>
-      </div>
-
-      {/* Activity Feed Section */}
-      <div className="jp-collab-section jp-collab-activity-section">
         {renderActivityFeed()}
+      </div>
+
+      {/* Share Controls */}
+      <div className="jp-Collab-share-section">
+        <button
+          className={`jp-Collab-share-toggle ${isShareMenuOpen ? 'jp-Collab-active' : ''}`}
+          onClick={handleShareToggle}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              handleShareToggle();
+            } else if (e.key === 'Escape' && isShareMenuOpen) {
+              setIsShareMenuOpen(false);
+            }
+          }}
+          title="Share notebook"
+          aria-label={`Share notebook. ${isShareMenuOpen ? 'Press Escape to close menu' : 'Click to open share options'}`}
+          aria-expanded={isShareMenuOpen}
+          aria-haspopup="true"
+        >
+          📤 Share
+        </button>
+        {renderShareMenu()}
+      </div>
+
+      {/* History Access */}
+      <div className="jp-Collab-history-section">
+        <button
+          className="jp-Collab-history-toggle"
+          onClick={onHistoryOpen}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onHistoryOpen?.();
+            }
+          }}
+          title="View change history"
+          aria-label="Open change history viewer"
+        >
+          🕒 History
+        </button>
       </div>
     </div>
   );
 };
 
-// Default export for easier importing
-export default CollaborationBar;
-
 /**
- * Lumino Widget wrapper for the CollaborationBar component
- * Enables integration with JupyterLab's widget system and shell
- * 
- * This widget is registered in the collaboration-top shell area and provides
- * the main collaboration interface for notebook users. It integrates with
- * the YjsNotebookProvider and other collaboration services to display
- * real-time collaboration status and controls.
- * 
- * Features:
- * - Real-time user presence indicators
- * - Connection status monitoring with auto-reconnect
- * - Activity feed showing recent collaboration events
- * - Permission controls and sharing functionality
- * - Collaboration mode toggle (view/edit)
- * - Error handling with user-friendly recovery options
- * - Responsive design supporting mobile and desktop
- * - Accessibility support with proper ARIA labels
- * - Dark theme and high contrast support
- * 
- * @example
- * ```typescript
- * const widget = new CollaborationBarWidget({
- *   onPermissionsClick: () => permissionsDialog.show(),
- *   onHistoryClick: () => historyViewer.show(),
- *   onShareClick: () => shareDialog.show(),
- *   onModeToggle: (mode) => notebook.setCollaborationMode(mode)
- * });
- * shell.add(widget, 'collaboration-top');
- * ```
+ * Widget wrapper for the CollaborationBar component
  */
-export class CollaborationBarWidget extends Widget implements IDisposable {
-  private _collaborationBar: React.ReactElement;
-  private _options: ICollaborationBarProps;
+export class CollaborationBarWidget extends ReactWidget {
+  private _shell: INotebookShell;
+  private _notebook?: INotebookModel;
+  private _yjsProvider?: YjsNotebookProvider;
+  private _awarenessProvider?: IAwarenessProvider;
+  private _permissionsProvider?: IPermissionsProvider;
+  private _modeChanged = new Signal<this, 'view' | 'edit'>(this);
+  private _permissionsRequested = new Signal<this, void>(this);
+  private _historyRequested = new Signal<this, void>(this);
 
-  constructor(options: ICollaborationBarProps = {}) {
+  constructor(options: {
+    shell: INotebookShell;
+    notebook?: INotebookModel;
+    yjsProvider?: YjsNotebookProvider;
+    awarenessProvider?: IAwarenessProvider;
+    permissionsProvider?: IPermissionsProvider;
+  }) {
     super();
-    this.addClass('jp-collaboration-bar-widget');
-    this.id = 'collaboration-bar';
-    this.title.label = 'Collaboration';
-    this.title.caption = 'Real-time collaboration status and controls';
-    
-    // Add accessibility attributes
-    this.node.setAttribute('role', 'toolbar');
-    this.node.setAttribute('aria-label', 'Collaboration controls');
-    this.node.setAttribute('aria-live', 'polite');
-    
-    this._options = options;
-    this._collaborationBar = React.createElement(CollaborationBar, options);
+    this._shell = options.shell;
+    this._notebook = options.notebook;
+    this._yjsProvider = options.yjsProvider;
+    this._awarenessProvider = options.awarenessProvider;
+    this._permissionsProvider = options.permissionsProvider;
+    this.addClass('jp-Collab-BarWidget');
   }
 
   /**
-   * Update the collaboration bar props
-   * @param options - New props to apply
+   * Signal emitted when collaboration mode changes
    */
-  updateProps(options: Partial<ICollaborationBarProps>): void {
-    this._options = { ...this._options, ...options };
-    this._collaborationBar = React.createElement(CollaborationBar, this._options);
-    
-    // Re-render with new props if attached
-    if (this.isAttached) {
-      const React = require('react');
-      const ReactDOM = require('react-dom');
-      ReactDOM.render(this._collaborationBar, this.node);
-    }
+  get modeChanged(): ISignal<this, 'view' | 'edit'> {
+    return this._modeChanged;
   }
 
   /**
-   * Get current collaboration status for external integrations
-   * @returns Current collaboration state summary
+   * Signal emitted when permissions dialog is requested
    */
-  getCollaborationStatus(): {
-    isConnected: boolean;
-    userCount: number;
-    hasErrors: boolean;
-  } {
-    // This would integrate with the actual provider in production
-    return {
-      isConnected: true,
-      userCount: 0,
-      hasErrors: false
-    };
+  get permissionsRequested(): ISignal<this, void> {
+    return this._permissionsRequested;
   }
 
   /**
-   * Dispose of the widget resources
+   * Signal emitted when history viewer is requested
    */
-  dispose(): void {
-    if (this.isDisposed) {
-      return;
-    }
-    
-    // Cleanup React component before disposing
-    if (this.isAttached) {
-      const ReactDOM = require('react-dom');
-      ReactDOM.unmountComponentAtNode(this.node);
-    }
-    
-    super.dispose();
+  get historyRequested(): ISignal<this, void> {
+    return this._historyRequested;
   }
 
   /**
-   * Handle after attach
+   * Update the notebook model
    */
-  protected onAfterAttach(): void {
-    super.onAfterAttach();
-    
-    // Render React component
-    const React = require('react');
-    const ReactDOM = require('react-dom');
-    
-    try {
-      ReactDOM.render(this._collaborationBar, this.node);
-    } catch (error) {
-      console.error('Failed to render CollaborationBar:', error);
-      // Fallback content
-      this.node.innerHTML = `
-        <div class="jp-collab-error-fallback">
-          <span>⚠️ Collaboration features unavailable</span>
-        </div>
-      `;
-    }
+  setNotebook(notebook: INotebookModel | undefined): void {
+    this._notebook = notebook;
+    this.update();
   }
 
   /**
-   * Handle before detach
+   * Update the YjsNotebookProvider
    */
-  protected onBeforeDetach(): void {
-    super.onBeforeDetach();
-    
-    // Safely unmount React component
-    try {
-      const ReactDOM = require('react-dom');
-      ReactDOM.unmountComponentAtNode(this.node);
-    } catch (error) {
-      console.error('Failed to unmount CollaborationBar:', error);
-    }
+  setYjsProvider(provider: YjsNotebookProvider | undefined): void {
+    this._yjsProvider = provider;
+    this.update();
   }
 
   /**
-   * Handle resize events for responsive behavior
+   * Update the awareness provider
    */
-  protected onResize(): void {
-    super.onResize();
-    
-    // Notify React component of resize if needed
-    const event = new CustomEvent('resize');
-    this.node.dispatchEvent(event);
+  setAwarenessProvider(provider: IAwarenessProvider | undefined): void {
+    this._awarenessProvider = provider;
+    this.update();
+  }
+
+  /**
+   * Update the permissions provider
+   */
+  setPermissionsProvider(provider: IPermissionsProvider | undefined): void {
+    this._permissionsProvider = provider;
+    this.update();
+  }
+
+  protected render(): JSX.Element {
+    return (
+      <CollaborationBar
+        shell={this._shell}
+        notebook={this._notebook}
+        yjsProvider={this._yjsProvider}
+        awarenessProvider={this._awarenessProvider}
+        permissionsProvider={this._permissionsProvider}
+        onModeChange={(mode) => this._modeChanged.emit(mode)}
+        onPermissionsOpen={() => this._permissionsRequested.emit()}
+        onHistoryOpen={() => this._historyRequested.emit()}
+      />
+    );
   }
 }
 
 /**
- * Type exports for external usage
+ * Token for the CollaborationBar service
  */
-export type {
-  ICollaborationBarProps,
-  IAwarenessState,
-  IConnectionStatus,
-  IActivityItem,
-  IPermissionInfo,
-  ICollaborationMode,
-  ICollaborationError,
-  ILoadingState
-};
+export const ICollaborationBar = new Token<ICollaborationBar>(
+  '@jupyter-notebook/collaboration-bar:ICollaborationBar'
+);
 
 /**
- * Constants for external configuration
+ * Interface for the CollaborationBar service
  */
-export const COLLABORATION_BAR_CONSTANTS = {
-  WIDGET_ID: 'collaboration-bar',
-  SHELL_AREA: 'collaboration-top',
-  UPDATE_INTERVAL: 5000,
-  RECONNECT_TIMEOUT: 30000,
-  MAX_ACTIVITY_ITEMS: 50,
-  MAX_VISIBLE_USERS: 10
-} as const;
+export interface ICollaborationBar {
+  /**
+   * The collaboration bar widget
+   */
+  readonly widget: CollaborationBarWidget;
+
+  /**
+   * Signal emitted when collaboration mode changes
+   */
+  readonly modeChanged: ISignal<CollaborationBarWidget, 'view' | 'edit'>;
+
+  /**
+   * Signal emitted when permissions dialog is requested
+   */
+  readonly permissionsRequested: ISignal<CollaborationBarWidget, void>;
+
+  /**
+   * Signal emitted when history viewer is requested
+   */
+  readonly historyRequested: ISignal<CollaborationBarWidget, void>;
+}
+
+export default CollaborationBar;
+
+/**
+ * CSS Styles for the CollaborationBar component
+ * These styles should be included in the extension's CSS bundle
+ */
+export const COLLABORATION_BAR_CSS = `
+/* Main collaboration bar container */
+.jp-Collab-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  background: var(--jp-layout-color1);
+  border-bottom: 1px solid var(--jp-border-color1);
+  min-height: 40px;
+  font-size: var(--jp-ui-font-size1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  position: relative;
+  z-index: 1000;
+}
+
+/* Status section */
+.jp-Collab-status-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 120px;
+}
+
+.jp-Collab-status-indicator {
+  font-size: 14px;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.jp-Collab-status-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.jp-Collab-status-primary {
+  font-weight: 500;
+  color: var(--jp-ui-font-color1);
+  text-transform: capitalize;
+}
+
+.jp-Collab-status-secondary {
+  font-size: 11px;
+  color: var(--jp-ui-font-color2);
+}
+
+/* Users section */
+.jp-Collab-users-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 100px;
+}
+
+.jp-Collab-users-avatars {
+  display: flex;
+  align-items: center;
+  gap: -4px; /* Overlap avatars slightly */
+}
+
+.jp-Collab-avatar {
+  border-radius: 50%;
+  border: 2px solid transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 600;
+  position: relative;
+  transition: transform 0.2s ease;
+}
+
+.jp-Collab-avatar:hover {
+  transform: scale(1.1);
+  z-index: 10;
+}
+
+.jp-Collab-avatar-small {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}
+
+.jp-Collab-avatar-medium {
+  width: 32px;
+  height: 32px;
+  font-size: 12px;
+}
+
+.jp-Collab-avatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.jp-Collab-avatar-active-indicator {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  background: #10b981;
+  border: 2px solid white;
+  border-radius: 50%;
+}
+
+.jp-Collab-users-more {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--jp-ui-font-color2);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.jp-Collab-users-count {
+  font-size: 11px;
+  color: var(--jp-ui-font-color2);
+  white-space: nowrap;
+}
+
+/* Mode section */
+.jp-Collab-mode-section {
+  display: flex;
+  align-items: center;
+}
+
+.jp-Collab-mode-toggle {
+  padding: 4px 12px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  background: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s ease;
+  min-width: 60px;
+}
+
+.jp-Collab-mode-toggle:hover:not(:disabled) {
+  background: var(--jp-layout-color2);
+  border-color: var(--jp-brand-color1);
+}
+
+.jp-Collab-mode-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.jp-Collab-mode-edit {
+  border-color: var(--jp-brand-color1);
+  background: var(--jp-brand-color1);
+  color: white;
+}
+
+.jp-Collab-mode-view {
+  border-color: var(--jp-warn-color1);
+  background: var(--jp-warn-color1);
+  color: white;
+}
+
+/* Activity section */
+.jp-Collab-activity-section {
+  position: relative;
+}
+
+.jp-Collab-activity-toggle {
+  padding: 4px 12px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  background: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.jp-Collab-activity-toggle:hover {
+  background: var(--jp-layout-color2);
+  border-color: var(--jp-brand-color1);
+}
+
+.jp-Collab-activity-toggle.jp-Collab-active {
+  background: var(--jp-brand-color1);
+  color: white;
+  border-color: var(--jp-brand-color1);
+}
+
+.jp-Collab-activity-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: var(--jp-error-color1);
+  color: white;
+  border-radius: 10px;
+  font-size: 9px;
+  padding: 2px 5px;
+  min-width: 16px;
+  text-align: center;
+  line-height: 1;
+}
+
+.jp-Collab-activity-feed {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  background: var(--jp-layout-color1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: 300px;
+  max-width: 400px;
+  max-height: 300px;
+  overflow: hidden;
+  z-index: 1001;
+}
+
+.jp-Collab-activity-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--jp-border-color1);
+  background: var(--jp-layout-color2);
+  font-weight: 500;
+}
+
+.jp-Collab-activity-close {
+  background: none;
+  border: none;
+  color: var(--jp-ui-font-color2);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.jp-Collab-activity-close:hover {
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-Collab-activity-list {
+  max-height: 250px;
+  overflow-y: auto;
+}
+
+.jp-Collab-activity-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.jp-Collab-activity-item:last-child {
+  border-bottom: none;
+}
+
+.jp-Collab-activity-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.jp-Collab-activity-description {
+  font-size: 12px;
+  color: var(--jp-ui-font-color1);
+  line-height: 1.3;
+  margin-bottom: 2px;
+}
+
+.jp-Collab-activity-time {
+  font-size: 10px;
+  color: var(--jp-ui-font-color2);
+}
+
+/* Share section */
+.jp-Collab-share-section {
+  position: relative;
+}
+
+.jp-Collab-share-toggle {
+  padding: 4px 12px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  background: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s ease;
+}
+
+.jp-Collab-share-toggle:hover {
+  background: var(--jp-layout-color2);
+  border-color: var(--jp-brand-color1);
+}
+
+.jp-Collab-share-toggle.jp-Collab-active {
+  background: var(--jp-brand-color1);
+  color: white;
+  border-color: var(--jp-brand-color1);
+}
+
+.jp-Collab-share-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  background: var(--jp-layout-color1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: 250px;
+  z-index: 1001;
+}
+
+.jp-Collab-share-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--jp-border-color1);
+  background: var(--jp-layout-color2);
+  font-weight: 500;
+}
+
+.jp-Collab-share-close {
+  background: none;
+  border: none;
+  color: var(--jp-ui-font-color2);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.jp-Collab-share-close:hover {
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-Collab-share-content {
+  padding: 12px;
+}
+
+.jp-Collab-share-button {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  background: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  transition: all 0.2s ease;
+}
+
+.jp-Collab-share-button:hover {
+  background: var(--jp-layout-color2);
+  border-color: var(--jp-brand-color1);
+}
+
+.jp-Collab-share-button:last-of-type {
+  margin-bottom: 12px;
+}
+
+.jp-Collab-share-info {
+  border-top: 1px solid var(--jp-border-color2);
+  padding-top: 8px;
+  font-size: 11px;
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-Collab-share-info div {
+  margin-bottom: 4px;
+}
+
+.jp-Collab-share-info strong {
+  color: var(--jp-ui-font-color1);
+}
+
+/* History section */
+.jp-Collab-history-section {
+  display: flex;
+  align-items: center;
+}
+
+.jp-Collab-history-toggle {
+  padding: 4px 12px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  background: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s ease;
+}
+
+.jp-Collab-history-toggle:hover {
+  background: var(--jp-layout-color2);
+  border-color: var(--jp-brand-color1);
+}
+
+/* Widget wrapper */
+.jp-Collab-BarWidget {
+  flex-shrink: 0;
+}
+
+/* Loading state */
+.jp-Collab-loading {
+  justify-content: center;
+  opacity: 0.8;
+}
+
+.jp-Collab-loading-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-Collab-loading-indicator span:first-child {
+  animation: jp-Collab-spin 1s linear infinite;
+}
+
+@keyframes jp-Collab-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Error state */
+.jp-Collab-error {
+  justify-content: center;
+  background: var(--jp-warn-color3);
+  border-bottom-color: var(--jp-warn-color1);
+}
+
+.jp-Collab-error-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--jp-warn-color1);
+}
+
+/* Notifications */
+.jp-Collab-notifications {
+  position: fixed;
+  top: 80px;
+  right: 16px;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 400px;
+}
+
+.jp-Collab-notification {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+  animation: jp-Collab-slideIn 0.3s ease-out;
+}
+
+.jp-Collab-notification:hover {
+  transform: translateX(-4px);
+}
+
+.jp-Collab-notification-info {
+  background: var(--jp-info-color3);
+  border-left: 4px solid var(--jp-info-color1);
+  color: var(--jp-info-color1);
+}
+
+.jp-Collab-notification-success {
+  background: var(--jp-success-color3);
+  border-left: 4px solid var(--jp-success-color1);
+  color: var(--jp-success-color1);
+}
+
+.jp-Collab-notification-warning {
+  background: var(--jp-warn-color3);
+  border-left: 4px solid var(--jp-warn-color1);
+  color: var(--jp-warn-color1);
+}
+
+.jp-Collab-notification-error {
+  background: var(--jp-error-color3);
+  border-left: 4px solid var(--jp-error-color1);
+  color: var(--jp-error-color1);
+}
+
+.jp-Collab-notification-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1;
+}
+
+.jp-Collab-notification-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.jp-Collab-notification-message {
+  font-size: 12px;
+  line-height: 1.4;
+  flex: 1;
+}
+
+.jp-Collab-notification-close {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.jp-Collab-notification-close:hover {
+  opacity: 1;
+}
+
+@keyframes jp-Collab-slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .jp-Collab-bar {
+    gap: 8px;
+    padding: 6px 12px;
+    flex-wrap: wrap;
+  }
+  
+  .jp-Collab-status-text {
+    display: none;
+  }
+  
+  .jp-Collab-users-count {
+    display: none;
+  }
+  
+  .jp-Collab-activity-feed,
+  .jp-Collab-share-menu {
+    right: auto;
+    left: 0;
+    min-width: 280px;
+  }
+}
+
+@media (max-width: 480px) {
+  .jp-Collab-bar {
+    gap: 4px;
+    padding: 4px 8px;
+  }
+  
+  .jp-Collab-mode-toggle,
+  .jp-Collab-activity-toggle,
+  .jp-Collab-share-toggle,
+  .jp-Collab-history-toggle {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+  
+  .jp-Collab-avatar-small {
+    width: 20px;
+    height: 20px;
+    font-size: 9px;
+  }
+}
+
+/* Dark theme support */
+[data-jp-theme-light="false"] .jp-Collab-avatar-active-indicator {
+  border-color: var(--jp-layout-color1);
+}
+
+[data-jp-theme-light="false"] .jp-Collab-activity-feed,
+[data-jp-theme-light="false"] .jp-Collab-share-menu {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .jp-Collab-bar {
+    border-bottom-width: 2px;
+  }
+  
+  .jp-Collab-mode-toggle,
+  .jp-Collab-activity-toggle,
+  .jp-Collab-share-toggle,
+  .jp-Collab-history-toggle {
+    border-width: 2px;
+  }
+  
+  .jp-Collab-avatar {
+    border-width: 3px;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .jp-Collab-avatar,
+  .jp-Collab-mode-toggle,
+  .jp-Collab-activity-toggle,
+  .jp-Collab-share-toggle,
+  .jp-Collab-history-toggle {
+    transition: none;
+  }
+}
+`;
