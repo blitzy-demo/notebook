@@ -18,8 +18,164 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      
       - name: Base Setup
         uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+      
+      # Build collaboration packages and generate artifacts
+      - name: Build Collaboration TypeScript Components
+        run: |
+          echo "Building collaboration TypeScript components..."
+          # Build awareness, locks, history, permissions, comments modules
+          jlpm build:collab --scope @jupyter-notebook/notebook
+          
+          # Verify collaboration modules compiled successfully
+          if [ ! -f "packages/notebook/lib/collab/awareness.js" ]; then
+            echo "Error: Awareness module not built"
+            exit 1
+          fi
+          if [ ! -f "packages/notebook/lib/collab/locks.js" ]; then
+            echo "Error: Locks module not built"
+            exit 1
+          fi
+          if [ ! -f "packages/notebook/lib/collab/history.js" ]; then
+            echo "Error: History module not built"
+            exit 1
+          fi
+          if [ ! -f "packages/notebook/lib/collab/permissions.js" ]; then
+            echo "Error: Permissions module not built"
+            exit 1
+          fi
+          if [ ! -f "packages/notebook/lib/collab/comments.js" ]; then
+            echo "Error: Comments module not built"
+            exit 1
+          fi
+          echo "✅ All collaboration TypeScript components built successfully"
+
+      - name: Build Collaboration UI Components
+        run: |
+          echo "Building collaboration React UI components..."
+          # Build React UI components for collaboration
+          jlpm build:collab-ui --scope @jupyter-notebook/notebook-extension
+          
+          # Verify UI components compiled successfully
+          for component in userPresence cellLockIndicator historyViewer permissionsDialog commentSystem collaborationBar; do
+            if [ ! -f "packages/notebook-extension/lib/components/${component}.js" ]; then
+              echo "Error: ${component} UI component not built"
+              exit 1
+            fi
+          done
+          echo "✅ All collaboration UI components built successfully"
+
+      - name: Export CRDT Schema Definitions
+        run: |
+          echo "Exporting CRDT schema definitions..."
+          # Generate CRDT schema definitions for version compatibility
+          python -m jupyter_notebook.collab.schema_export \
+            --output-dir=".jupyter_releaser_checkout/schemas" \
+            --format=json
+            
+          # Generate schema compatibility mapping
+          python -m jupyter_notebook.collab.compatibility_check \
+            --generate-mapping \
+            --output=".jupyter_releaser_checkout/schemas/version-compatibility.json"
+            
+          # Verify schema files generated
+          if [ ! -f ".jupyter_releaser_checkout/schemas/yjs-document-schema.json" ]; then
+            echo "Error: CRDT document schema not generated"
+            exit 1
+          fi
+          if [ ! -f ".jupyter_releaser_checkout/schemas/version-compatibility.json" ]; then
+            echo "Error: Version compatibility mapping not generated"
+            exit 1
+          fi
+          echo "✅ CRDT schema definitions exported successfully"
+
+      - name: Validate Yjs Document Schema Compatibility
+        run: |
+          echo "Validating Yjs document schema compatibility..."
+          # Run version compatibility checks
+          python -m jupyter_notebook.collab.compatibility_check \
+            --validate-schemas \
+            --schema-dir=".jupyter_releaser_checkout/schemas"
+            
+          # Test CRDT consistency with sample documents
+          python -m jupyter_notebook.collab.crdt_validator \
+            --test-consistency \
+            --schema-dir=".jupyter_releaser_checkout/schemas"
+            
+          echo "✅ Yjs document schema compatibility validated"
+
+      - name: Package Collaboration Server Handlers
+        run: |
+          echo "Packaging collaboration server handlers..."
+          # Build notebook-collab extra package
+          pip install -e ".[collab]"
+          python setup.py bdist_wheel --collab-extra
+          
+          # Verify collaboration handlers packaged
+          if [ ! -f "dist/notebook-*-collab.whl" ]; then
+            echo "Error: Collaboration server handlers package not created"
+            exit 1
+          fi
+          
+          # Copy to release checkout directory
+          cp dist/notebook-*-collab.whl .jupyter_releaser_checkout/dist/
+          echo "✅ Collaboration server handlers packaged successfully"
+
+      - name: Generate Collaboration Artifacts
+        run: |
+          echo "Generating collaboration artifacts..."
+          # Create collaboration bundle manifest
+          cat > .jupyter_releaser_checkout/dist/collaboration-manifest.json << EOF
+          {
+            "version": "$(cat package.json | jq -r .version)",
+            "collaboration_components": {
+              "typescript_modules": [
+                "awareness", "locks", "history", "permissions", "comments"
+              ],
+              "ui_components": [
+                "userPresence", "cellLockIndicator", "historyViewer", 
+                "permissionsDialog", "commentSystem", "collaborationBar"
+              ],
+              "server_handlers": "notebook-collab",
+              "crdt_schemas": [
+                "yjs-document-schema.json", "version-compatibility.json"
+              ]
+            },
+            "yjs_version": "^13.5.40",
+            "compatibility": {
+              "minimum_notebook_version": "7.5.0",
+              "crdt_schema_version": "1.0.0"
+            }
+          }
+          EOF
+          
+          # Create collaboration documentation
+          cat > .jupyter_releaser_checkout/dist/COLLABORATION_README.md << EOF
+          # Jupyter Notebook v7 Collaboration Features
+          
+          This release includes comprehensive real-time collaborative editing capabilities.
+          
+          ## Included Components
+          - TypeScript collaboration modules (awareness, locks, history, permissions, comments)
+          - React UI components for collaboration (presence, locking, history, permissions, comments)
+          - Python server handlers for collaboration (notebook-collab extra)
+          - CRDT schema definitions for version compatibility
+          
+          ## Installation
+          \`\`\`bash
+          pip install notebook[collab]
+          \`\`\`
+          
+          ## Compatibility
+          - Minimum Notebook version: 7.5.0
+          - Yjs version: ^13.5.40
+          - CRDT schema version: 1.0.0
+          EOF
+          
+          echo "✅ Collaboration artifacts generated successfully"
+
       - name: Check Release
         uses: jupyter-server/jupyter_releaser/.github/actions/check-release@v2
         with:
@@ -31,3 +187,20 @@ jobs:
         with:
           name: notebook-jupyter-releaser-dist-${{ github.run_number }}
           path: .jupyter_releaser_checkout/dist
+
+      - name: Upload Collaboration Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: notebook-collaboration-artifacts-${{ github.run_number }}
+          path: |
+            .jupyter_releaser_checkout/schemas/
+            .jupyter_releaser_checkout/dist/collaboration-manifest.json
+            .jupyter_releaser_checkout/dist/COLLABORATION_README.md
+            .jupyter_releaser_checkout/dist/notebook-*-collab.whl
+
+      - name: Upload CRDT Schema Definitions
+        uses: actions/upload-artifact@v4
+        with:
+          name: notebook-crdt-schemas-${{ github.run_number }}
+          path: |
+            .jupyter_releaser_checkout/schemas/*.json
