@@ -31,6 +31,22 @@ jobs:
       - name: Build
         uses: ./.github/actions/build-dist
 
+      - name: Build Collaboration Packages
+        run: |
+          # Build collaboration-specific UI components
+          hatch run build:collab-ui
+          
+          # Package collaboration server handlers
+          hatch run build:collab-server
+          
+          # Generate CRDT schema definitions for version compatibility
+          hatch run build:crdt-schemas
+          
+          # Upload collaboration artifacts
+          mkdir -p dist/collaboration
+          cp -r packages/notebook/src/collab/ dist/collaboration/
+          cp -r packages/notebook-extension/src/components/ dist/collaboration/components/
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -53,6 +69,28 @@ jobs:
         run: |
           hatch run js_test
 
+      - name: Collaboration Unit Tests
+        run: |
+          # Test Yjs integration and CRDT synchronization
+          hatch run test:collab-unit
+          
+          # Test user presence and awareness functionality
+          hatch run test:presence-awareness
+          
+          # Test cell locking and permissions
+          hatch run test:locks-permissions
+
+      - name: Yjs and CRDT Dependency Testing
+        run: |
+          # Validate Yjs dependencies are properly installed
+          python -c "import sys; sys.path.append('packages/notebook/src'); from collab.awareness import YjsAwareness; print('✓ Yjs awareness integration working')"
+          
+          # Test CRDT library compatibility
+          node -e "const Y = require('yjs'); const doc = new Y.Doc(); console.log('✓ Yjs CRDT library working');"
+          
+          # Verify @jupyterlab/yjs integration
+          node -e "const yjs = require('@jupyterlab/yjs'); console.log('✓ JupyterLab Yjs utilities available');"
+
       - name: Integration Tests
         run: |
           pip install .
@@ -63,10 +101,173 @@ jobs:
 
       - uses: jupyterlab/maintainer-tools/.github/actions/upload-coverage@v1
 
+  test_collaboration_core:
+    name: Test Collaboration Core
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+        collaboration-scenario: ['state-sync', 'conflict-resolution', 'permissions']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Base Setup
+        uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+
+      - name: Install Collaboration Dependencies
+        run: |
+          pip install .[collab]
+          npm install yjs@^13.5.40 @jupyterlab/yjs@^4.0.0
+
+      - name: Collaborative State Synchronization Tests
+        if: matrix.collaboration-scenario == 'state-sync'
+        run: |
+          # Test Yjs document synchronization across multiple clients
+          hatch run test:crdt-synchronization
+          
+          # Verify document convergence under network latency
+          hatch run test:document-convergence
+          
+          # Test change history tracking and versioning
+          hatch run test:change-history
+
+      - name: Conflict Resolution Tests  
+        if: matrix.collaboration-scenario == 'conflict-resolution'
+        run: |
+          # Test concurrent editing conflict resolution
+          hatch run test:concurrent-editing
+          
+          # Test cell-level locking mechanisms
+          hatch run test:cell-locking
+          
+          # Test lock acquisition and release workflows
+          hatch run test:lock-workflows
+
+      - name: Document Locking and Permissions Tests
+        if: matrix.collaboration-scenario == 'permissions'
+        run: |
+          # Test fine-grained permission enforcement
+          hatch run test:permissions-enforcement
+          
+          # Test role-based access control
+          hatch run test:role-based-access
+          
+          # Test comment system permissions
+          hatch run test:comment-permissions
+
+  test_collaboration_e2e:
+    name: Test Multi-User E2E Collaboration
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11']
+        users: [2, 3, 5] # Test with different numbers of concurrent users
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Base Setup
+        uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+
+      - name: Install E2E Testing Dependencies
+        run: |
+          pip install .[collab]
+          npm install playwright@^1.41.1 @jupyterlab/galata@^5.0.0
+          npx playwright install chromium firefox
+
+      - name: Multi-User End-to-End Collaborative Editing Tests
+        run: |
+          # Start collaboration server for testing
+          jupyter notebook --allow-root --no-browser --ip=0.0.0.0 --port=8888 &
+          sleep 10
+          
+          # Run Playwright tests with multiple browser contexts (simulating multiple users)
+          npx playwright test tests/collaboration/multi-user-editing.spec.ts --workers=${{ matrix.users }}
+          
+          # Test user presence and awareness with Galata
+          hatch run test:e2e-presence --users=${{ matrix.users }}
+          
+          # Test collaborative cell editing scenarios
+          hatch run test:e2e-collaborative-editing --users=${{ matrix.users }}
+
+      - name: Multi-User Conflict Resolution E2E Tests
+        run: |
+          # Test simultaneous editing and conflict resolution
+          hatch run test:e2e-conflict-resolution --users=${{ matrix.users }}
+          
+          # Test comment threading with multiple users
+          hatch run test:e2e-comment-threading --users=${{ matrix.users }}
+          
+          # Test document locking behavior across users
+          hatch run test:e2e-document-locking --users=${{ matrix.users }}
+
+      - name: Upload Collaboration Test Artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: collaboration-test-results-${{ matrix.users }}-users
+          path: |
+            test-results/
+            collaboration-logs/
+            playwright-report/
+
+  test_collaboration_dependencies:
+    name: Test Collaboration Dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Base Setup
+        uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+
+      - name: Validate Yjs and CRDT Dependencies
+        run: |
+          # Test Yjs installation and basic functionality
+          python -c "
+          import sys
+          import subprocess
+          
+          # Test yjs package availability
+          result = subprocess.run(['node', '-e', 'require(\"yjs\"); console.log(\"✓ yjs package available\")'], 
+                                capture_output=True, text=True)
+          if result.returncode != 0:
+              print('✗ yjs package not available')
+              sys.exit(1)
+          print(result.stdout.strip())
+          
+          # Test @jupyterlab/yjs integration
+          result = subprocess.run(['node', '-e', 'require(\"@jupyterlab/yjs\"); console.log(\"✓ @jupyterlab/yjs available\")'], 
+                                capture_output=True, text=True)
+          if result.returncode != 0:
+              print('✗ @jupyterlab/yjs package not available')
+              sys.exit(1)
+          print(result.stdout.strip())
+          "
+
+      - name: CRDT Schema Compatibility Tests
+        run: |
+          # Test CRDT schema version compatibility
+          hatch run test:crdt-schema-compatibility
+          
+          # Validate Yjs document serialization/deserialization
+          hatch run test:yjs-serialization
+          
+          # Test WebSocket protocol compatibility
+          hatch run test:websocket-protocol
+
   coverage:
     runs-on: ubuntu-latest
     needs:
       - test
+      - test_collaboration_core
+      - test_collaboration_e2e
     steps:
       - uses: actions/checkout@v4
       - uses: jupyterlab/maintainer-tools/.github/actions/report-coverage@v1
@@ -166,6 +367,20 @@ jobs:
           jupyter notebook --version
           jupyter notebook --help
 
+      - name: Validate Collaboration Features
+        run: |
+          # Test collaboration extensions are properly installed
+          jupyter labextension list 2>&1 | grep -ie "collaboration.*enabled.*ok" - || echo "Collaboration extension not found (optional)"
+          
+          # Test collaboration server endpoints are available
+          ${{ matrix.py_cmd }} -c "
+          try:
+              import notebook.handlers
+              print('✓ Collaboration handlers available')
+          except ImportError as e:
+              print('✗ Collaboration handlers not available:', e)
+          "
+
   check_links:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -196,6 +411,17 @@ jobs:
           yarn build:utils
           yarn integrity
 
+      - name: Collaboration Code Quality Checks
+        run: |
+          # Lint collaboration-specific TypeScript files
+          yarn eslint packages/notebook/src/collab/ packages/notebook-extension/src/components/
+          
+          # Check collaboration component formatting
+          yarn prettier:check packages/notebook/src/collab/ packages/notebook-extension/src/components/
+          
+          # Type-check collaboration modules
+          hatch run typing:collab
+
   tests_check: # This job does nothing and is only used for the branch protection
     if: always()
     needs:
@@ -205,6 +431,9 @@ jobs:
       - test_docs
       - test_minimum_versions
       - test_prereleases
+      - test_collaboration_core
+      - test_collaboration_e2e
+      - test_collaboration_dependencies
       - check_links
     runs-on: ubuntu-latest
     steps:
