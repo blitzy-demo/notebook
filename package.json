@@ -52,6 +52,8 @@
   },
   "devDependencies": {
     "@jupyterlab/buildutils": "~4.5.0-alpha.0",
+    "@jupyterlab/galata": "^5.0.0",
+    "@jupyterlab/yjs": "^4.0.0",
     "@typescript-eslint/eslint-plugin": "^5.55.0",
     "@typescript-eslint/parser": "^5.55.0",
     "eslint": "^8.36.0",
@@ -62,6 +64,7 @@
     "html-webpack-plugin": "^5.6.3",
     "lerna": "^7.1.4",
     "npm-run-all": "^4.1.5",
+    "playwright": "^1.41.1",
     "prettier": "^2.8.5",
     "rimraf": "^3.0.2",
     "typescript": "~5.5.4"
