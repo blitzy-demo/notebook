@@ -79,6 +79,170 @@ jobs:
             jlpm
             jlpm deduplicate
           fi
+
+      - name: Check and validate collaboration dependencies
+        shell: bash
+        run: |
+          set -eux
+          
+          # Check current versions of collaboration dependencies
+          echo "Checking collaboration dependency versions..."
+          
+          # Check yjs version compatibility (required: ^13.5.40)
+          YJS_CURRENT=$(jlpm list yjs --depth=0 2>/dev/null | grep yjs@ | sed 's/.*yjs@//' | sed 's/ .*//' || echo "not-installed")
+          echo "Current yjs version: ${YJS_CURRENT}"
+          
+          # Check @jupyterlab/yjs version compatibility (required: ^4.0.0)
+          JUPYTERLAB_YJS_CURRENT=$(jlpm list @jupyterlab/yjs --depth=0 2>/dev/null | grep @jupyterlab/yjs@ | sed 's/.*@jupyterlab\/yjs@//' | sed 's/ .*//' || echo "not-installed")
+          echo "Current @jupyterlab/yjs version: ${JUPYTERLAB_YJS_CURRENT}"
+          
+          # Check latest available versions
+          YJS_LATEST=$(npm view yjs version)
+          JUPYTERLAB_YJS_LATEST=$(npm view @jupyterlab/yjs version)
+          
+          echo "Latest yjs version: ${YJS_LATEST}"
+          echo "Latest @jupyterlab/yjs version: ${JUPYTERLAB_YJS_LATEST}"
+          
+          # Set environment variables for later use
+          echo "yjs_current=${YJS_CURRENT}" >> $GITHUB_ENV
+          echo "yjs_latest=${YJS_LATEST}" >> $GITHUB_ENV
+          echo "jupyterlab_yjs_current=${JUPYTERLAB_YJS_CURRENT}" >> $GITHUB_ENV
+          echo "jupyterlab_yjs_latest=${JUPYTERLAB_YJS_LATEST}" >> $GITHUB_ENV
+          
+          # Validate minimum version requirements for collaboration features
+          # yjs must be >= 13.5.40
+          if [[ "${YJS_CURRENT}" != "not-installed" ]]; then
+            echo "Validating yjs version compatibility..."
+            node -e "
+              const semver = require('semver');
+              const current = '${YJS_CURRENT}';
+              const required = '13.5.40';
+              if (!semver.gte(current, required)) {
+                console.error(\`yjs version \${current} does not meet minimum requirement \${required}\`);
+                process.exit(1);
+              }
+              console.log(\`yjs version \${current} meets minimum requirement \${required}\`);
+            "
+          fi
+          
+          # @jupyterlab/yjs must be >= 4.0.0
+          if [[ "${JUPYTERLAB_YJS_CURRENT}" != "not-installed" ]]; then
+            echo "Validating @jupyterlab/yjs version compatibility..."
+            node -e "
+              const semver = require('semver');
+              const current = '${JUPYTERLAB_YJS_CURRENT}';
+              const required = '4.0.0';
+              if (!semver.gte(current, required)) {
+                console.error(\`@jupyterlab/yjs version \${current} does not meet minimum requirement \${required}\`);
+                process.exit(1);
+              }
+              console.log(\`@jupyterlab/yjs version \${current} meets minimum requirement \${required}\`);
+            "
+          fi
+
+      - name: Upgrade collaboration dependencies
+        shell: bash
+        run: |
+          set -eux
+          
+          COLLABORATION_UPDATED=false
+          
+          # Check if yjs needs updating
+          if [[ "${YJS_CURRENT}" != "${YJS_LATEST}" ]]; then
+            echo "Updating yjs from ${YJS_CURRENT} to ${YJS_LATEST}..."
+            
+            # Validate that the latest version meets our minimum requirements
+            node -e "
+              const semver = require('semver');
+              const latest = '${YJS_LATEST}';
+              const required = '13.5.40';
+              if (!semver.gte(latest, required)) {
+                console.error(\`Latest yjs version \${latest} does not meet minimum requirement \${required}\`);
+                process.exit(1);
+              }
+              console.log(\`Latest yjs version \${latest} meets minimum requirement \${required}\`);
+            "
+            
+            # Update yjs to the latest compatible version
+            jlpm add yjs@^${YJS_LATEST}
+            COLLABORATION_UPDATED=true
+          fi
+          
+          # Check if @jupyterlab/yjs needs updating
+          if [[ "${JUPYTERLAB_YJS_CURRENT}" != "${JUPYTERLAB_YJS_LATEST}" ]]; then
+            echo "Updating @jupyterlab/yjs from ${JUPYTERLAB_YJS_CURRENT} to ${JUPYTERLAB_YJS_LATEST}..."
+            
+            # Validate that the latest version meets our minimum requirements
+            node -e "
+              const semver = require('semver');
+              const latest = '${JUPYTERLAB_YJS_LATEST}';
+              const required = '4.0.0';
+              if (!semver.gte(latest, required)) {
+                console.error(\`Latest @jupyterlab/yjs version \${latest} does not meet minimum requirement \${required}\`);
+                process.exit(1);
+              }
+              console.log(\`Latest @jupyterlab/yjs version \${latest} meets minimum requirement \${required}\`);
+            "
+            
+            # Update @jupyterlab/yjs to the latest compatible version
+            jlpm add @jupyterlab/yjs@^${JUPYTERLAB_YJS_LATEST}
+            COLLABORATION_UPDATED=true
+          fi
+          
+          # Set environment variable for later use
+          echo "collaboration_updated=${COLLABORATION_UPDATED}" >> $GITHUB_ENV
+          
+          # If collaboration dependencies were updated, run deduplication
+          if [[ "${COLLABORATION_UPDATED}" == "true" ]]; then
+            echo "Running dependency deduplication after collaboration updates..."
+            jlpm deduplicate
+            
+            cd ui-tests
+            jlpm
+            jlpm deduplicate
+          fi
+
+      - name: Validate CRDT library compatibility
+        shell: bash
+        run: |
+          set -eux
+          
+          echo "Validating CRDT library compatibility..."
+          
+          # Ensure yjs and @jupyterlab/yjs versions are compatible
+          # Get the actual installed versions after any updates
+          YJS_INSTALLED=$(jlpm list yjs --depth=0 2>/dev/null | grep yjs@ | sed 's/.*yjs@//' | sed 's/ .*//' || echo "not-installed")
+          JUPYTERLAB_YJS_INSTALLED=$(jlpm list @jupyterlab/yjs --depth=0 2>/dev/null | grep @jupyterlab/yjs@ | sed 's/.*@jupyterlab\/yjs@//' | sed 's/ .*//' || echo "not-installed")
+          
+          echo "Installed yjs version: ${YJS_INSTALLED}"
+          echo "Installed @jupyterlab/yjs version: ${JUPYTERLAB_YJS_INSTALLED}"
+          
+          # Validate compatibility matrix
+          if [[ "${YJS_INSTALLED}" != "not-installed" && "${JUPYTERLAB_YJS_INSTALLED}" != "not-installed" ]]; then
+            echo "Validating compatibility between yjs and @jupyterlab/yjs..."
+            
+            # Check compatibility matrix (simplified validation)
+            node -e "
+              const semver = require('semver');
+              const yjs = '${YJS_INSTALLED}';
+              const jupyterlabYjs = '${JUPYTERLAB_YJS_INSTALLED}';
+              
+              console.log(\`Checking compatibility: yjs@\${yjs} with @jupyterlab/yjs@\${jupyterlabYjs}\`);
+              
+              // Ensure yjs is compatible with @jupyterlab/yjs
+              // yjs ^13.5.40 should work with @jupyterlab/yjs ^4.0.0
+              if (semver.major(yjs) >= 13 && semver.major(jupyterlabYjs) >= 4) {
+                console.log('✓ CRDT library versions are compatible');
+              } else {
+                console.error('✗ CRDT library versions may not be compatible');
+                console.error(\`yjs major version: \${semver.major(yjs)}, @jupyterlab/yjs major version: \${semver.major(jupyterlabYjs)}\`);
+                process.exit(1);
+              }
+            "
+          else
+            echo "Warning: Some collaboration dependencies are not installed. Skipping compatibility check."
+          fi
+
       - uses: prefix-dev/setup-pixi@v0.8.8
         with:
           pixi-version: v0.41.4
@@ -95,10 +259,22 @@ jobs:
           set -eux
 
           export LATEST=${{ env.latest }}
+          export COLLABORATION_UPDATED=${{ env.collaboration_updated }}
           export BRANCH_NAME=update-to-v${LATEST}
 
-          # if resulted in any change:
+          # Check if any changes occurred (JupyterLab or collaboration dependencies)
+          HAS_CHANGES=false
+          
           if [[ ! -z "$(git status --porcelain package.json)" ]]; then
+            HAS_CHANGES=true
+          fi
+          
+          if [[ "${COLLABORATION_UPDATED}" == "true" ]]; then
+            HAS_CHANGES=true
+          fi
+
+          # if resulted in any change:
+          if [[ "${HAS_CHANGES}" == "true" ]]; then
             # if branch already exists.
             if git ls-remote --heads origin | grep "refs/heads/${BRANCH_NAME}$" > /dev/null; then
               echo "Branch '${BRANCH_NAME}' exists."
@@ -108,14 +284,61 @@ jobs:
               git config user.name "github-actions[bot]"
               git config user.email 'github-actions[bot]@users.noreply.github.com'
 
-              git commit . -m "Update to JupyterLab v${LATEST}"
+              # Create detailed commit message
+              COMMIT_MSG="Update to JupyterLab v${LATEST}"
+              
+              if [[ "${COLLABORATION_UPDATED}" == "true" ]]; then
+                COMMIT_MSG="${COMMIT_MSG}
+
+Collaboration dependency updates:
+- yjs: ${YJS_CURRENT} → ${YJS_LATEST}
+- @jupyterlab/yjs: ${JUPYTERLAB_YJS_CURRENT} → ${JUPYTERLAB_YJS_LATEST}
+
+✓ CRDT library compatibility validated
+✓ Minimum version requirements verified"
+              fi
+
+              git commit . -m "${COMMIT_MSG}"
 
               git push --set-upstream origin "${BRANCH_NAME}"
+
+              # Create detailed PR body
+              PR_BODY="New JupyterLab release [v${LATEST}](https://github.com/jupyterlab/jupyterlab/releases/tag/v${LATEST}) is available. Please review the lock file carefully.
+
+## Changes Made
+
+### JupyterLab Core
+- Updated JupyterLab to v${LATEST}
+
+### Collaboration Dependencies"
+              
+              if [[ "${COLLABORATION_UPDATED}" == "true" ]]; then
+                PR_BODY="${PR_BODY}
+- **yjs**: \`${YJS_CURRENT}\` → \`${YJS_LATEST}\`
+- **@jupyterlab/yjs**: \`${JUPYTERLAB_YJS_CURRENT}\` → \`${JUPYTERLAB_YJS_LATEST}\`
+
+### Validation Results
+✅ **CRDT Compatibility**: yjs and @jupyterlab/yjs versions are compatible  
+✅ **Version Requirements**: All collaboration dependencies meet minimum requirements  
+✅ **Dependency Deduplication**: Completed successfully"
+              else
+                PR_BODY="${PR_BODY}
+- No collaboration dependency updates needed
+- Current versions meet minimum requirements"
+              fi
+
+              PR_BODY="${PR_BODY}
+
+## Review Checklist
+- [ ] Verify JupyterLab compatibility
+- [ ] Test collaboration features if dependencies were updated
+- [ ] Run multi-user end-to-end tests
+- [ ] Check for any breaking changes in dependency updates"
 
               PR_ARGS=(
                 --base "${{ inputs.branch || 'main' }}"
                 --title "Update to JupyterLab v${LATEST}"
-                --body "New JupyterLab release [v${LATEST}](https://github.com/jupyterlab/jupyterlab/releases/tag/v${LATEST}) is available. Please review the lock file carefully."
+                --body "${PR_BODY}"
               )
 
               # Add --repo flag only if target_repo is specified
