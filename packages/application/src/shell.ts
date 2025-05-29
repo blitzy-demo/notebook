@@ -20,15 +20,24 @@ import {
 import { PanelHandler, SidePanelHandler } from './panelhandler';
 import { TabPanelSvg } from '@jupyterlab/ui-components';
 
-// Import collaboration interfaces and tokens
-import {
-  IYjsNotebookProvider,
-  IAwarenessManager,
-  ILockManager,
-  IHistoryManager,
-  IPermissionsManager,
-  ICommentManager
-} from './tokens';
+// Collaboration imports for enhanced shell functionality
+export interface IYjsNotebookProvider {
+  awareness: any;
+  locks: any;
+  history: any;
+  permissions: any;
+  comments: any;
+  isConnected: boolean;
+  connectionStatus: 'connected' | 'disconnected' | 'connecting' | 'error';
+}
+
+export interface ICollaborationStatus {
+  provider?: IYjsNotebookProvider;
+  activeUsers: number;
+  isCollaborating: boolean;
+  hasPermission: boolean;
+  syncStatus: 'synced' | 'syncing' | 'offline' | 'error';
+}
 
 /**
  * The Jupyter Notebook application shell token.
@@ -48,7 +57,8 @@ export interface INotebookShell extends NotebookShell {}
 export namespace INotebookShell {
   /**
    * The areas of the application shell where widgets can reside.
-   * Enhanced to support collaboration namespaces per Section 7.2.1
+   * Enhanced with collaboration-specific namespaced regions for proper
+   * scoping and isolation of collaboration widgets within appropriate UI zones.
    */
   export type Area = 
     | 'main' 
@@ -57,52 +67,22 @@ export namespace INotebookShell {
     | 'left' 
     | 'right' 
     | 'down'
-    | 'collaboration-top'      // Collaboration Bar in top area
-    | 'collaboration-sidebar'  // History Viewer and Permissions Dialog in right sidebar
-    | 'cell-overlay';          // Cell-level UI elements (comments, locks)
+    | 'collaboration-top'      // Hosts the Collaboration Bar in the top area
+    | 'collaboration-sidebar'  // Contains History Viewer and Permissions Dialog in the right sidebar
+    | 'cell-overlay';          // Manages cell-level UI elements like comment indicators and lock status
 
   /**
-   * Widget position with enhanced collaboration options
+   * Widget position
    */
   export interface IWidgetPosition {
     /**
-     * Widget area including collaboration namespaces
+     * Widget area
      */
     area?: Area;
     /**
      * Widget opening options
      */
     options?: DocumentRegistry.IOpenOptions;
-    /**
-     * Collaboration-specific positioning options
-     */
-    collaborationOptions?: ICollaborationOptions;
-  }
-
-  /**
-   * Collaboration-specific options for widget positioning
-   */
-  export interface ICollaborationOptions {
-    /**
-     * Priority for collaboration widgets (higher numbers = higher priority)
-     */
-    priority?: number;
-    /**
-     * Whether this widget should be hidden when collaboration is disabled
-     */
-    collaborationOnly?: boolean;
-    /**
-     * Responsive breakpoints for the widget
-     */
-    responsive?: {
-      hideOnMobile?: boolean;
-      hideOnTablet?: boolean;
-      compactMode?: boolean;
-    };
-    /**
-     * Required permissions to display this widget
-     */
-    requiredPermissions?: string[];
   }
 
   /**
@@ -116,33 +96,27 @@ export namespace INotebookShell {
   }
 
   /**
-   * Collaboration status information
+   * Collaboration-specific widget options for enhanced add() semantics
    */
-  export interface ICollaborationStatus {
+  export interface ICollaborationOptions extends DocumentRegistry.IOpenOptions {
     /**
-     * Whether collaboration is enabled and active
+     * The collaboration namespace for proper widget scoping
      */
-    isActive: boolean;
+    namespace?: 'collaboration-top' | 'collaboration-sidebar' | 'cell-overlay';
+    
     /**
-     * Connection status to collaboration server
+     * Whether this widget requires collaboration provider integration
      */
-    connectionStatus: 'connected' | 'disconnected' | 'connecting' | 'error';
+    requiresCollaboration?: boolean;
+    
     /**
-     * Number of active collaborators
+     * Responsive layout preferences for the widget
      */
-    collaboratorCount: number;
-    /**
-     * Current user's permissions
-     */
-    userPermissions: string[];
-    /**
-     * Whether real-time sync is working
-     */
-    syncStatus: 'synced' | 'syncing' | 'conflict' | 'offline';
-    /**
-     * Last sync timestamp
-     */
-    lastSyncTime?: number;
+    responsive?: {
+      mobile?: boolean;
+      desktop?: boolean;
+      breakpoint?: number;
+    };
   }
 }
 
@@ -152,15 +126,9 @@ export namespace INotebookShell {
 const DEFAULT_RANK = 900;
 
 /**
- * The default collaboration priority for collaboration widgets.
- */
-const DEFAULT_COLLABORATION_PRIORITY = 500;
-
-/**
  * The application shell with enhanced collaboration support.
- * 
- * Enhanced per Section 7.2.1 to support collaboration namespaces and
- * real-time document synchronization via YjsNotebookProvider integration.
+ * Provides namespaced regions for collaboration features through enhanced add() semantics
+ * and integration with YjsNotebookProvider for real-time document synchronization.
  */
 export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
   constructor() {
@@ -168,13 +136,11 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     this.id = 'main';
     this._userLayout = {};
     this._collaborationStatus = {
-      isActive: false,
-      connectionStatus: 'disconnected',
-      collaboratorCount: 0,
-      userPermissions: [],
+      activeUsers: 0,
+      isCollaborating: false,
+      hasPermission: true,
       syncStatus: 'offline'
     };
-    this._collaborationWidgets = new Map();
 
     this._topHandler = new PanelHandler();
     this._menuHandler = new PanelHandler();
@@ -182,13 +148,14 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     this._rightHandler = new SidePanelHandler('right');
     this._main = new Panel();
     
-    // Create collaboration-specific panels per Section 7.2.1
-    this._collaborationTopPanel = new Panel();
-    this._collaborationSidebarPanel = new Panel();
-    this._cellOverlayPanel = new Panel();
-    
+    // Enhanced panel wrappers with collaboration support
     const topWrapper = (this._topWrapper = new Panel());
     const menuWrapper = (this._menuWrapper = new Panel());
+
+    // Collaboration-specific panels for namespaced widget management
+    this._collaborationTopPanel = new Panel();
+    this._collaborationSidebarPanel = new Panel(); 
+    this._cellOverlayPanel = new Panel();
 
     this._topHandler.panel.id = 'top-panel';
     this._topHandler.panel.node.setAttribute('role', 'banner');
@@ -197,7 +164,7 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     this._main.id = 'main-panel';
     this._main.node.setAttribute('role', 'main');
 
-    // Set up collaboration panels
+    // Configure collaboration panels
     this._collaborationTopPanel.id = 'collaboration-top-panel';
     this._collaborationTopPanel.addClass('jp-collaboration-top');
     this._collaborationSidebarPanel.id = 'collaboration-sidebar-panel';
@@ -213,7 +180,7 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     // create wrappers around the top and menu areas
     topWrapper.id = 'top-panel-wrapper';
     topWrapper.addWidget(this._topHandler.panel);
-    // Add collaboration top panel to top wrapper per Section 7.2.1
+    // Add collaboration bar to top area wrapper
     topWrapper.addWidget(this._collaborationTopPanel);
 
     menuWrapper.id = 'menu-panel-wrapper';
@@ -227,8 +194,8 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     leftHandler.panel.node.setAttribute('role', 'complementary');
     rightHandler.panel.id = 'jp-right-stack';
     rightHandler.panel.node.setAttribute('role', 'complementary');
-    
-    // Add collaboration sidebar panel to right handler per Section 7.2.1
+
+    // Add collaboration sidebar to right handler
     rightHandler.panel.addWidget(this._collaborationSidebarPanel);
 
     // Hide the side panels by default.
@@ -249,9 +216,10 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     middlePanel.addWidget(this._spacer_top);
     middlePanel.addWidget(this._main);
     middlePanel.addWidget(this._spacer_bottom);
-    // Add cell overlay panel to middle panel for cell-level UI elements
-    middlePanel.addWidget(this._cellOverlayPanel);
     middlePanel.layout = middleLayout;
+
+    // Add cell overlay panel to main area for cell-level UI elements
+    this._main.addWidget(this._cellOverlayPanel);
 
     const vsplitPanel = new SplitPanel();
     vsplitPanel.id = 'jp-main-vsplit-panel';
@@ -309,7 +277,7 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     this.add(skipLinkWidgetHandler.skipLinkWidget, 'top', { rank: 0 });
     this._skipLinkWidgetHandler.show();
 
-    // Initialize responsive layout adaptation per Section 7.3.4
+    // Initialize responsive layout support
     this._initializeResponsiveLayout();
   }
 
@@ -331,20 +299,20 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
   }
 
   /**
-   * A signal emitted when collaboration status changes.
+   * Get the collaboration status for the current session.
+   * Provides real-time information about collaboration state including
+   * active users, sync status, and provider connectivity.
    */
-  get collaborationStatusChanged(): ISignal<
-    this,
-    INotebookShell.ICollaborationStatus
-  > {
-    return this._collaborationStatusChanged;
+  get collaborationStatus(): ICollaborationStatus {
+    return { ...this._collaborationStatus };
   }
 
   /**
-   * Get the current collaboration status.
+   * Get the YjsNotebookProvider for real-time collaboration integration.
+   * Returns null if collaboration is not active or configured.
    */
-  get collaborationStatus(): INotebookShell.ICollaborationStatus {
-    return { ...this._collaborationStatus };
+  get collaborationProvider(): IYjsNotebookProvider | null {
+    return this._collaborationStatus.provider || null;
   }
 
   /**
@@ -362,23 +330,23 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
   }
 
   /**
-   * Get the collaboration top panel
+   * Get the collaboration top panel for hosting collaboration bar
    */
-  get collaborationTop(): Widget {
+  get collaborationTop(): Panel {
     return this._collaborationTopPanel;
   }
 
   /**
-   * Get the collaboration sidebar panel
+   * Get the collaboration sidebar panel for history viewer and permissions dialog
    */
-  get collaborationSidebar(): Widget {
+  get collaborationSidebar(): Panel {
     return this._collaborationSidebarPanel;
   }
 
   /**
-   * Get the cell overlay panel
+   * Get the cell overlay panel for cell-level UI elements
    */
-  get cellOverlay(): Widget {
+  get cellOverlay(): Panel {
     return this._cellOverlayPanel;
   }
 
@@ -448,191 +416,36 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
   }
 
   /**
-   * Set collaboration services for real-time synchronization.
-   * Integrates with YjsNotebookProvider and collaboration modules per Section 5.2.1
+   * Set the collaboration provider for real-time document synchronization.
+   * Integrates with YjsNotebookProvider and collaboration modules.
    */
-  setCollaborationServices(services: {
-    yjsProvider?: IYjsNotebookProvider;
-    awarenessManager?: IAwarenessManager;
-    lockManager?: ILockManager;
-    historyManager?: IHistoryManager;
-    permissionsManager?: IPermissionsManager;
-    commentManager?: ICommentManager;
-  }): void {
-    this._collaborationServices = services;
-
-    // Connect to collaboration status updates
-    if (services.yjsProvider) {
-      // Monitor connection status
-      this._updateCollaborationStatus({
-        isActive: true,
-        connectionStatus: services.yjsProvider.isConnected ? 'connected' : 'disconnected'
-      });
-    }
-
-    if (services.awarenessManager) {
-      // Monitor collaborator count
-      services.awarenessManager.onAwarenessChange((users) => {
-        this._updateCollaborationStatus({
-          collaboratorCount: users.size
-        });
-      });
-    }
-
-    if (services.permissionsManager) {
-      // Monitor user permissions
-      services.permissionsManager.onPermissionChange((event) => {
-        // Update user permissions based on current user
-        this._updateCollaborationStatus({
-          userPermissions: this._getCurrentUserPermissions()
-        });
-      });
-    }
-  }
-
-  /**
-   * Update collaboration status and emit signal.
-   */
-  private _updateCollaborationStatus(
-    updates: Partial<INotebookShell.ICollaborationStatus>
-  ): void {
-    const previousStatus = { ...this._collaborationStatus };
-    Object.assign(this._collaborationStatus, updates);
-    
-    // Update last sync time if status changed to synced
-    if (updates.syncStatus === 'synced') {
-      this._collaborationStatus.lastSyncTime = Date.now();
-    }
-
-    this._collaborationStatusChanged.emit(this._collaborationStatus);
-
-    // Update UI based on collaboration status
-    this._updateCollaborationUI(previousStatus);
-  }
-
-  /**
-   * Update collaboration UI elements based on status changes.
-   */
-  private _updateCollaborationUI(
-    previousStatus: INotebookShell.ICollaborationStatus
-  ): void {
-    const current = this._collaborationStatus;
-    
-    // Show/hide collaboration panels based on active status
-    if (current.isActive !== previousStatus.isActive) {
-      this._toggleCollaborationPanels(current.isActive);
-    }
-
-    // Update collaboration widgets visibility based on permissions
-    if (current.userPermissions !== previousStatus.userPermissions) {
-      this._updateCollaborationWidgetVisibility();
-    }
-
-    // Add visual indicators for connection status
-    this.node.classList.toggle('jp-collaboration-active', current.isActive);
-    this.node.classList.toggle('jp-collaboration-connected', 
-      current.connectionStatus === 'connected');
-    this.node.classList.toggle('jp-collaboration-syncing', 
-      current.syncStatus === 'syncing');
-    this.node.classList.toggle('jp-collaboration-conflict', 
-      current.syncStatus === 'conflict');
-  }
-
-  /**
-   * Toggle visibility of collaboration panels.
-   */
-  private _toggleCollaborationPanels(isActive: boolean): void {
-    this._collaborationTopPanel.setHidden(!isActive);
-    this._collaborationSidebarPanel.setHidden(!isActive);
-    
-    // Only show cell overlay if collaboration is active and user has permissions
-    const hasWritePermission = this._collaborationStatus.userPermissions.includes('write');
-    this._cellOverlayPanel.setHidden(!isActive || !hasWritePermission);
-  }
-
-  /**
-   * Update visibility of collaboration widgets based on permissions.
-   */
-  private _updateCollaborationWidgetVisibility(): void {
-    const userPermissions = this._collaborationStatus.userPermissions;
-    
-    this._collaborationWidgets.forEach((options, widget) => {
-      if (options.requiredPermissions) {
-        const hasRequiredPermissions = options.requiredPermissions.every(
-          permission => userPermissions.includes(permission)
-        );
-        widget.setHidden(!hasRequiredPermissions);
+  setCollaborationProvider(provider: IYjsNotebookProvider | null): void {
+    if (this._collaborationStatus.provider !== provider) {
+      // Disconnect from previous provider if any
+      if (this._collaborationStatus.provider) {
+        this._disconnectCollaborationProvider();
       }
-    });
-  }
 
-  /**
-   * Get current user permissions from collaboration services.
-   */
-  private _getCurrentUserPermissions(): string[] {
-    if (!this._collaborationServices?.permissionsManager) {
-      return [];
-    }
-    
-    // This would normally get the current user ID from the authentication system
-    const currentUserId = 'current-user'; // Placeholder
-    const userPermissions = this._collaborationServices.permissionsManager
-      .getUserPermissions(currentUserId);
-    
-    return userPermissions.permissions || [];
-  }
-
-  /**
-   * Initialize responsive layout adaptation per Section 7.3.4
-   */
-  private _initializeResponsiveLayout(): void {
-    // Add responsive classes for CSS media queries
-    this.node.classList.add('jp-NotebookShell-responsive');
-    
-    // Monitor window resize for responsive adaptations
-    window.addEventListener('resize', () => {
-      this._handleResponsiveLayout();
-    });
-
-    // Initial responsive layout setup
-    this._handleResponsiveLayout();
-  }
-
-  /**
-   * Handle responsive layout changes per Section 7.3.4
-   */
-  private _handleResponsiveLayout(): void {
-    const width = window.innerWidth;
-    const isMobile = width < 768;
-    const isTablet = width >= 768 && width < 1024;
-    
-    // Update CSS classes for responsive behavior
-    this.node.classList.toggle('jp-NotebookShell-mobile', isMobile);
-    this.node.classList.toggle('jp-NotebookShell-tablet', isTablet);
-    this.node.classList.toggle('jp-NotebookShell-desktop', width >= 1024);
-    
-    // Handle collaboration widget responsive behavior
-    this._collaborationWidgets.forEach((options, widget) => {
-      if (options.responsive) {
-        const shouldHide = (isMobile && options.responsive.hideOnMobile) ||
-                          (isTablet && options.responsive.hideOnTablet);
-        
-        if (shouldHide) {
-          widget.setHidden(true);
-        } else if (options.responsive.compactMode && (isMobile || isTablet)) {
-          widget.addClass('jp-collaboration-compact');
-        } else {
-          widget.removeClass('jp-collaboration-compact');
-          // Only show if collaboration is active and permissions allow
-          const shouldShow = this._collaborationStatus.isActive &&
-            (!options.requiredPermissions || 
-             options.requiredPermissions.every(p => 
-               this._collaborationStatus.userPermissions.includes(p)
-             ));
-          widget.setHidden(!shouldShow);
-        }
+      this._collaborationStatus.provider = provider;
+      
+      if (provider) {
+        this._connectCollaborationProvider(provider);
+      } else {
+        this._collaborationStatus.isCollaborating = false;
+        this._collaborationStatus.syncStatus = 'offline';
+        this._collaborationStatus.activeUsers = 0;
       }
-    });
+
+      // Emit collaboration status change signal
+      this._collaborationStatusChanged.emit(this._collaborationStatus);
+    }
+  }
+
+  /**
+   * Signal emitted when collaboration status changes.
+   */
+  get collaborationStatusChanged(): ISignal<NotebookShell, ICollaborationStatus> {
+    return this._collaborationStatusChanged;
   }
 
   /**
@@ -640,10 +453,14 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
    */
   activateById(id: string): void {
     // Search all areas that can have widgets for this widget, starting with main.
-    for (const area of ['main', 'top', 'left', 'right', 'menu', 'down', 
-                       'collaboration-top', 'collaboration-sidebar', 'cell-overlay']) {
+    const areas: INotebookShell.Area[] = [
+      'main', 'top', 'left', 'right', 'menu', 'down',
+      'collaboration-top', 'collaboration-sidebar', 'cell-overlay'
+    ];
+    
+    for (const area of areas) {
       const widget = find(
-        this.widgets(area as INotebookShell.Area),
+        this.widgets(area),
         (w) => w.id === id
       );
       if (widget) {
@@ -655,33 +472,33 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
           this._downPanel.show();
           widget.activate();
         } else if (area === 'collaboration-sidebar') {
-          // Ensure right sidebar is visible for collaboration sidebar widgets
-          this.expandRight();
+          // Special handling for collaboration sidebar widgets
+          this.expandRight(); // Ensure right sidebar is visible
           widget.activate();
         } else {
           widget.activate();
         }
+        break;
       }
     }
   }
 
   /**
    * Add a widget to the application shell with enhanced collaboration support.
+   * Supports namespaced regions for collaboration features and proper scoping.
    *
    * @param widget - The widget being added.
    *
    * @param area - Optional region in the shell into which the widget should
-   * be added, including collaboration namespaces.
+   * be added. Enhanced to support collaboration namespaces.
    *
-   * @param options - Optional open options with collaboration enhancements.
+   * @param options - Optional open options with collaboration-specific enhancements.
    *
    */
   add(
     widget: Widget,
     area?: INotebookShell.Area,
-    options?: DocumentRegistry.IOpenOptions & {
-      collaborationOptions?: INotebookShell.ICollaborationOptions;
-    }
+    options?: DocumentRegistry.IOpenOptions | INotebookShell.ICollaborationOptions
   ): void {
     let userPosition: INotebookShell.IWidgetPosition | undefined;
     if (options?.type && this._userLayout[options.type]) {
@@ -691,9 +508,6 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     }
 
     area = userPosition?.area ?? area;
-    const collaborationOptions = options?.collaborationOptions || 
-                                userPosition?.collaborationOptions;
-    
     options =
       options || userPosition?.options
         ? {
@@ -702,154 +516,83 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
           }
         : undefined;
 
-    // Store collaboration options for the widget
-    if (collaborationOptions) {
-      this._collaborationWidgets.set(widget, collaborationOptions);
+    const rank = options?.rank ?? DEFAULT_RANK;
+    const collabOptions = options as INotebookShell.ICollaborationOptions;
+
+    // Enhanced collaboration widget handling
+    if (collabOptions?.requiresCollaboration && !this._collaborationStatus.isCollaborating) {
+      // Widget requires collaboration but collaboration is not active
+      console.warn(`Widget ${widget.id} requires collaboration but collaboration is not active`);
+      return;
     }
 
-    const rank = options?.rank ?? 
-                 collaborationOptions?.priority ?? 
-                 DEFAULT_RANK;
+    // Apply responsive layout preferences if specified
+    if (collabOptions?.responsive) {
+      this._applyResponsiveLayout(widget, collabOptions.responsive);
+    }
 
-    // Handle collaboration-specific areas per Section 7.2.1
+    // Handle collaboration namespaces with proper scoping and isolation
     switch (area) {
       case 'collaboration-top':
-        this._addToCollaborationTop(widget, rank, collaborationOptions);
-        break;
+        // Collaboration Bar and presence indicators in top area
+        widget.addClass('jp-collaboration-widget');
+        widget.addClass('jp-collaboration-top-widget');
+        return this._addToCollaborationTop(widget, rank);
+        
       case 'collaboration-sidebar':
-        this._addToCollaborationSidebar(widget, rank, collaborationOptions);
-        break;
+        // History Viewer and Permissions Dialog in right sidebar
+        widget.addClass('jp-collaboration-widget');
+        widget.addClass('jp-collaboration-sidebar-widget');
+        return this._addToCollaborationSidebar(widget, rank);
+        
       case 'cell-overlay':
-        this._addToCellOverlay(widget, rank, collaborationOptions);
-        break;
+        // Cell-level UI elements like comment indicators and lock status
+        widget.addClass('jp-collaboration-widget');
+        widget.addClass('jp-cell-overlay-widget');
+        return this._addToCellOverlay(widget, rank);
+        
       case 'top':
         return this._topHandler.addWidget(widget, rank);
+        
       case 'menu':
         return this._menuHandler.addWidget(widget, rank);
+        
       case 'main':
       case undefined: {
-        if (this._main.widgets.length > 0) {
-          // do not add the widget if there is already one
-          return;
+        if (this._main.widgets.length > 1) {
+          // Allow cell overlay widgets in main area alongside primary widget
+          const isOverlay = widget.hasClass('jp-cell-overlay-widget');
+          if (!isOverlay) {
+            // do not add non-overlay widgets if there is already a primary widget
+            return;
+          }
         }
         const previousWidget = this.currentWidget;
         this._main.addWidget(widget);
         this._main.update();
-        this._currentChanged.emit({
-          newValue: widget,
-          oldValue: previousWidget,
-        });
-        this._mainWidgetLoaded.resolve();
+        
+        // Only emit change signal for primary widgets, not overlays
+        if (!widget.hasClass('jp-cell-overlay-widget')) {
+          this._currentChanged.emit({
+            newValue: widget,
+            oldValue: previousWidget,
+          });
+          this._mainWidgetLoaded.resolve();
+        }
         break;
       }
       case 'left':
         return this._leftHandler.addWidget(widget, rank);
+        
       case 'right':
         return this._rightHandler.addWidget(widget, rank);
+        
       case 'down':
         return this._downPanel.addWidget(widget);
+        
       default:
         console.warn(`Cannot add widget to area: ${area}`);
     }
-
-    // Apply responsive layout settings if specified
-    if (collaborationOptions?.responsive) {
-      this._handleResponsiveLayout();
-    }
-
-    // Hide widget if collaboration is disabled and it's collaboration-only
-    if (collaborationOptions?.collaborationOnly && !this._collaborationStatus.isActive) {
-      widget.setHidden(true);
-    }
-
-    // Check permissions if required
-    if (collaborationOptions?.requiredPermissions) {
-      const hasPermissions = collaborationOptions.requiredPermissions.every(
-        permission => this._collaborationStatus.userPermissions.includes(permission)
-      );
-      if (!hasPermissions) {
-        widget.setHidden(true);
-      }
-    }
-  }
-
-  /**
-   * Add widget to collaboration top area.
-   */
-  private _addToCollaborationTop(
-    widget: Widget, 
-    rank: number, 
-    options?: INotebookShell.ICollaborationOptions
-  ): void {
-    // Add to collaboration top panel with priority-based ordering
-    const widgets = Array.from(this._collaborationTopPanel.widgets);
-    let insertIndex = widgets.length;
-    
-    // Find correct position based on rank/priority
-    for (let i = 0; i < widgets.length; i++) {
-      const otherWidget = widgets[i];
-      const otherOptions = this._collaborationWidgets.get(otherWidget);
-      const otherRank = otherOptions?.priority ?? DEFAULT_COLLABORATION_PRIORITY;
-      
-      if (rank < otherRank) {
-        insertIndex = i;
-        break;
-      }
-    }
-    
-    this._collaborationTopPanel.insertWidget(insertIndex, widget);
-    widget.addClass('jp-collaboration-top-widget');
-  }
-
-  /**
-   * Add widget to collaboration sidebar area.
-   */
-  private _addToCollaborationSidebar(
-    widget: Widget, 
-    rank: number, 
-    options?: INotebookShell.ICollaborationOptions
-  ): void {
-    // Add to collaboration sidebar panel
-    const widgets = Array.from(this._collaborationSidebarPanel.widgets);
-    let insertIndex = widgets.length;
-    
-    // Find correct position based on rank/priority
-    for (let i = 0; i < widgets.length; i++) {
-      const otherWidget = widgets[i];
-      const otherOptions = this._collaborationWidgets.get(otherWidget);
-      const otherRank = otherOptions?.priority ?? DEFAULT_COLLABORATION_PRIORITY;
-      
-      if (rank < otherRank) {
-        insertIndex = i;
-        break;
-      }
-    }
-    
-    this._collaborationSidebarPanel.insertWidget(insertIndex, widget);
-    widget.addClass('jp-collaboration-sidebar-widget');
-    
-    // Ensure right sidebar is visible when collaboration widgets are added
-    if (this._collaborationStatus.isActive) {
-      this.expandRight();
-    }
-  }
-
-  /**
-   * Add widget to cell overlay area.
-   */
-  private _addToCellOverlay(
-    widget: Widget, 
-    rank: number, 
-    options?: INotebookShell.ICollaborationOptions
-  ): void {
-    // Cell overlay widgets are typically positioned absolutely within cells
-    this._cellOverlayPanel.addWidget(widget);
-    widget.addClass('jp-cell-overlay-widget');
-    
-    // Apply special positioning for cell overlay widgets
-    widget.node.style.position = 'absolute';
-    widget.node.style.zIndex = '1000';
-    widget.node.style.pointerEvents = 'auto';
   }
 
   /**
@@ -869,9 +612,9 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
   }
 
   /**
-   * Return the list of widgets for the given area.
+   * Return the list of widgets for the given area, including collaboration namespaces.
    *
-   * @param area The area including collaboration namespaces
+   * @param area The area
    */
   *widgets(area: INotebookShell.Area): IterableIterator<Widget> {
     switch (area ?? 'main') {
@@ -950,6 +693,187 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
   }
 
   /**
+   * Update collaboration status and emit change signal.
+   * Used internally for real-time collaboration state management.
+   */
+  updateCollaborationStatus(status: Partial<ICollaborationStatus>): void {
+    const updated = { ...this._collaborationStatus, ...status };
+    if (JSON.stringify(updated) !== JSON.stringify(this._collaborationStatus)) {
+      this._collaborationStatus = updated;
+      this._collaborationStatusChanged.emit(this._collaborationStatus);
+    }
+  }
+
+  /**
+   * Add widget to collaboration top area with proper isolation.
+   * Private method for managing collaboration-top namespace widgets.
+   */
+  private _addToCollaborationTop(widget: Widget, rank: number): void {
+    // Remove widget from parent if it has one
+    widget.parent = null;
+    
+    // Add to collaboration top panel with rank-based ordering
+    const items = Array.from(this._collaborationTopPanel.widgets)
+      .map(w => ({ widget: w, rank: (w as any)._rank || DEFAULT_RANK }))
+      .concat([{ widget, rank }])
+      .sort((a, b) => a.rank - b.rank);
+    
+    // Clear and re-add all widgets in order
+    while (this._collaborationTopPanel.widgets.length > 0) {
+      this._collaborationTopPanel.widgets[0].parent = null;
+    }
+    
+    items.forEach(item => {
+      (item.widget as any)._rank = item.rank;
+      this._collaborationTopPanel.addWidget(item.widget);
+    });
+  }
+
+  /**
+   * Add widget to collaboration sidebar area with proper isolation.
+   * Private method for managing collaboration-sidebar namespace widgets.
+   */
+  private _addToCollaborationSidebar(widget: Widget, rank: number): void {
+    // Remove widget from parent if it has one
+    widget.parent = null;
+    
+    // Add to collaboration sidebar panel with rank-based ordering
+    const items = Array.from(this._collaborationSidebarPanel.widgets)
+      .map(w => ({ widget: w, rank: (w as any)._rank || DEFAULT_RANK }))
+      .concat([{ widget, rank }])
+      .sort((a, b) => a.rank - b.rank);
+    
+    // Clear and re-add all widgets in order
+    while (this._collaborationSidebarPanel.widgets.length > 0) {
+      this._collaborationSidebarPanel.widgets[0].parent = null;
+    }
+    
+    items.forEach(item => {
+      (item.widget as any)._rank = item.rank;
+      this._collaborationSidebarPanel.addWidget(item.widget);
+    });
+
+    // Ensure right sidebar is visible when collaboration widgets are added
+    if (!this._rightHandler.isVisible) {
+      this._rightHandler.show();
+    }
+  }
+
+  /**
+   * Add widget to cell overlay area with proper positioning.
+   * Private method for managing cell-overlay namespace widgets.
+   */
+  private _addToCellOverlay(widget: Widget, rank: number): void {
+    // Remove widget from parent if it has one
+    widget.parent = null;
+    
+    // Set up overlay positioning
+    widget.addClass('jp-cell-overlay-positioned');
+    
+    // Add to cell overlay panel with rank-based z-index
+    (widget.node.style as any).zIndex = rank.toString();
+    (widget as any)._rank = rank;
+    
+    this._cellOverlayPanel.addWidget(widget);
+  }
+
+  /**
+   * Connect to collaboration provider and set up event listeners.
+   * Private method for YjsNotebookProvider integration.
+   */
+  private _connectCollaborationProvider(provider: IYjsNotebookProvider): void {
+    this._collaborationStatus.isCollaborating = true;
+    this._collaborationStatus.syncStatus = provider.isConnected ? 'synced' : 'connecting';
+
+    // Update connection status based on provider state
+    const updateConnectionStatus = () => {
+      this.updateCollaborationStatus({
+        syncStatus: provider.isConnected ? 'synced' : 'offline'
+      });
+    };
+
+    // Monitor provider connection changes
+    if (provider.awareness) {
+      // Listen for awareness changes to update active user count
+      const updateActiveUsers = () => {
+        const awarenessStates = provider.awareness.getStates();
+        this.updateCollaborationStatus({
+          activeUsers: awarenessStates.size - 1 // Exclude current user
+        });
+      };
+      
+      // Set up awareness listeners (pseudo-code since actual implementation would depend on Yjs API)
+      if (typeof provider.awareness.on === 'function') {
+        provider.awareness.on('change', updateActiveUsers);
+        provider.awareness.on('update', updateActiveUsers);
+      }
+    }
+
+    // Initial status update
+    updateConnectionStatus();
+  }
+
+  /**
+   * Disconnect from collaboration provider and clean up.
+   * Private method for provider cleanup.
+   */
+  private _disconnectCollaborationProvider(): void {
+    // Clean up any provider event listeners here
+    // Implementation would depend on actual YjsNotebookProvider API
+    
+    this._collaborationStatus.isCollaborating = false;
+    this._collaborationStatus.syncStatus = 'offline';
+    this._collaborationStatus.activeUsers = 0;
+  }
+
+  /**
+   * Initialize responsive layout support for collaboration UI components.
+   * Private method for setting up responsive behavior.
+   */
+  private _initializeResponsiveLayout(): void {
+    const mediaQuery = window.matchMedia('(max-width: 768px)');
+    
+    const handleResponsiveChange = (e: MediaQueryListEvent | MediaQueryList) => {
+      const isMobile = e.matches;
+      
+      // Apply responsive classes to collaboration areas
+      this._collaborationTopPanel.toggleClass('jp-collaboration-mobile', isMobile);
+      this._collaborationSidebarPanel.toggleClass('jp-collaboration-mobile', isMobile);
+      this._cellOverlayPanel.toggleClass('jp-collaboration-mobile', isMobile);
+      
+      // Emit responsive layout change signal
+      this._responsiveLayoutChanged.emit({ isMobile, breakpoint: 768 });
+    };
+
+    // Set up responsive listener
+    mediaQuery.addListener(handleResponsiveChange);
+    handleResponsiveChange(mediaQuery); // Initial call
+    
+    // Store reference for cleanup
+    this._mediaQuery = mediaQuery;
+    this._responsiveHandler = handleResponsiveChange;
+  }
+
+  /**
+   * Apply responsive layout preferences to a widget.
+   * Private method for responsive widget configuration.
+   */
+  private _applyResponsiveLayout(
+    widget: Widget, 
+    responsive: NonNullable<INotebookShell.ICollaborationOptions['responsive']>
+  ): void {
+    if (responsive.mobile !== undefined) {
+      widget.toggleClass('jp-responsive-mobile', responsive.mobile);
+    }
+    if (responsive.desktop !== undefined) {
+      widget.toggleClass('jp-responsive-desktop', responsive.desktop);
+    }
+    if (responsive.breakpoint !== undefined) {
+      (widget as any)._responsiveBreakpoint = responsive.breakpoint;
+    }
+  }
+
+  /**
    * Handle a change on the down panel widgets
    */
   private _onTabPanelChanged(): void {
@@ -958,28 +882,6 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     }
   }
 
-  // Private members for collaboration support
-  private _collaborationStatus: INotebookShell.ICollaborationStatus;
-  private _collaborationServices?: {
-    yjsProvider?: IYjsNotebookProvider;
-    awarenessManager?: IAwarenessManager;
-    lockManager?: ILockManager;
-    historyManager?: IHistoryManager;
-    permissionsManager?: IPermissionsManager;
-    commentManager?: ICommentManager;
-  };
-  private _collaborationWidgets = new Map<Widget, INotebookShell.ICollaborationOptions>();
-  private _collaborationStatusChanged = new Signal<
-    this,
-    INotebookShell.ICollaborationStatus
-  >(this);
-
-  // Collaboration panels per Section 7.2.1
-  private _collaborationTopPanel: Panel;
-  private _collaborationSidebarPanel: Panel;
-  private _cellOverlayPanel: Panel;
-
-  // Existing private members
   private _topWrapper: Panel;
   private _topHandler: PanelHandler;
   private _menuWrapper: Panel;
@@ -991,6 +893,19 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
   private _skipLinkWidgetHandler: Private.SkipLinkWidgetHandler;
   private _main: Panel;
   private _downPanel: TabPanel;
+  
+  // Enhanced collaboration support
+  private _collaborationTopPanel: Panel;
+  private _collaborationSidebarPanel: Panel;
+  private _cellOverlayPanel: Panel;
+  private _collaborationStatus: ICollaborationStatus;
+  private _collaborationStatusChanged = new Signal<this, ICollaborationStatus>(this);
+  private _responsiveLayoutChanged = new Signal<this, { isMobile: boolean; breakpoint: number }>(this);
+  
+  // Responsive layout support
+  private _mediaQuery?: MediaQueryList;
+  private _responsiveHandler?: (e: MediaQueryListEvent | MediaQueryList) => void;
+  
   private _translator: ITranslator = nullTranslator;
   private _currentChanged = new Signal<this, FocusTracker.IChangedArgs<Widget>>(
     this
@@ -999,12 +914,19 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
   private _userLayout: INotebookShell.IUserLayout;
 }
 
+/**
+ * Enhanced Private namespace with collaboration support.
+ */
 export namespace Private {
+  /**
+   * SkipLinkWidgetHandler with collaboration awareness.
+   */
   export class SkipLinkWidgetHandler {
     /**
      * Construct a new skipLink widget handler.
      */
     constructor(shell: INotebookShell) {
+      this._shell = shell;
       const skipLinkWidget = (this._skipLinkWidget = new Widget());
       const skipToMain = document.createElement('a');
       skipToMain.href = '#first-cell';
@@ -1015,22 +937,108 @@ export namespace Private {
       skipLinkWidget.addClass('jp-skiplink');
       skipLinkWidget.id = 'jp-skiplink';
       skipLinkWidget.node.appendChild(skipToMain);
+
+      // Add collaboration-aware skip link if collaboration is active
+      this._setupCollaborationSkipLinks();
+      
+      // Listen for collaboration status changes
+      this._shell.collaborationStatusChanged.connect(this._onCollaborationStatusChanged, this);
     }
 
     handleEvent(event: Event): void {
       switch (event.type) {
         case 'click':
-          this._focusMain();
+          const target = event.target as HTMLElement;
+          if (target.getAttribute('href') === '#first-cell') {
+            this._focusMain();
+          } else if (target.getAttribute('href') === '#collaboration-bar') {
+            this._focusCollaborationBar();
+          } else if (target.getAttribute('href') === '#collaboration-sidebar') {
+            this._focusCollaborationSidebar();
+          }
           break;
       }
     }
 
+    /**
+     * Focus the main content area (first cell).
+     */
     private _focusMain() {
       const input = document.querySelector(
         '#main-panel .jp-InputArea-editor'
       ) as HTMLInputElement;
-      input.tabIndex = 1;
-      input.focus();
+      if (input) {
+        input.tabIndex = 1;
+        input.focus();
+      }
+    }
+
+    /**
+     * Focus the collaboration bar if present.
+     */
+    private _focusCollaborationBar() {
+      const collabBar = document.querySelector(
+        '#collaboration-top-panel .jp-collaboration-bar'
+      ) as HTMLElement;
+      if (collabBar) {
+        collabBar.tabIndex = 1;
+        collabBar.focus();
+      }
+    }
+
+    /**
+     * Focus the collaboration sidebar if present.
+     */
+    private _focusCollaborationSidebar() {
+      const collabSidebar = document.querySelector(
+        '#collaboration-sidebar-panel'
+      ) as HTMLElement;
+      if (collabSidebar) {
+        collabSidebar.tabIndex = 1;
+        collabSidebar.focus();
+      }
+    }
+
+    /**
+     * Set up collaboration-specific skip links.
+     */
+    private _setupCollaborationSkipLinks(): void {
+      if (this._shell.collaborationStatus.isCollaborating) {
+        // Add skip to collaboration bar link
+        const skipToCollabBar = document.createElement('a');
+        skipToCollabBar.href = '#collaboration-bar';
+        skipToCollabBar.tabIndex = 2;
+        skipToCollabBar.text = 'Skip to Collaboration Bar';
+        skipToCollabBar.className = 'skip-link collaboration-skip';
+        skipToCollabBar.addEventListener('click', this);
+        this._skipLinkWidget.node.appendChild(skipToCollabBar);
+
+        // Add skip to collaboration sidebar link
+        const skipToCollabSidebar = document.createElement('a');
+        skipToCollabSidebar.href = '#collaboration-sidebar';
+        skipToCollabSidebar.tabIndex = 3;
+        skipToCollabSidebar.text = 'Skip to Collaboration Tools';
+        skipToCollabSidebar.className = 'skip-link collaboration-skip';
+        skipToCollabSidebar.addEventListener('click', this);
+        this._skipLinkWidget.node.appendChild(skipToCollabSidebar);
+      }
+    }
+
+    /**
+     * Handle collaboration status changes.
+     */
+    private _onCollaborationStatusChanged(
+      sender: INotebookShell,
+      status: ICollaborationStatus
+    ): void {
+      // Remove existing collaboration skip links
+      const existingLinks = this._skipLinkWidget.node.querySelectorAll('.collaboration-skip');
+      existingLinks.forEach(link => link.remove());
+
+      // Re-setup if collaboration is active
+      if (status.isCollaborating) {
+        this._setupCollaborationSkipLinks();
+      }
     }
 
     /**
@@ -1048,7 +1056,15 @@ export namespace Private {
         return;
       }
       this._isDisposed = true;
+      
+      // Disconnect collaboration status listener
+      this._shell.collaborationStatusChanged.disconnect(this._onCollaborationStatusChanged, this);
+      
+      // Remove event listeners
       this._skipLinkWidget.node.removeEventListener('click', this);
+      const collaborationLinks = this._skipLinkWidget.node.querySelectorAll('.collaboration-skip');
+      collaborationLinks.forEach(link => link.removeEventListener('click', this));
+      
       this._skipLinkWidget.dispose();
     }
 
@@ -1073,6 +1089,7 @@ export namespace Private {
       return this._isDisposed;
     }
 
+    private _shell: INotebookShell;
     private _skipLinkWidget: Widget;
     private _isDisposed = false;
   }
