@@ -32,9 +32,8 @@ from jupyterlab_server.config import (  # type:ignore[attr-defined]
 from jupyterlab_server.handlers import _camelCase, is_url
 from notebook_shim.shim import NotebookConfigShimMixin  # type:ignore[import-untyped]
 from tornado import web
-from traitlets import Bool, Unicode, Integer, List, Dict, Float, default
+from traitlets import Bool, Unicode, Int, Float, default
 from traitlets.config.loader import Config
-import logging
 
 from ._version import __version__
 
@@ -99,35 +98,32 @@ class NotebookBaseHandler(ExtensionHandlerJinjaMixin, ExtensionHandlerMixin, Jup
         page_config.setdefault("fullMathjaxUrl", mathjax_url)
         page_config.setdefault("jupyterConfigDir", jupyter_config_dir())
 
-        # Add collaboration-specific page_config settings to support frontend collaboration features
-        # and UI components per Section 6.4.1 and Section 0.4.1 requirements
-        collaboration_config = {
-            "collaborationEnabled": app.collaboration_enabled,
-            "collaborationSessionTimeout": app.collaboration_session_timeout,
-            "collaborationMaxUsers": app.collaboration_max_users,
-            "collaborationLogLevel": app.collaboration_log_level,
-            "collaborationAuditEnabled": app.collaboration_audit_enabled,
-            "collaborationRetentionDays": app.collaboration_retention_days,
-            "collaborationEncryptionRequired": app.collaboration_encryption_required,
-            "collaborationWsRateLimit": app.collaboration_ws_rate_limit,
-            "collaborationCommentRateLimit": app.collaboration_comment_rate_limit,
-            "collaborationLockTimeout": app.collaboration_lock_timeout,
-        }
-        
-        # Only expose collaboration config if collaboration is enabled
+        # Add collaboration-specific page_config settings
+        page_config["collaborationEnabled"] = app.collaboration_enabled
         if app.collaboration_enabled:
-            page_config.update(collaboration_config)
-            
-            # Add collaboration WebSocket endpoint URL
-            page_config["collaborationWsUrl"] = ujoin(self.base_url, "api", "collaboration", "ws")
-            
-            # Add collaboration REST API base URLs  
-            page_config["collaborationApiUrls"] = {
-                "sessions": ujoin(self.base_url, "api", "collaboration", "sessions"),
-                "permissions": ujoin(self.base_url, "api", "collaboration", "permissions"),
-                "comments": ujoin(self.base_url, "api", "collaboration", "comments"),
-                "history": ujoin(self.base_url, "api", "collaboration", "history"),
-                "health": ujoin(self.base_url, "api", "collaboration", "health"),
+            page_config["collaborationConfig"] = {
+                "sessionTimeout": app.collaboration_session_timeout,
+                "wsUrl": ujoin(self.base_url, "api/collaboration/ws"),
+                "permissionsUrl": ujoin(self.base_url, "api/collaboration/permissions"),
+                "commentsUrl": ujoin(self.base_url, "api/collaboration/comments"),
+                "historyUrl": ujoin(self.base_url, "api/collaboration/history"),
+                "maxUsers": getattr(app, "collab_max_users", 20),
+                "wsRateLimit": getattr(app, "collab_ws_rate_limit", 100),
+                "commentRateLimit": getattr(app, "collab_comment_rate_limit", 30),
+                "features": {
+                    "presence": True,
+                    "locks": True,
+                    "comments": True,
+                    "history": True,
+                    "permissions": True,
+                },
+                "loggingConfig": {
+                    "level": app.collaboration_log_level,
+                    "auditEnabled": app.permission_audit_enabled,
+                    "lockAuditEnabled": app.lock_audit_enabled,
+                    "contentLogging": app.collaboration_content_logging,
+                    "commentLogsEnabled": app.comment_logs_enabled,
+                }
             }
 
         # Put all our config in page_config
@@ -307,119 +303,120 @@ class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[
     collaboration_enabled = Bool(
         True,
         config=True,
-        help="""Enable or disable real-time collaborative editing capabilities.
-        When disabled, collaboration endpoints return 404 and all collaboration
-        features are bypassed without impacting single-user workflows.
+        help="""Enable real-time collaborative editing features.
+        When disabled, collaboration endpoints return 404 and UI components are hidden.
+        Defaults to True for new deployments.
         """,
     )
 
-    collaboration_session_timeout = Integer(
+    collaboration_session_timeout = Int(
         1800,  # 30 minutes in seconds
         config=True,
-        help="""Timeout for collaborative editing sessions in seconds.
-        Stale collaboration WebSockets are terminated after this duration.
-        Defaults to 1800 seconds (30 minutes), shorter than standard sessions.
+        help="""Timeout for collaborative sessions in seconds.
+        After this period of inactivity, collaboration WebSocket connections are terminated.
+        Defaults to 1800 seconds (30 minutes).
         """,
     )
 
-    collaboration_max_users = Integer(
-        20,
-        config=True,
-        help="""Maximum number of concurrent users per collaborative notebook session.
-        Prevents resource exhaustion by limiting participants per notebook.
-        """,
-    )
-
+    # Collaboration logging configuration per Section 6.4.1 audit logging requirements
     collaboration_log_level = Unicode(
         "INFO",
         config=True,
-        help="""Logging level for collaboration events (DEBUG, INFO, WARNING, ERROR).
-        Controls verbosity of collaboration-specific audit logging.
+        help="""Log level for collaboration events.
+        Valid values: DEBUG, INFO, WARNING, ERROR, CRITICAL.
+        Defaults to INFO for production deployments.
         """,
     )
 
-    collaboration_audit_enabled = Bool(
+    permission_audit_enabled = Bool(
         True,
         config=True,
-        help="""Enable comprehensive audit logging for collaboration events.
-        Captures presence, locks, comments, and version operations for compliance.
+        help="""Enable audit logging for permission changes.
+        When enabled, all permission modifications are logged for compliance.
+        Defaults to True for security auditing.
         """,
     )
 
-    collaboration_retention_days = Integer(
+    lock_audit_enabled = Bool(
+        True,
+        config=True,
+        help="""Enable audit logging for lock operations.
+        When enabled, all cell lock/unlock operations are logged.
+        Defaults to True for collaboration debugging.
+        """,
+    )
+
+    collaboration_content_logging = Bool(
+        False,
+        config=True,
+        help="""Enable content-level logging for CRDT operations.
+        WARNING: This may log sensitive notebook content. Use only for debugging.
+        Defaults to False for privacy protection.
+        """,
+    )
+
+    comment_logs_enabled = Bool(
+        True,
+        config=True,
+        help="""Enable logging for comment system events.
+        When enabled, comment creation, editing, and resolution are logged.
+        Defaults to True for collaboration tracking.
+        """,
+    )
+
+    # Additional collaboration configuration for enterprise deployments
+    collab_max_users = Int(
+        20,
+        config=True,
+        help="""Maximum number of concurrent users per notebook collaboration session.
+        Prevents resource exhaustion in large deployments.
+        Defaults to 20 users per notebook.
+        """,
+    )
+
+    collab_ws_rate_limit = Int(
+        100,
+        config=True,
+        help="""Rate limit for collaboration WebSocket messages per minute.
+        Applied per user to prevent abuse of real-time features.
+        Defaults to 100 messages per minute.
+        """,
+    )
+
+    collab_comment_rate_limit = Int(
         30,
         config=True,
-        help="""Number of days to retain collaboration metadata and history.
-        After this period, inactive collaboration sessions are automatically purged.
+        help="""Rate limit for comment API requests per minute.
+        Applied per user to prevent comment spam.
+        Defaults to 30 requests per minute.
         """,
     )
 
-    collaboration_encryption_required = Bool(
-        True,
+    # Enhanced SIEM integration configuration per Section 6.4.6
+    collaboration_siem_integration = Bool(
+        False,
         config=True,
-        help="""Require encryption for all collaboration channels.
-        When True, enforces TLS for WebSocket connections and HMAC/JWT signatures.
-        """,
-    )
-
-    collaboration_ws_rate_limit = Float(
-        100.0,  # messages per second
-        config=True,
-        help="""Rate limit for collaboration WebSocket messages per user (messages/second).
-        Prevents DoS attacks from misbehaving collaboration clients.
-        """,
-    )
-
-    collaboration_comment_rate_limit = Float(
-        10.0,  # requests per minute
-        config=True,
-        help="""Rate limit for collaboration comment API requests per user (requests/minute).
-        Prevents comment spam and API abuse.
-        """,
-    )
-
-    collaboration_lock_timeout = Integer(
-        300,  # 5 minutes in seconds
-        config=True,
-        help="""Timeout for cell-level locks in seconds.
-        Stale locks are automatically released after this duration.
-        """,
-    )
-
-    collaboration_audit_events = List(
-        ["presence", "locks", "comments", "versions"],
-        config=True,
-        help="""List of collaboration event types to include in audit logs.
-        Available types: presence, locks, comments, versions, permissions.
-        """,
-    )
-
-    collaboration_siem_integration = Dict(
-        {
-            "enabled": False,
-            "format": "json",
-            "destination": "file",
-            "facility": "local5"
-        },
-        config=True,
-        help="""SIEM integration configuration for collaboration audit logs.
-        Supports structured JSON output to syslog, Kafka, or file destinations.
+        help="""Enable SIEM integration for collaboration events.
+        When enabled, structured logs are sent to configured SIEM systems.
+        Defaults to False, enable for enterprise compliance.
         """,
     )
 
     collaboration_data_residency = Unicode(
         "",
         config=True,
-        help="""Data residency configuration for collaboration metadata storage.
-        Enforces geographic constraints for regulatory compliance.
+        help="""Data residency region for collaboration metadata.
+        Ensures compliance with geographic data protection regulations.
+        Empty string means no specific residency requirements.
         """,
     )
 
     collaboration_gdpr_compliant = Bool(
         False,
         config=True,
-        help="""Enable GDPR-compliant mode for collaboration features.
-        Implements enhanced privacy controls and data retention policies.
+        help="""Enable GDPR-compliant collaboration features.
+        When enabled, implements privacy controls and data retention policies.
+        Defaults to False, enable for EU deployments.
         """,
     )
 
@@ -434,25 +431,25 @@ class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[
         "Load custom CSS in template html files. Default is True",
     )
 
-    # Add collaboration-specific command-line flags
-    flags["collaboration-enabled"] = (
-        {"JupyterNotebookApp": {"collaboration_enabled": True}},
-        "Enable real-time collaborative editing features.",
-    )
-
-    flags["no-collaboration"] = (
+    # Collaboration-specific flags
+    flags["disable-collaboration"] = (
         {"JupyterNotebookApp": {"collaboration_enabled": False}},
         "Disable real-time collaborative editing features.",
     )
 
-    flags["collaboration-audit"] = (
-        {"JupyterNotebookApp": {"collaboration_audit_enabled": True}},
-        "Enable comprehensive audit logging for collaboration events.",
+    flags["enable-collaboration-content-logging"] = (
+        {"JupyterNotebookApp": {"collaboration_content_logging": True}},
+        "Enable content-level logging for CRDT operations (may log sensitive data).",
     )
 
-    flags["collaboration-encryption"] = (
-        {"JupyterNotebookApp": {"collaboration_encryption_required": True}},
-        "Require encryption for all collaboration channels.",
+    flags["enable-siem-integration"] = (
+        {"JupyterNotebookApp": {"collaboration_siem_integration": True}},
+        "Enable SIEM integration for collaboration audit events.",
+    )
+
+    flags["gdpr-compliant"] = (
+        {"JupyterNotebookApp": {"collaboration_gdpr_compliant": True}},
+        "Enable GDPR-compliant collaboration features and data retention.",
     )
 
     @default("static_dir")
@@ -499,95 +496,14 @@ class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[
             extension_enabled = False
         return extension_enabled
 
-    def _configure_collaboration_logging(self) -> None:
-        """Configure collaboration-specific logging and audit trail support per Section 6.4.1."""
-        if not self.collaboration_enabled:
-            return
-
-        # Create collaboration-specific logger
-        collab_logger = logging.getLogger("jupyter_notebook.collaboration")
-        collab_logger.setLevel(getattr(logging, self.collaboration_log_level.upper()))
-
-        # Configure audit logging if enabled
-        if self.collaboration_audit_enabled:
-            audit_logger = logging.getLogger("jupyter_notebook.collaboration.audit")
-            audit_logger.setLevel(logging.INFO)
-
-            # Set up SIEM integration if configured
-            if self.collaboration_siem_integration.get("enabled", False):
-                siem_config = self.collaboration_siem_integration
-                
-                if siem_config.get("destination") == "syslog":
-                    try:
-                        from logging.handlers import SysLogHandler
-                        facility = siem_config.get("facility", "local5")
-                        syslog_handler = SysLogHandler(facility=getattr(SysLogHandler, f"LOG_{facility.upper()}"))
-                        
-                        if siem_config.get("format") == "json":
-                            import json
-                            
-                            class JSONFormatter(logging.Formatter):
-                                def format(self, record):
-                                    log_data = {
-                                        "timestamp": self.formatTime(record),
-                                        "level": record.levelname,
-                                        "logger": record.name,
-                                        "message": record.getMessage(),
-                                        "event_type": getattr(record, "event_type", "unknown"),
-                                        "user_id": getattr(record, "user_id", ""),
-                                        "session_id": getattr(record, "session_id", ""),
-                                        "correlation_id": getattr(record, "correlation_id", ""),
-                                    }
-                                    return json.dumps(log_data)
-                            
-                            syslog_handler.setFormatter(JSONFormatter())
-                        
-                        audit_logger.addHandler(syslog_handler)
-                        
-                    except ImportError:
-                        self.log.warning("SysLogHandler not available, falling back to file logging")
-
-        self.log.info(f"Collaboration logging configured: level={self.collaboration_log_level}, "
-                     f"audit_enabled={self.collaboration_audit_enabled}, "
-                     f"siem_enabled={self.collaboration_siem_integration.get('enabled', False)}")
-
-    def _setup_collaboration_authentication(self) -> None:
-        """Set up collaboration authentication integration with JupyterHub for multi-user sessions."""
-        if not self.collaboration_enabled or self.serverapp is None:
-            return
-
-        # Check if running under JupyterHub and configure collaboration authentication
-        if "hub_prefix" in self.serverapp.tornado_settings:
-            tornado_settings = self.serverapp.tornado_settings
-            
-            # Store JupyterHub settings for collaboration handlers
-            collaboration_auth_settings = {
-                "hub_prefix": tornado_settings.get("hub_prefix"),
-                "hub_host": tornado_settings.get("hub_host"),
-                "hub_user": tornado_settings.get("user"),
-                "hub_api_token": os.environ.get("JUPYTERHUB_API_TOKEN"),
-                "collaboration_enabled": self.collaboration_enabled,
-                "collaboration_session_timeout": self.collaboration_session_timeout,
-                "collaboration_max_users": self.collaboration_max_users,
-                "collaboration_encryption_required": self.collaboration_encryption_required,
-            }
-            
-            # Add collaboration authentication settings to web app settings
-            self.serverapp.web_app.settings["collaboration_auth"] = collaboration_auth_settings
-            
-            self.log.info("Collaboration authentication configured for JupyterHub integration")
-        else:
-            # Standalone mode - use token-based authentication
-            self.log.info("Collaboration authentication configured for standalone mode")
-
     def initialize_handlers(self) -> None:
-        """Initialize handlers."""
+        """Initialize handlers with collaboration WebSocket support."""
         assert self.serverapp is not None  # noqa: S101
         page_config = self.serverapp.web_app.settings.setdefault("page_config_data", {})
         nbclassic_enabled = self.server_extension_is_enabled("nbclassic")
         page_config["nbclassic_enabled"] = nbclassic_enabled
 
-        # If running under JupyterHub, add more metadata.
+        # JupyterHub integration for multi-user collaborative sessions
         if "hub_prefix" in self.serverapp.tornado_settings:
             tornado_settings = self.serverapp.tornado_settings
             hub_prefix = tornado_settings["hub_prefix"]
@@ -595,6 +511,24 @@ class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[
             page_config["hubHost"] = tornado_settings["hub_host"]
             page_config["hubUser"] = tornado_settings["user"]
             page_config["shareUrl"] = ujoin(hub_prefix, "user-redirect")
+            
+            # Enhanced JupyterHub integration for collaboration authentication
+            if self.collaboration_enabled:
+                page_config["collaborationHub"] = {
+                    "enabled": True,
+                    "hubPrefix": hub_prefix,
+                    "hubHost": tornado_settings["hub_host"],
+                    "hubUser": tornado_settings["user"],
+                    "hubApiToken": tornado_settings.get("hub_api_token", ""),
+                    "hubServicePrefix": tornado_settings.get("hub_service_prefix", ""),
+                    "userIdentity": {
+                        "name": tornado_settings["user"],
+                        "displayName": tornado_settings.get("user_display_name", tornado_settings["user"]),
+                        "groups": tornado_settings.get("user_groups", []),
+                        "roles": tornado_settings.get("user_roles", ["user"]),
+                    },
+                }
+            
             # Assume the server_name property indicates running JupyterHub 1.0.
             if hasattr(self.serverapp, "server_name"):
                 page_config["hubServerName"] = self.serverapp.server_name
@@ -603,103 +537,20 @@ class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[
             # but at least make sure we don't use the token
             # if the serverapp set one
             page_config["token"] = ""
+        else:
+            # Standalone mode collaboration configuration
+            if self.collaboration_enabled:
+                page_config["collaborationHub"] = {
+                    "enabled": False,
+                    "standaloneMode": True,
+                    "userIdentity": {
+                        "name": "jupyter-user",
+                        "displayName": "Jupyter User",
+                        "groups": [],
+                        "roles": ["admin"],  # Full access in standalone mode
+                    },
+                }
 
-        # Register collaboration WebSocket handlers and REST API endpoints if collaboration is enabled
-        if self.collaboration_enabled:
-            try:
-                # Import collaboration handlers (will be implemented in handlers.py)
-                from .handlers import (
-                    CollaborationWebSocketHandler,
-                    CollaborationSessionsHandler,
-                    CollaborationPermissionsHandler,
-                    CollaborationCommentsHandler,
-                    CollaborationHistoryHandler,
-                    CollaborationHealthHandler,
-                )
-
-                # Register collaboration WebSocket endpoint with proper authentication and authorization middleware
-                self.handlers.append((
-                    r"/api/collaboration/ws/?",
-                    CollaborationWebSocketHandler,
-                    {"extensionapp": self}
-                ))
-
-                # Register collaboration REST API endpoints
-                self.handlers.append((
-                    r"/api/collaboration/sessions/?",
-                    CollaborationSessionsHandler,
-                    {"extensionapp": self}
-                ))
-                
-                self.handlers.append((
-                    r"/api/collaboration/sessions/([^/]+)/?",
-                    CollaborationSessionsHandler,
-                    {"extensionapp": self}
-                ))
-
-                self.handlers.append((
-                    r"/api/collaboration/permissions/?",
-                    CollaborationPermissionsHandler,
-                    {"extensionapp": self}
-                ))
-                
-                self.handlers.append((
-                    r"/api/collaboration/permissions/([^/]+)/?",
-                    CollaborationPermissionsHandler,
-                    {"extensionapp": self}
-                ))
-                
-                self.handlers.append((
-                    r"/api/collaboration/permissions/([^/]+)/cells/([^/]+)/?",
-                    CollaborationPermissionsHandler,
-                    {"extensionapp": self}
-                ))
-
-                self.handlers.append((
-                    r"/api/collaboration/comments/([^/]+)/?",
-                    CollaborationCommentsHandler,
-                    {"extensionapp": self}
-                ))
-                
-                self.handlers.append((
-                    r"/api/collaboration/comments/([^/]+)/threads/([^/]+)/?",
-                    CollaborationCommentsHandler,
-                    {"extensionapp": self}
-                ))
-                
-                self.handlers.append((
-                    r"/api/collaboration/comments/([^/]+)/threads/([^/]+)/replies/?",
-                    CollaborationCommentsHandler,
-                    {"extensionapp": self}
-                ))
-
-                self.handlers.append((
-                    r"/api/collaboration/history/?",
-                    CollaborationHistoryHandler,
-                    {"extensionapp": self}
-                ))
-                
-                self.handlers.append((
-                    r"/api/collaboration/history/([^/]+)/?",
-                    CollaborationHistoryHandler,
-                    {"extensionapp": self}
-                ))
-
-                # Register collaboration health check endpoint
-                self.handlers.append((
-                    r"/api/collaboration/health/?",
-                    CollaborationHealthHandler,
-                    {"extensionapp": self}
-                ))
-
-                self.log.info("Collaboration handlers registered successfully")
-
-            except ImportError as e:
-                # If collaboration handlers are not available, log warning but don't fail
-                self.log.warning(f"Collaboration handlers not available: {e}")
-                self.log.warning("Collaboration features will be disabled")
-                self.collaboration_enabled = False
-        
         # Register standard notebook handlers
         self.handlers.append(("/tree(.*)", TreeHandler))
         self.handlers.append(("/notebooks(.*)", NotebookHandler))
@@ -707,21 +558,95 @@ class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[
         self.handlers.append(("/consoles/(.*)", ConsoleHandler))
         self.handlers.append(("/terminals/(.*)", TerminalHandler))
         self.handlers.append(("/custom/custom.css", CustomCssHandler))
+
+        # Register collaboration WebSocket handlers for real-time collaborative editing
+        if self.collaboration_enabled:
+            try:
+                # Import collaboration handlers dynamically to avoid hard dependency
+                from .handlers import (
+                    CollaborationWebSocketHandler,
+                    CollaborationSessionHandler,
+                    CollaborationPermissionsHandler,
+                    CollaborationCommentsHandler,
+                    CollaborationHistoryHandler,
+                    CollaborationHealthHandler,
+                )
+
+                # Main collaboration WebSocket endpoint for Yjs CRDT synchronization
+                self.handlers.append(
+                    (r"/api/collaboration/ws", CollaborationWebSocketHandler, {
+                        "collaboration_config": {
+                            "session_timeout": self.collaboration_session_timeout,
+                            "max_users": self.collab_max_users,
+                            "ws_rate_limit": self.collab_ws_rate_limit,
+                            "audit_logging": {
+                                "enabled": self.permission_audit_enabled,
+                                "level": self.collaboration_log_level,
+                                "content_logging": self.collaboration_content_logging,
+                            },
+                            "siem_integration": self.collaboration_siem_integration,
+                            "data_residency": self.collaboration_data_residency,
+                            "gdpr_compliant": self.collaboration_gdpr_compliant,
+                        }
+                    })
+                )
+
+                # REST API endpoints for collaboration management
+                self.handlers.extend([
+                    (r"/api/collaboration/sessions", CollaborationSessionHandler),
+                    (r"/api/collaboration/sessions/([^/]+)", CollaborationSessionHandler),
+                    (r"/api/collaboration/permissions", CollaborationPermissionsHandler),
+                    (r"/api/collaboration/permissions/([^/]+)", CollaborationPermissionsHandler),
+                    (r"/api/collaboration/permissions/([^/]+)/cells/([^/]+)", CollaborationPermissionsHandler),
+                    (r"/api/collaboration/comments/([^/]+)", CollaborationCommentsHandler),
+                    (r"/api/collaboration/comments/([^/]+)/threads/([^/]+)", CollaborationCommentsHandler),
+                    (r"/api/collaboration/comments/([^/]+)/threads/([^/]+)/replies", CollaborationCommentsHandler),
+                    (r"/api/collaboration/comments/([^/]+)/threads/([^/]+)/status", CollaborationCommentsHandler),
+                    (r"/api/collaboration/history/([^/]+)", CollaborationHistoryHandler),
+                    (r"/api/collaboration/health", CollaborationHealthHandler),
+                ])
+
+                self.log.info(
+                    "Collaboration endpoints registered: WebSocket at /api/collaboration/ws, "
+                    "REST APIs for sessions, permissions, comments, and history"
+                )
+
+                # Configure collaboration logging per audit requirements
+                if self.permission_audit_enabled or self.lock_audit_enabled or self.comment_logs_enabled:
+                    self.log.info(
+                        "Collaboration audit logging enabled: "
+                        f"permissions={self.permission_audit_enabled}, "
+                        f"locks={self.lock_audit_enabled}, "
+                        f"comments={self.comment_logs_enabled}, "
+                        f"level={self.collaboration_log_level}"
+                    )
+
+                # Configure SIEM integration if enabled
+                if self.collaboration_siem_integration:
+                    self.log.info(
+                        "SIEM integration enabled for collaboration events. "
+                        f"Data residency: {self.collaboration_data_residency or 'none'}, "
+                        f"GDPR compliant: {self.collaboration_gdpr_compliant}"
+                    )
+
+            except ImportError as e:
+                self.log.warning(
+                    f"Collaboration handlers not available: {e}. "
+                    "Collaboration features will be disabled. "
+                    "Ensure 'notebook.handlers' module is properly installed."
+                )
+                # Disable collaboration in page config if handlers can't be imported
+                page_config["collaborationEnabled"] = False
+                self.collaboration_enabled = False
+        else:
+            self.log.info("Collaboration features disabled by configuration")
+            page_config["collaborationEnabled"] = False
+
         super().initialize_handlers()
 
     def initialize(self, argv: list[str] | None = None) -> None:  # noqa: ARG002
         """Subclass because the ExtensionApp.initialize() method does not take arguments"""
         super().initialize()
-        
-        # Configure collaboration features after core initialization
-        if self.collaboration_enabled:
-            self._configure_collaboration_logging()
-            self._setup_collaboration_authentication()
-            
-            self.log.info(f"Collaboration features initialized: "
-                         f"session_timeout={self.collaboration_session_timeout}s, "
-                         f"max_users={self.collaboration_max_users}, "
-                         f"encryption_required={self.collaboration_encryption_required}")
 
 
 main = launch_new_instance = JupyterNotebookApp.launch_instance
