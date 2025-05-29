@@ -1,5 +1,6 @@
 version: 2
 updates:
+  # GitHub Actions ecosystem monitoring
   - package-ecosystem: 'github-actions'
     directory: '/'
     schedule:
@@ -8,7 +9,141 @@ updates:
       actions:
         patterns:
           - "*"
+
+  # Python ecosystem monitoring
   - package-ecosystem: 'pip'
     directory: '/'
     schedule:
       interval: 'weekly'
+    groups:
+      # Core Python dependencies for coordinated updates
+      python-core:
+        patterns:
+          - "jupyter_server*"
+          - "jupyterlab*"
+          - "notebook*"
+          - "tornado*"
+      # Development and testing Python dependencies  
+      python-dev:
+        patterns:
+          - "pytest*"
+          - "mypy*"
+          - "ruff*"
+          - "pre-commit*"
+          - "hatchling*"
+
+  # npm ecosystem monitoring for JavaScript/TypeScript dependencies
+  - package-ecosystem: 'npm'
+    directory: '/packages/notebook'
+    schedule:
+      interval: 'weekly'
+    groups:
+      # Collaboration dependencies for coordinated updates as specified in Section 8.6.2
+      collaboration:
+        patterns:
+          - "yjs*"
+          - "@jupyterlab/yjs*"
+        # Version compatibility checks for CRDT schema definitions and Yjs document version compatibility
+        update-types:
+          - "minor"
+          - "patch"
+      # Core JupyterLab dependencies for synchronized versioning
+      jupyterlab-core:
+        patterns:
+          - "@jupyterlab/*"
+          - "@jupyter-notebook/*"
+          - "@lumino/*"
+        update-types:
+          - "minor"
+          - "patch"
+      # React and UI dependencies
+      ui-framework:
+        patterns:
+          - "react*"
+          - "@types/react*"
+        update-types:
+          - "minor"
+          - "patch"
+      # Enhanced testing dependencies for multi-user collaborative scenarios
+      testing:
+        patterns:
+          - "playwright*"
+          - "@playwright/*"
+          - "@jupyterlab/galata*"
+          - "jest*"
+          - "@types/jest*"
+        update-types:
+          - "minor"
+          - "patch"
+      # Development tooling
+      dev-tools:
+        patterns:
+          - "eslint*"
+          - "prettier*"
+          - "@types/*"
+          - "typescript*"
+
+  # npm ecosystem monitoring for notebook-extension package
+  - package-ecosystem: 'npm'
+    directory: '/packages/notebook-extension'
+    schedule:
+      interval: 'weekly'
+    groups:
+      # Collaboration dependencies for coordinated updates
+      collaboration:
+        patterns:
+          - "yjs*"
+          - "@jupyterlab/yjs*"
+        update-types:
+          - "minor"
+          - "patch"
+      # Core JupyterLab dependencies 
+      jupyterlab-core:
+        patterns:
+          - "@jupyterlab/*"
+          - "@jupyter-notebook/*"
+          - "@lumino/*"
+        update-types:
+          - "minor"
+          - "patch"
+      # React and UI dependencies for collaboration components
+      ui-framework:
+        patterns:
+          - "react*"
+          - "@types/react*"
+        update-types:
+          - "minor"
+          - "patch"
+      # Testing dependencies for collaborative workflows
+      testing:
+        patterns:
+          - "playwright*"
+          - "@playwright/*"
+          - "@jupyterlab/galata*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # npm ecosystem monitoring for application package
+  - package-ecosystem: 'npm'
+    directory: '/packages/application'
+    schedule:
+      interval: 'weekly'
+    groups:
+      # Core JupyterLab dependencies for synchronized versioning
+      jupyterlab-core:
+        patterns:
+          - "@jupyterlab/*"
+          - "@jupyter-notebook/*"
+          - "@lumino/*"
+        update-types:
+          - "minor"
+          - "patch"
+      # React and UI dependencies
+      ui-framework:
+        patterns:
+          - "react*"
+          - "@types/react*"
+        update-types:
+          - "minor"
+          - "patch"
