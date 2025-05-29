@@ -39,6 +39,17 @@ import { Widget } from '@lumino/widgets';
 
 import { TrustedComponent } from './trusted';
 
+// Collaboration imports
+import { YjsNotebookProvider } from '@jupyterlab/yjs';
+
+// Collaboration component imports
+import { UserPresenceComponent } from './components/userPresence';
+import { CellLockIndicatorComponent } from './components/cellLockIndicator';
+import { HistoryViewerComponent } from './components/historyViewer';
+import { PermissionsDialogComponent } from './components/permissionsDialog';
+import { CommentSystemComponent } from './components/commentSystem';
+import { CollaborationBarComponent } from './components/collaborationBar';
+
 /**
  * The class for kernel status errors.
  */
@@ -678,6 +689,182 @@ const editNotebookMetadata: JupyterFrontEndPlugin<void> = {
 };
 
 /**
+ * A plugin to enable real-time collaborative editing capabilities.
+ * Registers all collaboration UI components and services for multi-user editing,
+ * presence awareness, conflict resolution, and collaborative review workflows.
+ */
+const collaboration: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:collaboration',
+  description: 'A plugin to enable real-time collaborative editing capabilities.',
+  autoStart: true,
+  requires: [INotebookShell, INotebookTracker, YjsNotebookProvider],
+  optional: [ISettingRegistry, ITranslator],
+  activate: (
+    app: JupyterFrontEnd,
+    shell: INotebookShell,
+    tracker: INotebookTracker,
+    yjsProvider: YjsNotebookProvider,
+    settingRegistry: ISettingRegistry | null,
+    translator: ITranslator | null
+  ) => {
+    const trans = (translator ?? nullTranslator).load('notebook');
+    
+    // Check collaboration settings
+    let collaborationEnabled = true;
+    
+    if (settingRegistry) {
+      const loadSettings = settingRegistry.load(collaboration.id);
+      const updateSettings = (settings: ISettingRegistry.ISettings): void => {
+        collaborationEnabled = settings.get('enabled').composite as boolean;
+      };
+
+      Promise.all([loadSettings, app.restored])
+        .then(([settings]) => {
+          updateSettings(settings);
+          settings.changed.connect((settings) => {
+            updateSettings(settings);
+          });
+        })
+        .catch((reason: Error) => {
+          console.error(reason.message);
+        });
+    }
+
+    const activateCollaborationComponents = () => {
+      if (!collaborationEnabled) {
+        return;
+      }
+
+      const current = shell.currentWidget;
+      if (!(current instanceof NotebookPanel)) {
+        return;
+      }
+
+      // Register Collaboration Bar in collaboration-top shell area per Section 7.2.1
+      const collaborationBar = new CollaborationBarComponent({
+        shell,
+        yjsProvider,
+        notebookPanel: current,
+        translator
+      });
+      shell.add(collaborationBar, 'top', { 
+        rank: 1000,
+        type: 'collaboration-top'
+      });
+
+      // Register User Presence component in collaboration-top shell area per Section 7.9.2
+      const userPresence = new UserPresenceComponent({
+        shell,
+        yjsProvider,
+        notebookPanel: current,
+        translator
+      });
+      shell.add(userPresence, 'top', { 
+        rank: 1001,
+        type: 'collaboration:presenceIndicator'
+      });
+
+      // Register History Viewer component in right sidebar per Section 7.2.2
+      const historyViewer = new HistoryViewerComponent({
+        shell,
+        yjsProvider,
+        notebookPanel: current,
+        translator
+      });
+      shell.add(historyViewer, 'right', { 
+        rank: 2000,
+        type: 'collaboration:historyPanel'
+      });
+
+      // Register Permissions Dialog component per Section 0.4.1
+      const permissionsDialog = new PermissionsDialogComponent({
+        shell,
+        yjsProvider,
+        notebookPanel: current,
+        translator
+      });
+      shell.add(permissionsDialog, 'right', { 
+        rank: 2001,
+        type: 'collaboration-sidebar'
+      });
+
+      // Register Cell Lock Indicator component per Implementation Plan
+      const cellLockIndicator = new CellLockIndicatorComponent({
+        shell,
+        yjsProvider,
+        notebookPanel: current,
+        translator
+      });
+      
+      // Add cell lock indicators as overlays to notebook cells
+      if (current.content) {
+        current.content.widgets.forEach((cell, index) => {
+          const lockWidget = cellLockIndicator.createCellLockWidget(cell, index);
+          if (lockWidget) {
+            // Add to cellOverlay:lock extension point per Section 7.9.2
+            current.content.addWidget(lockWidget);
+          }
+        });
+      }
+
+      // Register Comment System component per Section 7.9.4
+      const commentSystem = new CommentSystemComponent({
+        shell,
+        yjsProvider,
+        notebookPanel: current,
+        translator
+      });
+      
+      // Add comment system as cell overlays
+      if (current.content) {
+        current.content.widgets.forEach((cell, index) => {
+          const commentWidget = commentSystem.createCellCommentWidget(cell, index);
+          if (commentWidget) {
+            // Add to cellOverlay:comment extension point per Section 7.9.2
+            current.content.addWidget(commentWidget);
+          }
+        });
+      }
+
+      // Set up real-time synchronization
+      try {
+        yjsProvider.connect();
+        console.log('Collaboration features activated for notebook:', current.context.path);
+      } catch (error) {
+        console.warn('Failed to establish collaboration connection:', error);
+        // Graceful degradation - continue in single-user mode
+      }
+    };
+
+    // Activate collaboration when notebook changes
+    const onChange = async () => {
+      if (collaborationEnabled) {
+        activateCollaborationComponents();
+      }
+    };
+
+    // Connect to notebook changes
+    shell.currentChanged.connect(onChange);
+    
+    // Connect to new notebook widgets
+    tracker.widgetAdded.connect((sender, notebook) => {
+      if (collaborationEnabled) {
+        notebook.sessionContext.ready.then(() => {
+          activateCollaborationComponents();
+        });
+      }
+    });
+
+    // Initial activation for current notebook
+    app.started.then(() => {
+      if (collaborationEnabled && shell.currentWidget instanceof NotebookPanel) {
+        activateCollaborationComponents();
+      }
+    });
+  },
+};
+
+/**
  * Export the plugins as default.
  */
 const plugins: JupyterFrontEndPlugin<any>[] = [
@@ -692,6 +879,7 @@ const plugins: JupyterFrontEndPlugin<any>[] = [
   scrollOutput,
   tabIcon,
   trusted,
+  collaboration, // Add collaboration plugin to enable collaborative editing capabilities
 ];
 
 export default plugins;
