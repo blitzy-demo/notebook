@@ -276,3 +276,338 @@ body[data-notebook='notebooks']
   text-decoration: underline;
   color: var(--jp-content-link-color);
 }
+
+/* Collaboration Features - Cell Lock Indicators */
+
+/* Cell Lock Indicator Container */
+.jp-Collab-CellLockIndicator {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-family: var(--jp-ui-font-family);
+  pointer-events: auto;
+}
+
+/* Individual Cell Lock Widget */
+.jp-Collab-CellLockWidget {
+  position: relative;
+  display: inline-block;
+}
+
+/* Lock States */
+.jp-Collab-CellLock-available,
+.jp-Collab-CellLock-owned,
+.jp-Collab-CellLock-locked,
+.jp-Collab-CellLock-pending,
+.jp-Collab-CellLock-offline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 12px;
+  background: var(--jp-layout-color1);
+  border: 1px solid var(--jp-border-color2);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Available state - cell can be locked */
+.jp-Collab-CellLock-available {
+  background: var(--jp-layout-color0);
+  color: var(--jp-ui-font-color2);
+  opacity: 0.7;
+}
+
+.jp-Collab-CellLock-available:hover {
+  opacity: 1;
+  background: var(--jp-layout-color1);
+  border-color: var(--jp-brand-color1);
+}
+
+/* Owned state - current user has the lock */
+.jp-Collab-CellLock-owned {
+  background: var(--jp-brand-color1);
+  color: var(--jp-ui-inverse-font-color0);
+  border-color: var(--jp-brand-color0);
+}
+
+.jp-Collab-CellLock-owned:hover {
+  background: var(--jp-brand-color0);
+}
+
+/* Locked state - another user has the lock */
+.jp-Collab-CellLock-locked {
+  background: var(--jp-warn-color2);
+  color: var(--jp-ui-font-color0);
+  border-color: var(--jp-warn-color1);
+  cursor: not-allowed;
+}
+
+/* Pending state - lock acquisition in progress */
+.jp-Collab-CellLock-pending {
+  background: var(--jp-info-color2);
+  color: var(--jp-ui-font-color0);
+  border-color: var(--jp-info-color1);
+  cursor: wait;
+}
+
+/* Offline state - collaboration not available */
+.jp-Collab-CellLock-offline {
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color2);
+  border-color: var(--jp-border-color1);
+  cursor: help;
+  opacity: 0.6;
+}
+
+/* Lock Icons */
+.jp-Collab-CellLock-icon {
+  font-size: 10px;
+  line-height: 1;
+  display: inline-block;
+  min-width: 10px;
+  text-align: center;
+}
+
+/* User names in lock indicators */
+.jp-Collab-CellLock-user {
+  font-size: 10px;
+  font-weight: 600;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Conflict Resolution Dialog */
+.jp-Collab-ConflictDialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: fadeIn 0.2s ease;
+}
+
+.jp-Collab-ConflictDialog {
+  background: var(--jp-layout-color0);
+  border-radius: 8px;
+  box-shadow: var(--jp-elevation-z8);
+  padding: 0;
+  max-width: 400px;
+  min-width: 320px;
+  max-height: 80vh;
+  overflow: hidden;
+  animation: slideIn 0.2s ease;
+}
+
+.jp-Collab-ConflictDialog-header {
+  background: var(--jp-brand-color1);
+  color: var(--jp-ui-inverse-font-color0);
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.jp-Collab-ConflictDialog-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-Collab-ConflictDialog-content {
+  padding: 20px;
+  font-family: var(--jp-ui-font-family);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--jp-ui-font-color0);
+}
+
+.jp-Collab-ConflictDialog-content p {
+  margin: 0 0 16px 0;
+}
+
+.jp-Collab-ConflictDialog-userInfo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: var(--jp-layout-color1);
+  border-radius: 6px;
+  border: 1px solid var(--jp-border-color2);
+}
+
+.jp-Collab-ConflictDialog-userColor {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--jp-layout-color0);
+  flex-shrink: 0;
+}
+
+.jp-Collab-ConflictDialog-userName {
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+}
+
+.jp-Collab-ConflictDialog-actions {
+  padding: 16px 20px;
+  background: var(--jp-layout-color1);
+  border-top: 1px solid var(--jp-border-color2);
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.jp-Collab-ConflictDialog-button {
+  padding: 8px 16px;
+  border-radius: 4px;
+  border: 1px solid var(--jp-border-color2);
+  background: var(--jp-layout-color0);
+  color: var(--jp-ui-font-color0);
+  font-family: var(--jp-ui-font-family);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 70px;
+}
+
+.jp-Collab-ConflictDialog-button:hover {
+  background: var(--jp-layout-color2);
+  border-color: var(--jp-brand-color1);
+}
+
+.jp-Collab-ConflictDialog-button:focus {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 2px;
+}
+
+.jp-Collab-ConflictDialog-button-secondary {
+  background: var(--jp-layout-color1);
+}
+
+.jp-Collab-ConflictDialog-button-secondary:hover {
+  background: var(--jp-layout-color2);
+}
+
+.jp-Collab-ConflictDialog-button-danger {
+  background: var(--jp-error-color1);
+  color: var(--jp-ui-inverse-font-color0);
+  border-color: var(--jp-error-color0);
+}
+
+.jp-Collab-ConflictDialog-button-danger:hover {
+  background: var(--jp-error-color0);
+}
+
+/* General Collaboration Component Styles */
+.jp-Collab-CellLockIndicatorComponent {
+  display: contents;
+}
+
+/* Mobile adaptations for collaboration features */
+@media only screen and (max-width: 760px) {
+  .jp-Collab-CellLockIndicator {
+    position: relative;
+    top: 2px;
+    right: 2px;
+    font-size: 10px;
+  }
+
+  .jp-Collab-CellLock-available,
+  .jp-Collab-CellLock-owned,
+  .jp-Collab-CellLock-locked,
+  .jp-Collab-CellLock-pending,
+  .jp-Collab-CellLock-offline {
+    padding: 1px 4px;
+    font-size: 10px;
+    max-width: 80px;
+  }
+
+  .jp-Collab-CellLock-user {
+    max-width: 50px;
+    font-size: 9px;
+  }
+
+  .jp-Collab-ConflictDialog {
+    margin: 16px;
+    max-width: none;
+    min-width: auto;
+  }
+
+  .jp-Collab-ConflictDialog-actions {
+    flex-direction: column;
+  }
+
+  .jp-Collab-ConflictDialog-button {
+    width: 100%;
+  }
+}
+
+/* High contrast and accessibility support */
+@media (prefers-contrast: high) {
+  .jp-Collab-CellLock-available,
+  .jp-Collab-CellLock-owned,
+  .jp-Collab-CellLock-locked,
+  .jp-Collab-CellLock-pending,
+  .jp-Collab-CellLock-offline {
+    border-width: 2px;
+  }
+
+  .jp-Collab-ConflictDialog {
+    border: 2px solid var(--jp-border-color0);
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .jp-Collab-CellLock-available,
+  .jp-Collab-CellLock-owned,
+  .jp-Collab-CellLock-locked,
+  .jp-Collab-CellLock-pending,
+  .jp-Collab-CellLock-offline,
+  .jp-Collab-ConflictDialog-overlay,
+  .jp-Collab-ConflictDialog,
+  .jp-Collab-ConflictDialog-button {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* Animation keyframes */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
