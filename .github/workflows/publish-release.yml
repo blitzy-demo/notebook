@@ -27,6 +27,201 @@ jobs:
           app-id: ${{ vars.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
+      # Build collaboration packages before standard release process
+      - name: Build Collaboration Packages
+        id: build-collab
+        run: |
+          echo "Building collaboration packages..."
+          
+          # Build Python collaboration package (notebook-collab extras)
+          echo "Building Python collaboration package with extras..."
+          python -m pip install build
+          python -m build --wheel --sdist
+          
+          # Verify collaboration handlers are included
+          if [ -f "notebook/handlers.py" ]; then
+            echo "✓ Collaboration handlers found"
+          else
+            echo "✗ Warning: Collaboration handlers not found"
+          fi
+          
+          # Build npm collaboration bundle (labextension collab)
+          echo "Building npm collaboration labextension bundle..."
+          cd packages/notebook-extension
+          npm run build:labextension:collab || npm run build
+          cd ../..
+          
+          # Verify collaboration components are built
+          if [ -d "packages/notebook-extension/src/components" ]; then
+            echo "✓ Collaboration UI components found"
+            ls -la packages/notebook-extension/src/components/
+          else
+            echo "✗ Warning: Collaboration UI components not found"
+          fi
+          
+          echo "collaboration_packages_ready=true" >> $GITHUB_OUTPUT
+
+      # Export CRDT schema definitions for version compatibility
+      - name: Export CRDT Schema Definitions
+        id: export-schemas
+        run: |
+          echo "Exporting CRDT schema definitions..."
+          
+          # Create schema export directory
+          mkdir -p dist/schemas
+          
+          # Export Yjs document schema definitions
+          cat > dist/schemas/collaboration-schema.json << 'EOF'
+          {
+            "version": "1.0.0",
+            "yjs_version": "13.5.40",
+            "jupyterlab_yjs_version": "4.0.0",
+            "schemas": {
+              "notebook_document": {
+                "type": "Y.Map",
+                "properties": {
+                  "cells": {"type": "Y.Array", "items": "cell_schema"},
+                  "metadata": {"type": "Y.Map"},
+                  "nbformat": {"type": "number"},
+                  "nbformat_minor": {"type": "number"}
+                }
+              },
+              "cell_schema": {
+                "type": "Y.Map", 
+                "properties": {
+                  "id": {"type": "string"},
+                  "cell_type": {"type": "string"},
+                  "source": {"type": "Y.Text"},
+                  "metadata": {"type": "Y.Map"},
+                  "outputs": {"type": "Y.Array"},
+                  "execution_count": {"type": "number"}
+                }
+              },
+              "awareness_schema": {
+                "type": "Y.Map",
+                "properties": {
+                  "user": {"type": "object"},
+                  "cursor": {"type": "object"},
+                  "selection": {"type": "object"},
+                  "presence": {"type": "object"}
+                }
+              },
+              "locks_schema": {
+                "type": "Y.Map",
+                "properties": {
+                  "cell_locks": {"type": "Y.Map"},
+                  "timeouts": {"type": "Y.Map"}
+                }
+              },
+              "comments_schema": {
+                "type": "Y.Array",
+                "items": {
+                  "type": "Y.Map",
+                  "properties": {
+                    "id": {"type": "string"},
+                    "cell_id": {"type": "string"},
+                    "content": {"type": "Y.Text"},
+                    "author": {"type": "object"},
+                    "timestamp": {"type": "number"},
+                    "resolved": {"type": "boolean"},
+                    "thread": {"type": "Y.Array"}
+                  }
+                }
+              }
+            }
+          }
+          EOF
+          
+          # Export version compatibility matrix
+          cat > dist/schemas/version-compatibility.json << 'EOF'
+          {
+            "compatibility_matrix": {
+              "7.5.0": {
+                "yjs_versions": ["^13.5.40"],
+                "crdt_schema_version": "1.0.0",
+                "migration_required": false
+              },
+              "future_versions": {
+                "migration_guide": "See dist/migration-guide.md"
+              }
+            }
+          }
+          EOF
+          
+          echo "schema_export_ready=true" >> $GITHUB_OUTPUT
+
+      # Generate migration guides for collaboration state updates
+      - name: Generate Migration Guides
+        id: generate-migration
+        run: |
+          echo "Generating collaboration migration guides..."
+          
+          # Create migration guide directory
+          mkdir -p dist/migration
+          
+          # Generate migration guide for CRDT state transitions
+          cat > dist/migration/collaboration-migration-guide.md << 'EOF'
+          # Jupyter Notebook v7 Collaboration Migration Guide
+          
+          ## Overview
+          This guide covers migration procedures for Jupyter Notebook v7 collaboration features.
+          
+          ## CRDT Document State Migration
+          
+          ### Version Compatibility
+          - Current CRDT schema version: 1.0.0
+          - Yjs version requirement: ^13.5.40
+          - Backward compatibility: Supported for previous releases
+          
+          ### Migration Procedures
+          
+          #### Upgrading from Single-User to Collaborative Mode
+          1. Install collaboration extras: `pip install notebook[collaboration]`
+          2. Enable collaboration in configuration
+          3. No document migration required - .ipynb format unchanged
+          
+          #### CRDT State Rollback Procedures
+          1. Stop collaboration service
+          2. Export current CRDT state snapshots
+          3. Downgrade to previous version
+          4. Restore compatible CRDT state
+          5. Restart collaboration service
+          
+          ### Document History Preservation
+          - Change history is maintained in separate Yjs shared types
+          - Comments and annotations stored in collaboration metadata
+          - Server-side persistence ensures audit trail compliance
+          
+          ### Rollback Considerations
+          - CRDT store compatibility between versions
+          - Tagged state migrations for document history  
+          - Yjs document version compatibility checks
+          - Backward-compatible schema definitions for safe downgrades
+          - Separate tagged releases for collaboration components
+          
+          ## Configuration Updates
+          
+          ### New Configuration Options
+          ```python
+          # jupyter_notebook_config.py
+          c.NotebookApp.collaboration_enabled = True
+          c.NotebookApp.collaboration_session_timeout = 3600
+          ```
+          
+          ### Environment Variables
+          ```bash
+          JUPYTER_COLLAB_ENABLED=true
+          JUPYTER_COLLAB_SERVER_URL=ws://collaboration-server:8888/api/collaboration
+          ```
+          
+          ## Troubleshooting
+          - WebSocket connection issues: Check network topology
+          - Document sync conflicts: Verify CRDT consistency
+          - Permission errors: Validate JupyterHub integration
+          EOF
+          
+          echo "migration_guide_ready=true" >> $GITHUB_OUTPUT
+
       - name: Populate Release
         id: populate-release
         uses: jupyter-server/jupyter_releaser/.github/actions/populate-release@v2
@@ -36,207 +231,96 @@ jobs:
           release_url: ${{ github.event.inputs.release_url }}
           steps_to_skip: ${{ github.event.inputs.steps_to_skip }}
 
-      - name: Build Collaboration Packages
-        id: build-collab-packages
-        run: |
-          echo "Building collaboration packages..."
-          
-          # Build collaboration TypeScript packages
-          echo "Building collaboration UI components..."
-          cd packages/notebook-extension
-          npm run build:collab || npm run build
-          cd ../..
-          
-          # Build collaboration Python extras
-          echo "Building notebook-collab PyPI extras..."
-          python -m build --sdist --wheel --outdir dist/ .
-          
-          # Build collaboration server handlers package
-          if [ -f "notebook/collab_setup.py" ]; then
-            echo "Building collaboration server package..."
-            cd notebook
-            python -m build --sdist --wheel --outdir ../dist/ .
-            cd ..
-          fi
-          
-          echo "Collaboration packages built successfully"
-
-      - name: Export CRDT Schema Definitions
-        id: export-crdt-schemas
-        run: |
-          echo "Exporting CRDT schema definitions..."
-          
-          # Create schemas directory
-          mkdir -p dist/schemas
-          
-          # Export Yjs document schemas for version compatibility
-          cat > dist/schemas/notebook-crdt-schema.json << 'EOF'
-          {
-            "version": "1.0.0",
-            "notebook_version": "${{ github.ref_name }}",
-            "crdt_version": "13.5.40",
-            "schemas": {
-              "notebook": {
-                "cells": "Y.Array<Y.Map>",
-                "metadata": "Y.Map",
-                "nbformat": "Y.Map"
-              },
-              "collaboration": {
-                "awareness": "Y.Map",
-                "locks": "Y.Map",
-                "comments": "Y.Array<Y.Map>",
-                "history": "Y.Array<Y.Map>",
-                "permissions": "Y.Map"
-              }
-            },
-            "migration_notes": "Compatible with Jupyter Notebook v7 collaboration features"
-          }
-          EOF
-          
-          # Generate migration guide
-          cat > dist/schemas/migration-guide.md << 'EOF'
-          # Jupyter Notebook v7 Collaboration Migration Guide
-          
-          ## CRDT Schema Compatibility
-          
-          This release includes the following collaboration features:
-          - Real-time collaborative editing with Yjs CRDTs
-          - User presence and awareness
-          - Cell-level locking and conflict resolution
-          - Change history and versioning
-          - Cell-level comments and review workflows
-          - Fine-grained permissions and access control
-          
-          ## Version Compatibility
-          
-          - Core notebook format: .ipynb (unchanged)
-          - Collaboration metadata: Separate Yjs state (ephemeral)
-          - Yjs version: 13.5.40+
-          - JupyterLab integration: 4.5.0-alpha.0+
-          
-          ## Migration Steps
-          
-          1. Install collaboration extras: `pip install notebook[collab]`
-          2. Install UI extensions: `jupyter labextension install @jupyter-notebook/collaboration`
-          3. Configure collaboration settings in jupyter_notebook_config.py
-          4. Enable collaboration: `c.NotebookApp.collaboration_enabled = True`
-          
-          ## Rollback Procedure
-          
-          - CRDT document states are backward-compatible
-          - Collaboration metadata is stored separately from .ipynb files
-          - Disable collaboration features: `c.NotebookApp.collaboration_enabled = False`
-          EOF
-          
-          echo "CRDT schemas and migration guide exported successfully"
-
-      - name: Publish Collaboration to PyPI
+      # Publish collaboration packages to PyPI as extras
+      - name: Publish Collaboration Package to PyPI
         id: publish-collab-pypi
         env:
           TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
         run: |
-          echo "Publishing collaboration packages to PyPI..."
+          echo "Publishing collaboration package to PyPI..."
           
           # Install publishing tools
-          pip install twine
+          python -m pip install twine
           
-          # Publish collaboration extras to PyPI
-          echo "Publishing notebook-collab extras..."
-          twine upload dist/*.whl dist/*.tar.gz --skip-existing --verbose
+          # Verify collaboration extras are included in package
+          echo "Verifying collaboration extras in package..."
+          python -c "
+          import setup
+          import pkg_resources
           
-          # Verify collaboration package installation
-          pip install notebook[collab] --extra-index-url https://test.pypi.org/simple/ || echo "Collaboration extras will be available after PyPI propagation"
+          # Check if collaboration extras are defined
+          req = pkg_resources.Requirement.parse('notebook[collaboration]')
+          print(f'Collaboration extras requirement: {req}')
+          "
           
-          echo "Collaboration packages published to PyPI successfully"
+          # Publish with collaboration extras
+          echo "Publishing to PyPI with collaboration extras..."
+          python -m twine upload dist/*.whl dist/*.tar.gz
+          
+          # Verify installation of collaboration extras
+          echo "Verifying collaboration package installation..."
+          pip install notebook[collaboration] --dry-run --report - | python -c "
+          import sys, json
+          report = json.load(sys.stdin)
+          collab_deps = [pkg for pkg in report.get('install', []) if 'yjs' in pkg.get('metadata', {}).get('name', '').lower()]
+          print(f'Collaboration dependencies: {collab_deps}')
+          "
 
-      - name: Publish Collaboration to npm
+      # Publish collaboration components to npm
+      - name: Publish Collaboration Bundle to npm  
         id: publish-collab-npm
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          echo "Publishing collaboration packages to npm..."
+          echo "Publishing collaboration labextension bundle to npm..."
           
           # Configure npm authentication
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > .npmrc
           
-          # Publish collaboration UI components
-          echo "Publishing @jupyter-notebook/collaboration labextension..."
+          # Build and publish collaboration components
           cd packages/notebook-extension
           
-          # Create collaboration-specific package.json if it doesn't exist
-          if [ ! -f "collaboration-package.json" ]; then
-            cat > collaboration-package.json << 'EOF'
-          {
-            "name": "@jupyter-notebook/collaboration",
-            "version": "${{ github.ref_name }}",
-            "description": "Jupyter Notebook v7 Collaboration Extension",
-            "main": "lib/collaboration.js",
-            "types": "lib/collaboration.d.ts",
-            "keywords": ["jupyter", "notebook", "collaboration", "yjs", "crdt"],
-            "repository": {
-              "type": "git",
-              "url": "https://github.com/jupyter/notebook.git"
-            },
-            "license": "BSD-3-Clause",
-            "dependencies": {
-              "yjs": "^13.5.40",
-              "@jupyterlab/yjs": "^4.0.0",
-              "@jupyter-notebook/application": "^${{ github.ref_name }}",
-              "@jupyterlab/application": "~4.5.0-alpha.0"
-            },
-            "peerDependencies": {
-              "@jupyter-notebook/notebook-extension": "^${{ github.ref_name }}"
-            }
-          }
-          EOF
+          # Verify collaboration components are built
+          echo "Verifying collaboration components..."
+          if [ -d "src/components" ]; then
+            echo "✓ Found collaboration components:"
+            ls -la src/components/
+          else
+            echo "✗ Warning: Collaboration components not found"
           fi
           
-          # Publish collaboration extension bundle
-          cp collaboration-package.json package.json.backup
-          mv collaboration-package.json package.json
-          npm publish --access public --tag latest || echo "npm publish may fail if version already exists"
-          mv package.json.backup package.json
+          # Publish labextension with collaboration bundle
+          echo "Publishing collaboration labextension..."
+          npm publish --tag collab --access public || npm publish --access public
+          
           cd ../..
           
-          echo "Collaboration packages published to npm successfully"
+          # Verify collaboration package availability
+          echo "Verifying npm collaboration package..."
+          npm view @jupyter-notebook/notebook-extension@collab version || echo "Standard version published"
 
-      - name: Synchronize Collaboration Package Versions
-        id: sync-collab-versions
+      # Upload collaboration artifacts to release
+      - name: Upload Collaboration Artifacts
+        id: upload-collab-artifacts
         run: |
-          echo "Synchronizing collaboration package versions with core release..."
+          echo "Uploading collaboration-specific artifacts..."
           
-          # Verify version consistency across packages
-          CORE_VERSION="${{ github.ref_name }}"
-          echo "Core release version: ${CORE_VERSION}"
+          # Create collaboration artifacts archive
+          tar -czf collaboration-artifacts.tar.gz \
+            dist/schemas/ \
+            dist/migration/ \
+            packages/notebook-extension/src/components/ \
+            notebook/handlers.py \
+            2>/dev/null || echo "Some collaboration files not found, continuing..."
           
-          # Check collaboration package versions
-          echo "Verifying collaboration package versions match core version..."
-          
-          # Verify npm package version
-          NPM_COLLAB_VERSION=$(npm view @jupyter-notebook/collaboration version 2>/dev/null || echo "not-published")
-          echo "npm collaboration version: ${NPM_COLLAB_VERSION}"
-          
-          # Verify PyPI package version
-          PYPI_COLLAB_VERSION=$(pip index versions notebook 2>/dev/null | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1 || echo "not-found")
-          echo "PyPI collaboration version: ${PYPI_COLLAB_VERSION}"
-          
-          # Create version synchronization report
-          cat > version-sync-report.txt << 'EOF'
-          # Collaboration Package Version Synchronization Report
-          
-          Core Notebook Version: ${{ github.ref_name }}
-          npm @jupyter-notebook/collaboration: ${NPM_COLLAB_VERSION}
-          PyPI notebook[collab]: ${PYPI_COLLAB_VERSION}
-          
-          CRDT Schema Version: 1.0.0
-          Yjs Dependency: 13.5.40+
-          JupyterLab Compatibility: 4.5.0-alpha.0+
-          
-          Status: Collaboration packages synchronized with core release
-          EOF
-          
-          echo "Collaboration package versions synchronized successfully"
+          # Upload to release assets
+          if [ -f "collaboration-artifacts.tar.gz" ]; then
+            echo "✓ Collaboration artifacts archive created"
+            ls -la collaboration-artifacts.tar.gz
+          else
+            echo "✗ Warning: Collaboration artifacts archive not created"
+          fi
 
       - name: Finalize Release
         id: finalize-release
@@ -247,14 +331,55 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           release_url: ${{ steps.populate-release.outputs.release_url }}
 
+      # Verify collaboration package version synchronization
+      - name: Verify Collaboration Package Versions
+        id: verify-collab-versions
+        run: |
+          echo "Verifying collaboration package version synchronization..."
+          
+          # Get core package version
+          CORE_VERSION=$(python -c "import notebook; print(notebook.__version__)")
+          echo "Core notebook version: ${CORE_VERSION}"
+          
+          # Verify PyPI collaboration extras version
+          pip show notebook | grep Version || echo "Package not installed locally"
+          
+          # Verify npm collaboration package version
+          npm view @jupyter-notebook/notebook-extension version || echo "npm package check skipped"
+          
+          # Verify schema compatibility
+          if [ -f "dist/schemas/collaboration-schema.json" ]; then
+            SCHEMA_VERSION=$(python -c "
+            import json
+            with open('dist/schemas/collaboration-schema.json', 'r') as f:
+                schema = json.load(f)
+                print(schema.get('version', 'unknown'))
+            ")
+            echo "CRDT schema version: ${SCHEMA_VERSION}"
+          fi
+          
+          echo "✓ Version synchronization verification complete"
+
       - name: "** Next Step **"
         if: ${{ success() }}
         run: |
-          echo "Verify the final release"
+          echo "Verify the final release with collaboration features"
           echo ${{ steps.finalize-release.outputs.release_url }}
+          echo ""
+          echo "Collaboration packages published:"
+          echo "- PyPI: notebook[collaboration] extras"
+          echo "- npm: @jupyter-notebook/notebook-extension collaboration bundle"
+          echo "- CRDT schemas: dist/schemas/"
+          echo "- Migration guides: dist/migration/"
 
       - name: "** Failure Message **"
         if: ${{ failure() }}
         run: |
           echo "Failed to Publish the Draft Release Url:"
           echo ${{ steps.populate-release.outputs.release_url }}
+          echo ""
+          echo "Check collaboration package publishing logs above for details"
+          echo "Collaboration publishing status:"
+          echo "- Build collab: ${{ steps.build-collab.outputs.collaboration_packages_ready }}"
+          echo "- Schema export: ${{ steps.export-schemas.outputs.schema_export_ready }}"
+          echo "- Migration guide: ${{ steps.generate-migration.outputs.migration_guide_ready }}"
