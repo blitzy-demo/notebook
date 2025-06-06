@@ -1,1460 +1,1739 @@
 """
-Multi-tier Collaborative Persistence Layer
+Multi-tier persistence layer managing sophisticated collaborative data storage across
+Redis, MongoDB, PostgreSQL, and S3 backends.
 
-This module implements a sophisticated persistence infrastructure for Jupyter Notebook v7's
-collaborative editing capabilities. It coordinates data storage across Redis (hot path),
-MongoDB (warm path), PostgreSQL (cold path), and S3 (archive path) to provide optimal
-performance, reliability, and enterprise-grade audit capabilities.
+This module coordinates CRDT operation storage, version history tracking, user permission
+persistence, and collaborative metadata management. It provides the critical data layer
+enabling real-time synchronization, conflict resolution, and enterprise-grade audit
+capabilities.
+
+The persistence layer implements a performance tier hierarchy:
+- Hot Path (Redis): Sub-millisecond operations for active collaboration state
+- Warm Path (MongoDB): Fast document retrieval for CRDT states and change history  
+- Cold Path (PostgreSQL): Structured storage for long-term version history and compliance
+- Archive Path (S3): Cost-effective storage for snapshots and backup versions
 
 Architecture:
-- Redis: Sub-millisecond operations for session coordination, locks, and presence
-- MongoDB: Fast CRDT state storage and flexible collaborative metadata
-- PostgreSQL: Structured storage for user permissions, version history, and audit trails
-- S3: Cost-effective storage for snapshots, backups, and historical document states
-
-The system implements eventual consistency with CRDT-based conflict resolution and
-automated state reconstruction capabilities with priority-based recovery mechanisms.
+- PersistenceLayer: Main coordinator class implementing multi-tier storage strategy
+- Storage adapters: Redis, MongoDB, PostgreSQL, and S3 integration managers
+- Connection pooling: High-availability connection management with failover
+- Encryption: Comprehensive encryption at rest and in transit for all storage tiers
+- Recovery: Automated state reconstruction with priority-based recovery mechanisms
 """
 
 import asyncio
-import hashlib
 import json
+import time
+import hashlib
 import logging
 import os
-import time
-import uuid
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Union, Tuple
-from contextlib import asynccontextmanager
+from typing import Dict, List, Optional, Any, Union, Tuple
 from dataclasses import dataclass, asdict
-from enum import Enum
+from contextlib import asynccontextmanager
+import uuid
 
-# Third-party imports
-import aioredis
-import boto3
-from botocore.exceptions import ClientError, BotoCoreError
-from motor.motor_asyncio import AsyncIOMotorClient
+# Redis integration
+import redis.asyncio as redis
+import redis.sentinel
+from redis.exceptions import ConnectionError, TimeoutError as RedisTimeoutError
+
+# PostgreSQL integration  
 import asyncpg
-import asyncpg.pool
-from sqlalchemy import create_engine, MetaData, Table, Column, String, Integer, DateTime, JSON, Boolean, Text, ForeignKey
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import declarative_base, relationship
+from asyncpg.pool import Pool as AsyncPGPool
+from asyncpg.exceptions import PostgresError
+
+# MongoDB integration
+import motor.motor_asyncio
+from pymongo.errors import PyMongoError
+from bson import Binary, ObjectId
+
+# S3 integration
+import aioboto3
+from botocore.exceptions import ClientError, NoCredentialsError
+from botocore.config import Config
+
+# Encryption
 from cryptography.fernet import Fernet
-import lz4.frame
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+import base64
 
-# Monitoring and observability
-from prometheus_client import Counter, Histogram, Gauge, Summary
-
-# Logging configuration
+# Logger setup
 logger = logging.getLogger(__name__)
 
 
-class StorageTier(Enum):
-    """Storage tier enumeration for data flow management"""
-    HOT = "hot"          # Redis - sub-millisecond operations
-    WARM = "warm"        # MongoDB - fast document retrieval
-    COLD = "cold"        # PostgreSQL - structured long-term storage
-    ARCHIVE = "archive"  # S3 - cost-effective backup and archival
-
-
-class OperationType(Enum):
-    """CRDT operation types for collaborative editing"""
-    CREATE = "create"
-    UPDATE = "update"
-    DELETE = "delete"
-    MOVE = "move"
-    INSERT = "insert"
-    MERGE = "merge"
-    CONFLICT_RESOLUTION = "conflict_resolution"
-
-
 @dataclass
-class CRDTOperation:
-    """CRDT operation data structure"""
-    operation_id: str
-    session_id: str
-    user_id: str
-    operation_type: OperationType
-    cell_id: Optional[str]
-    content: Optional[str]
-    timestamp: datetime
-    vector_clock: Dict[str, int]
-    metadata: Dict[str, Any]
-
-
-@dataclass
-class SessionMetadata:
-    """Collaborative session metadata"""
+class CollaborationSession:
+    """Collaborative session metadata model"""
     session_id: str
     notebook_path: str
     created_by: str
     created_at: datetime
-    participants: List[str]
+    expires_at: datetime
     permissions: Dict[str, Any]
-    status: str
+    participants: List[str]
+    status: str = "active"
+    metadata: Dict[str, Any] = None
+
+    def __post_init__(self):
+        if self.metadata is None:
+            self.metadata = {}
+
+
+@dataclass 
+class CRDTOperation:
+    """CRDT operation model for Yjs synchronization"""
+    operation_id: str
+    document_id: str
+    client_id: int
+    user_id: str
+    timestamp: datetime
+    operation_type: str
+    operation_data: bytes
+    cell_id: Optional[str] = None
+    parent_version: Optional[int] = None
+
+
+@dataclass
+class VersionHistory:
+    """Version history entry for audit trails"""
+    version_id: str
+    session_id: str
+    operation_id: str
+    user_id: str
+    timestamp: datetime
+    operation_type: str
+    operation_data: Dict[str, Any]
+    cell_id: Optional[str] = None
+    diff_data: Optional[Dict[str, Any]] = None
 
 
 @dataclass
 class UserPermission:
-    """User permission structure"""
+    """User permission model for role-based access control"""
     user_id: str
     session_id: str
-    role: str
-    permissions: List[str]
+    permission_level: str  # viewer, editor, admin
     granted_by: str
     granted_at: datetime
-    expires_at: Optional[datetime]
+    expires_at: Optional[datetime] = None
+    cell_permissions: Dict[str, List[str]] = None
 
-
-class PersistenceMetrics:
-    """Prometheus metrics for persistence layer monitoring"""
-    
-    def __init__(self):
-        # Operation metrics
-        self.operation_total = Counter(
-            'jupyter_collab_persistence_operations_total',
-            'Total persistence operations',
-            ['storage_tier', 'operation_type', 'status']
-        )
-        
-        self.operation_duration = Histogram(
-            'jupyter_collab_persistence_operation_duration_seconds',
-            'Persistence operation duration',
-            ['storage_tier', 'operation_type'],
-            buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0]
-        )
-        
-        # Connection metrics
-        self.connection_pool_size = Gauge(
-            'jupyter_collab_persistence_connection_pool_size',
-            'Connection pool size',
-            ['storage_tier']
-        )
-        
-        self.connection_errors = Counter(
-            'jupyter_collab_persistence_connection_errors_total',
-            'Connection errors',
-            ['storage_tier', 'error_type']
-        )
-        
-        # Data metrics
-        self.data_size_bytes = Summary(
-            'jupyter_collab_persistence_data_size_bytes',
-            'Size of stored data',
-            ['storage_tier', 'data_type']
-        )
-        
-        # Replication metrics
-        self.replication_lag = Histogram(
-            'jupyter_collab_persistence_replication_lag_seconds',
-            'Cross-tier replication lag',
-            ['source_tier', 'target_tier'],
-            buckets=[0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0]
-        )
-
-
-class PersistenceConfig:
-    """Configuration management for persistence layer"""
-    
-    def __init__(self):
-        # Redis configuration
-        self.redis_url = os.getenv('JUPYTER_COLLAB_REDIS_URL', 'redis://localhost:6379')
-        self.redis_db = int(os.getenv('JUPYTER_COLLAB_REDIS_DB', '0'))
-        self.redis_pool_size = int(os.getenv('JUPYTER_COLLAB_REDIS_POOL_SIZE', '20'))
-        self.redis_timeout = int(os.getenv('JUPYTER_COLLAB_REDIS_TIMEOUT', '5'))
-        
-        # MongoDB configuration
-        self.mongodb_url = os.getenv('JUPYTER_COLLAB_MONGODB_URL', 'mongodb://localhost:27017')
-        self.mongodb_database = os.getenv('JUPYTER_COLLAB_MONGODB_DATABASE', 'jupyter_collaboration')
-        self.mongodb_pool_size = int(os.getenv('JUPYTER_COLLAB_MONGODB_POOL_SIZE', '10'))
-        
-        # PostgreSQL configuration
-        self.postgres_url = os.getenv('JUPYTER_COLLAB_POSTGRES_URL', 'postgresql://localhost:5432/jupyter_collab')
-        self.postgres_pool_size = int(os.getenv('JUPYTER_COLLAB_POSTGRES_POOL_SIZE', '20'))
-        self.postgres_max_overflow = int(os.getenv('JUPYTER_COLLAB_POSTGRES_MAX_OVERFLOW', '0'))
-        
-        # S3 configuration
-        self.s3_endpoint = os.getenv('JUPYTER_COLLAB_S3_ENDPOINT')
-        self.s3_bucket = os.getenv('JUPYTER_COLLAB_S3_BUCKET', 'jupyter-collaboration')
-        self.s3_access_key = os.getenv('JUPYTER_COLLAB_S3_ACCESS_KEY')
-        self.s3_secret_key = os.getenv('JUPYTER_COLLAB_S3_SECRET_KEY')
-        self.s3_region = os.getenv('JUPYTER_COLLAB_S3_REGION', 'us-east-1')
-        
-        # Encryption configuration
-        self.encryption_key = os.getenv('JUPYTER_COLLAB_ENCRYPTION_KEY')
-        if not self.encryption_key:
-            self.encryption_key = Fernet.generate_key()
-            logger.warning("No encryption key provided, using generated key (not suitable for production)")
-        
-        # Data tier configuration
-        self.hot_tier_ttl = int(os.getenv('JUPYTER_COLLAB_HOT_TTL', '3600'))  # 1 hour
-        self.warm_tier_retention = int(os.getenv('JUPYTER_COLLAB_WARM_RETENTION', '604800'))  # 7 days
-        self.cold_tier_retention = int(os.getenv('JUPYTER_COLLAB_COLD_RETENTION', '31536000'))  # 1 year
-        
-        # Performance tuning
-        self.compression_enabled = os.getenv('JUPYTER_COLLAB_COMPRESSION', 'true').lower() == 'true'
-        self.async_replication = os.getenv('JUPYTER_COLLAB_ASYNC_REPLICATION', 'true').lower() == 'true'
-        self.batch_size = int(os.getenv('JUPYTER_COLLAB_BATCH_SIZE', '100'))
+    def __post_init__(self):
+        if self.cell_permissions is None:
+            self.cell_permissions = {}
 
 
 class EncryptionManager:
-    """Encryption manager for sensitive data protection"""
+    """Manages encryption for all storage tiers with enterprise security compliance"""
     
-    def __init__(self, encryption_key: bytes):
-        self.fernet = Fernet(encryption_key)
-        self.metrics = PersistenceMetrics()
+    def __init__(self, master_key: Optional[str] = None):
+        """Initialize encryption with master key from environment or generate new"""
+        if master_key:
+            self.master_key = master_key.encode()
+        else:
+            # Generate key from environment or create new
+            key_material = os.getenv('JUPYTER_COLLAB_ENCRYPTION_KEY', self._generate_key_material())
+            self.master_key = key_material.encode()
+        
+        # Derive encryption key using PBKDF2
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=b'jupyter_collab_salt_2024',  # Production should use random salt per deployment
+            iterations=100000,
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(self.master_key))
+        self.fernet = Fernet(key)
     
-    def encrypt(self, data: str) -> bytes:
-        """Encrypt string data"""
-        try:
-            encrypted = self.fernet.encrypt(data.encode('utf-8'))
-            self.metrics.operation_total.labels(
-                storage_tier='encryption', 
-                operation_type='encrypt', 
-                status='success'
-            ).inc()
-            return encrypted
-        except Exception as e:
-            self.metrics.operation_total.labels(
-                storage_tier='encryption', 
-                operation_type='encrypt', 
-                status='error'
-            ).inc()
-            logger.error(f"Encryption error: {e}")
-            raise
+    def _generate_key_material(self) -> str:
+        """Generate secure key material for new deployments"""
+        return base64.urlsafe_b64encode(os.urandom(32)).decode()
     
-    def decrypt(self, encrypted_data: bytes) -> str:
-        """Decrypt data to string"""
-        try:
-            decrypted = self.fernet.decrypt(encrypted_data).decode('utf-8')
-            self.metrics.operation_total.labels(
-                storage_tier='encryption', 
-                operation_type='decrypt', 
-                status='success'
-            ).inc()
-            return decrypted
-        except Exception as e:
-            self.metrics.operation_total.labels(
-                storage_tier='encryption', 
-                operation_type='decrypt', 
-                status='error'
-            ).inc()
-            logger.error(f"Decryption error: {e}")
-            raise
+    def encrypt_data(self, data: Union[str, bytes]) -> bytes:
+        """Encrypt data with AES-256 encryption"""
+        if isinstance(data, str):
+            data = data.encode('utf-8')
+        return self.fernet.encrypt(data)
+    
+    def decrypt_data(self, encrypted_data: bytes) -> bytes:
+        """Decrypt data and return original bytes"""
+        return self.fernet.decrypt(encrypted_data)
     
     def encrypt_json(self, data: Dict[str, Any]) -> bytes:
-        """Encrypt JSON data"""
-        json_str = json.dumps(data, separators=(',', ':'))
-        return self.encrypt(json_str)
+        """Encrypt JSON data for storage"""
+        json_str = json.dumps(data, default=str)
+        return self.encrypt_data(json_str)
     
     def decrypt_json(self, encrypted_data: bytes) -> Dict[str, Any]:
-        """Decrypt data to JSON"""
-        decrypted_str = self.decrypt(encrypted_data)
-        return json.loads(decrypted_str)
+        """Decrypt and parse JSON data"""
+        json_str = self.decrypt_data(encrypted_data).decode('utf-8')
+        return json.loads(json_str)
 
 
 class RedisManager:
-    """Redis manager for hot-path operations"""
+    """Redis integration for session coordination, cell-lock management, and presence tracking"""
     
-    def __init__(self, config: PersistenceConfig, encryption_manager: EncryptionManager):
-        self.config = config
+    def __init__(self, redis_url: str, encryption_manager: EncryptionManager):
+        self.redis_url = redis_url
         self.encryption = encryption_manager
-        self.metrics = PersistenceMetrics()
-        self.redis: Optional[aioredis.Redis] = None
-        self.connection_pool: Optional[aioredis.ConnectionPool] = None
+        self.redis_client: Optional[redis.Redis] = None
+        self.sentinel: Optional[redis.sentinel.Sentinel] = None
+        
+        # Configuration from environment
+        self.lock_timeout = int(os.getenv('JUPYTER_COLLAB_LOCK_TIMEOUT', '300'))  # 5 minutes
+        self.presence_ttl = int(os.getenv('JUPYTER_COLLAB_PRESENCE_TTL', '60'))  # 1 minute
+        self.session_ttl = int(os.getenv('JUPYTER_COLLAB_SESSION_TTL', '86400'))  # 24 hours
+        
+        logger.info(f"Initializing Redis manager with URL: {redis_url}")
     
     async def initialize(self):
-        """Initialize Redis connection pool"""
+        """Initialize Redis connection with sentinel support for high availability"""
         try:
-            self.connection_pool = aioredis.ConnectionPool.from_url(
-                self.config.redis_url,
-                db=self.config.redis_db,
-                max_connections=self.config.redis_pool_size,
-                socket_timeout=self.config.redis_timeout,
-                socket_connect_timeout=self.config.redis_timeout,
-                health_check_interval=30
-            )
-            
-            self.redis = aioredis.Redis(connection_pool=self.connection_pool)
+            if 'sentinel://' in self.redis_url:
+                await self._initialize_sentinel()
+            else:
+                await self._initialize_direct()
             
             # Test connection
-            await self.redis.ping()
-            
-            self.metrics.connection_pool_size.labels(storage_tier='redis').set(
-                self.config.redis_pool_size
-            )
-            
-            logger.info("Redis connection pool initialized successfully")
+            await self.redis_client.ping()
+            logger.info("Redis connection established successfully")
             
         except Exception as e:
-            self.metrics.connection_errors.labels(
-                storage_tier='redis',
-                error_type='initialization'
-            ).inc()
-            logger.error(f"Failed to initialize Redis: {e}")
+            logger.error(f"Failed to initialize Redis connection: {e}")
             raise
     
-    async def close(self):
-        """Close Redis connections"""
-        if self.redis:
-            await self.redis.close()
-        if self.connection_pool:
-            await self.connection_pool.disconnect()
+    async def _initialize_sentinel(self):
+        """Initialize Redis Sentinel for automatic failover"""
+        # Parse sentinel URLs - format: sentinel://host1:port1,host2:port2/service_name
+        url_parts = self.redis_url.replace('sentinel://', '').split('/')
+        sentinel_hosts = [(host.split(':')[0], int(host.split(':')[1])) 
+                         for host in url_parts[0].split(',')]
+        service_name = url_parts[1] if len(url_parts) > 1 else 'jupyter-collab'
+        
+        self.sentinel = redis.sentinel.Sentinel(
+            sentinel_hosts,
+            socket_timeout=0.1,
+            socket_connect_timeout=0.1,
+            socket_keepalive=True,
+        )
+        
+        self.redis_client = self.sentinel.master_for(
+            service_name,
+            socket_timeout=0.1,
+            socket_connect_timeout=0.1,
+            decode_responses=False,  # Handle binary data for encryption
+            retry_on_timeout=True,
+            health_check_interval=30
+        )
     
-    @asynccontextmanager
-    async def _operation_timer(self, operation_type: str):
-        """Context manager for operation timing"""
-        start_time = time.time()
+    async def _initialize_direct(self):
+        """Initialize direct Redis connection"""
+        self.redis_client = redis.from_url(
+            self.redis_url,
+            decode_responses=False,  # Handle binary data for encryption
+            retry_on_timeout=True,
+            health_check_interval=30,
+            max_connections=20
+        )
+    
+    async def acquire_cell_lock(self, notebook_path: str, cell_id: str, user_id: str) -> bool:
+        """Acquire distributed cell lock with TTL for conflict prevention"""
+        lock_key = f"lock:{hashlib.sha256(notebook_path.encode()).hexdigest()}:{cell_id}"
+        lock_value = f"{user_id}:{int(time.time())}"
+        
         try:
-            yield
-            self.metrics.operation_total.labels(
-                storage_tier='redis',
-                operation_type=operation_type,
-                status='success'
-            ).inc()
-        except Exception as e:
-            self.metrics.operation_total.labels(
-                storage_tier='redis',
-                operation_type=operation_type,
-                status='error'
-            ).inc()
-            raise
-        finally:
-            duration = time.time() - start_time
-            self.metrics.operation_duration.labels(
-                storage_tier='redis',
-                operation_type=operation_type
-            ).observe(duration)
-    
-    async def store_session_state(self, session_id: str, state: Dict[str, Any]) -> bool:
-        """Store session state in Redis"""
-        async with self._operation_timer('store_session_state'):
-            key = f"session:{session_id}"
-            encrypted_state = self.encryption.encrypt_json(state)
-            
-            await self.redis.setex(
-                key,
-                self.config.hot_tier_ttl,
-                encrypted_state
+            # Use Redis SET with NX (not exists) and EX (expire) for atomic lock acquisition
+            result = await self.redis_client.set(
+                lock_key,
+                self.encryption.encrypt_data(lock_value),
+                nx=True,
+                ex=self.lock_timeout
             )
             
-            self.metrics.data_size_bytes.labels(
-                storage_tier='redis',
-                data_type='session_state'
-            ).observe(len(encrypted_state))
-            
-            return True
+            if result:
+                logger.debug(f"Cell lock acquired: {lock_key} by {user_id}")
+                return True
+            else:
+                # Check if lock is owned by same user (allow re-entrant locks)
+                existing_lock = await self.redis_client.get(lock_key)
+                if existing_lock:
+                    try:
+                        existing_value = self.encryption.decrypt_data(existing_lock).decode('utf-8')
+                        existing_user = existing_value.split(':')[0]
+                        if existing_user == user_id:
+                            # Extend lock TTL for same user
+                            await self.redis_client.expire(lock_key, self.lock_timeout)
+                            return True
+                    except Exception as e:
+                        logger.warning(f"Error checking existing lock: {e}")
+                
+                logger.debug(f"Cell lock acquisition failed: {lock_key} by {user_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error acquiring cell lock: {e}")
+            return False
     
-    async def get_session_state(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """Retrieve session state from Redis"""
-        async with self._operation_timer('get_session_state'):
-            key = f"session:{session_id}"
-            encrypted_state = await self.redis.get(key)
+    async def release_cell_lock(self, notebook_path: str, cell_id: str, user_id: str) -> bool:
+        """Release cell lock with ownership validation"""
+        lock_key = f"lock:{hashlib.sha256(notebook_path.encode()).hexdigest()}:{cell_id}"
+        
+        try:
+            # Get current lock value to verify ownership
+            existing_lock = await self.redis_client.get(lock_key)
+            if not existing_lock:
+                return True  # Lock doesn't exist, consider it released
             
-            if encrypted_state:
-                return self.encryption.decrypt_json(encrypted_state)
-            return None
+            try:
+                existing_value = self.encryption.decrypt_data(existing_lock).decode('utf-8')
+                existing_user = existing_value.split(':')[0]
+                
+                if existing_user == user_id:
+                    await self.redis_client.delete(lock_key)
+                    logger.debug(f"Cell lock released: {lock_key} by {user_id}")
+                    return True
+                else:
+                    logger.warning(f"Lock release denied: {lock_key} owned by {existing_user}, requested by {user_id}")
+                    return False
+                    
+            except Exception as e:
+                logger.warning(f"Error verifying lock ownership: {e}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error releasing cell lock: {e}")
+            return False
     
-    async def acquire_cell_lock(self, session_id: str, cell_id: str, user_id: str, timeout: int = 300) -> bool:
-        """Acquire cell lock with timeout"""
-        async with self._operation_timer('acquire_cell_lock'):
-            lock_key = f"lock:{session_id}:{cell_id}"
-            lock_value = json.dumps({
-                'user_id': user_id,
-                'acquired_at': time.time(),
-                'session_id': session_id
-            })
+    async def update_user_presence(self, session_id: str, user_id: str, presence_data: Dict[str, Any]):
+        """Update user presence with automatic expiration and broadcasting"""
+        presence_key = f"presence:{session_id}"
+        user_key = f"user:{user_id}"
+        
+        try:
+            # Store encrypted presence data with TTL
+            encrypted_data = self.encryption.encrypt_json(presence_data)
             
-            # Use Redis SET with NX (not exists) and EX (expire) for atomic lock acquisition
-            result = await self.redis.set(lock_key, lock_value, nx=True, ex=timeout)
-            return result is not None
-    
-    async def release_cell_lock(self, session_id: str, cell_id: str, user_id: str) -> bool:
-        """Release cell lock"""
-        async with self._operation_timer('release_cell_lock'):
-            lock_key = f"lock:{session_id}:{cell_id}"
-            
-            # Lua script for atomic lock release
-            lua_script = """
-            local lock_key = KEYS[1]
-            local user_id = ARGV[1]
-            local current_lock = redis.call('GET', lock_key)
-            
-            if current_lock then
-                local lock_data = cjson.decode(current_lock)
-                if lock_data.user_id == user_id then
-                    redis.call('DEL', lock_key)
-                    return 1
-                end
-            end
-            return 0
-            """
-            
-            result = await self.redis.eval(lua_script, 1, lock_key, user_id)
-            return result == 1
-    
-    async def update_user_presence(self, session_id: str, user_id: str, presence_data: Dict[str, Any]) -> bool:
-        """Update user presence data"""
-        async with self._operation_timer('update_user_presence'):
-            presence_key = f"presence:{session_id}"
-            user_key = f"user:{user_id}"
-            
-            # Store presence data with TTL
-            pipeline = self.redis.pipeline()
-            pipeline.hset(presence_key, user_key, json.dumps(presence_data))
-            pipeline.expire(presence_key, 60)  # 1-minute TTL
+            pipeline = self.redis_client.pipeline()
+            pipeline.hset(presence_key, user_key, encrypted_data)
+            pipeline.expire(presence_key, self.presence_ttl)
             await pipeline.execute()
             
-            # Publish presence update
-            await self.redis.publish(
+            # Broadcast presence update via pub/sub
+            broadcast_data = {
+                'user_id': user_id,
+                'presence': presence_data,
+                'timestamp': time.time()
+            }
+            
+            await self.redis_client.publish(
                 f"presence:updates:{session_id}",
-                json.dumps({
-                    'user_id': user_id,
-                    'presence': presence_data,
-                    'timestamp': time.time()
-                })
+                self.encryption.encrypt_json(broadcast_data)
             )
             
-            return True
-    
-    async def get_session_participants(self, session_id: str) -> List[str]:
-        """Get list of session participants"""
-        async with self._operation_timer('get_session_participants'):
-            presence_key = f"presence:{session_id}"
-            user_keys = await self.redis.hkeys(presence_key)
-            return [key.split(':', 1)[1] for key in user_keys if key.startswith('user:')]
-    
-    async def cache_crdt_operation(self, operation: CRDTOperation) -> bool:
-        """Cache CRDT operation for fast access"""
-        async with self._operation_timer('cache_crdt_operation'):
-            operation_key = f"crdt_op:{operation.session_id}:{operation.operation_id}"
-            operation_data = asdict(operation)
-            operation_data['timestamp'] = operation.timestamp.isoformat()
+            logger.debug(f"Presence updated for user {user_id} in session {session_id}")
             
-            encrypted_data = self.encryption.encrypt_json(operation_data)
+        except Exception as e:
+            logger.error(f"Error updating user presence: {e}")
+    
+    async def get_session_participants(self, session_id: str) -> List[Dict[str, Any]]:
+        """Retrieve all active participants in a collaborative session"""
+        presence_key = f"presence:{session_id}"
+        
+        try:
+            # Get all user presence data
+            participants_data = await self.redis_client.hgetall(presence_key)
             
-            await self.redis.setex(
-                operation_key,
-                self.config.hot_tier_ttl,
+            participants = []
+            for user_key, encrypted_data in participants_data.items():
+                try:
+                    user_id = user_key.decode('utf-8').replace('user:', '')
+                    presence_data = self.encryption.decrypt_json(encrypted_data)
+                    
+                    participants.append({
+                        'user_id': user_id,
+                        'presence': presence_data,
+                        'last_seen': presence_data.get('timestamp', time.time())
+                    })
+                    
+                except Exception as e:
+                    logger.warning(f"Error decrypting presence data for {user_key}: {e}")
+            
+            return participants
+            
+        except Exception as e:
+            logger.error(f"Error retrieving session participants: {e}")
+            return []
+    
+    async def store_session_cache(self, session: CollaborationSession):
+        """Cache session metadata for fast access"""
+        session_key = f"session:{session.session_id}"
+        
+        try:
+            session_data = asdict(session)
+            encrypted_data = self.encryption.encrypt_json(session_data)
+            
+            await self.redis_client.setex(
+                session_key,
+                self.session_ttl,
                 encrypted_data
             )
             
-            # Add to operation sequence
-            sequence_key = f"crdt_seq:{operation.session_id}"
-            await self.redis.lpush(sequence_key, operation.operation_id)
-            await self.redis.expire(sequence_key, self.config.hot_tier_ttl)
+            logger.debug(f"Session cached: {session.session_id}")
             
-            return True
+        except Exception as e:
+            logger.error(f"Error caching session: {e}")
+    
+    async def get_session_cache(self, session_id: str) -> Optional[CollaborationSession]:
+        """Retrieve cached session metadata"""
+        session_key = f"session:{session_id}"
+        
+        try:
+            encrypted_data = await self.redis_client.get(session_key)
+            if not encrypted_data:
+                return None
+            
+            session_data = self.encryption.decrypt_json(encrypted_data)
+            
+            # Convert datetime strings back to datetime objects
+            session_data['created_at'] = datetime.fromisoformat(session_data['created_at'])
+            session_data['expires_at'] = datetime.fromisoformat(session_data['expires_at'])
+            
+            return CollaborationSession(**session_data)
+            
+        except Exception as e:
+            logger.error(f"Error retrieving cached session: {e}")
+            return None
+    
+    async def cleanup_expired_sessions(self):
+        """Periodic cleanup of expired sessions and locks"""
+        try:
+            # Clean up expired presence data
+            presence_keys = await self.redis_client.keys("presence:*")
+            for key in presence_keys:
+                ttl = await self.redis_client.ttl(key)
+                if ttl == -1:  # No TTL set, set one
+                    await self.redis_client.expire(key, self.presence_ttl)
+            
+            # Clean up orphaned locks (locks without TTL)
+            lock_keys = await self.redis_client.keys("lock:*")
+            for key in lock_keys:
+                ttl = await self.redis_client.ttl(key)
+                if ttl == -1:  # No TTL set, remove orphaned lock
+                    await self.redis_client.delete(key)
+                    logger.info(f"Removed orphaned lock: {key}")
+            
+            logger.debug("Redis cleanup completed")
+            
+        except Exception as e:
+            logger.error(f"Error during Redis cleanup: {e}")
+
+
+class PostgreSQLManager:
+    """PostgreSQL integration for structured storage of user permissions, version history, and audit trails"""
+    
+    def __init__(self, postgres_url: str, encryption_manager: EncryptionManager):
+        self.postgres_url = postgres_url
+        self.encryption = encryption_manager
+        self.pool: Optional[AsyncPGPool] = None
+        
+        logger.info("Initializing PostgreSQL manager")
+    
+    async def initialize(self):
+        """Initialize PostgreSQL connection pool with optimized settings"""
+        try:
+            self.pool = await asyncpg.create_pool(
+                self.postgres_url,
+                min_size=5,
+                max_size=20,
+                max_queries=50000,
+                max_inactive_connection_lifetime=300,
+                command_timeout=60,
+                server_settings={
+                    'jit': 'off',  # Disable JIT for better connection startup time
+                    'application_name': 'jupyter_collab_persistence'
+                }
+            )
+            
+            # Test connection and create schema if needed
+            async with self.pool.acquire() as conn:
+                await conn.execute("SELECT 1")
+                await self._create_collaboration_schema(conn)
+            
+            logger.info("PostgreSQL connection pool established successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize PostgreSQL pool: {e}")
+            raise
+    
+    async def _create_collaboration_schema(self, conn: asyncpg.Connection):
+        """Create collaboration schema and tables if they don't exist"""
+        schema_sql = """
+        -- Create collaboration schema
+        CREATE SCHEMA IF NOT EXISTS collaboration;
+        
+        -- Sessions table
+        CREATE TABLE IF NOT EXISTS collaboration.sessions (
+            session_id UUID PRIMARY KEY,
+            notebook_path TEXT NOT NULL,
+            created_by TEXT NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            permissions JSONB NOT NULL,
+            participants TEXT[] DEFAULT '{}',
+            status TEXT DEFAULT 'active' CHECK (status IN ('active', 'paused', 'terminated')),
+            metadata JSONB DEFAULT '{}'
+        );
+        
+        -- Version history table
+        CREATE TABLE IF NOT EXISTS collaboration.version_history (
+            id SERIAL PRIMARY KEY,
+            version_id UUID NOT NULL,
+            session_id UUID REFERENCES collaboration.sessions(session_id) ON DELETE CASCADE,
+            operation_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+            operation_type TEXT NOT NULL,
+            operation_data JSONB NOT NULL,
+            cell_id TEXT,
+            diff_data JSONB,
+            parent_version INTEGER REFERENCES collaboration.version_history(id)
+        );
+        
+        -- User permissions table
+        CREATE TABLE IF NOT EXISTS collaboration.user_permissions (
+            id SERIAL PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            session_id UUID REFERENCES collaboration.sessions(session_id) ON DELETE CASCADE,
+            permission_level TEXT NOT NULL CHECK (permission_level IN ('viewer', 'editor', 'admin')),
+            granted_by TEXT NOT NULL,
+            granted_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            expires_at TIMESTAMP WITH TIME ZONE,
+            cell_permissions JSONB DEFAULT '{}',
+            UNIQUE(user_id, session_id)
+        );
+        
+        -- Comments table for review system
+        CREATE TABLE IF NOT EXISTS collaboration.comments (
+            comment_id UUID PRIMARY KEY,
+            session_id UUID REFERENCES collaboration.sessions(session_id) ON DELETE CASCADE,
+            cell_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            parent_comment_id UUID REFERENCES collaboration.comments(comment_id),
+            status TEXT DEFAULT 'active' CHECK (status IN ('active', 'resolved', 'deleted')),
+            metadata JSONB DEFAULT '{}'
+        );
+        
+        -- Audit trail table
+        CREATE TABLE IF NOT EXISTS collaboration.audit_trail (
+            id SERIAL PRIMARY KEY,
+            session_id UUID REFERENCES collaboration.sessions(session_id) ON DELETE CASCADE,
+            user_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            resource_type TEXT NOT NULL,
+            resource_id TEXT,
+            timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+            ip_address INET,
+            user_agent TEXT,
+            metadata JSONB DEFAULT '{}'
+        );
+        
+        -- Performance indexes
+        CREATE INDEX IF NOT EXISTS idx_sessions_notebook_path ON collaboration.sessions USING btree(notebook_path);
+        CREATE INDEX IF NOT EXISTS idx_sessions_created_by ON collaboration.sessions USING btree(created_by);
+        CREATE INDEX IF NOT EXISTS idx_sessions_status_expires ON collaboration.sessions USING btree(status, expires_at);
+        
+        CREATE INDEX IF NOT EXISTS idx_version_history_session_timestamp ON collaboration.version_history USING btree(session_id, timestamp);
+        CREATE INDEX IF NOT EXISTS idx_version_history_operation_id ON collaboration.version_history USING btree(operation_id);
+        CREATE INDEX IF NOT EXISTS idx_version_history_user_id ON collaboration.version_history USING btree(user_id);
+        
+        CREATE INDEX IF NOT EXISTS idx_user_permissions_user_session ON collaboration.user_permissions USING btree(user_id, session_id);
+        CREATE INDEX IF NOT EXISTS idx_user_permissions_session_level ON collaboration.user_permissions USING btree(session_id, permission_level);
+        
+        CREATE INDEX IF NOT EXISTS idx_comments_session_cell ON collaboration.comments USING btree(session_id, cell_id);
+        CREATE INDEX IF NOT EXISTS idx_comments_user_created ON collaboration.comments USING btree(user_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_comments_status ON collaboration.comments USING btree(status) WHERE status = 'active';
+        
+        CREATE INDEX IF NOT EXISTS idx_audit_trail_session_timestamp ON collaboration.audit_trail USING btree(session_id, timestamp);
+        CREATE INDEX IF NOT EXISTS idx_audit_trail_user_action ON collaboration.audit_trail USING btree(user_id, action);
+        
+        -- JSONB indexes for fast metadata queries
+        CREATE INDEX IF NOT EXISTS idx_sessions_permissions_gin ON collaboration.sessions USING gin(permissions);
+        CREATE INDEX IF NOT EXISTS idx_version_operation_data_gin ON collaboration.version_history USING gin(operation_data);
+        CREATE INDEX IF NOT EXISTS idx_comments_metadata_gin ON collaboration.comments USING gin(metadata);
+        CREATE INDEX IF NOT EXISTS idx_audit_metadata_gin ON collaboration.audit_trail USING gin(metadata);
+        """
+        
+        try:
+            await conn.execute(schema_sql)
+            logger.debug("Collaboration schema and tables verified/created")
+        except Exception as e:
+            logger.error(f"Error creating collaboration schema: {e}")
+            raise
+    
+    async def create_session(self, session: CollaborationSession) -> str:
+        """Create new collaborative session with full metadata"""
+        async with self.pool.acquire() as conn:
+            try:
+                session_id = await conn.fetchval("""
+                    INSERT INTO collaboration.sessions 
+                    (session_id, notebook_path, created_by, created_at, expires_at, 
+                     permissions, participants, status, metadata)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    RETURNING session_id
+                """,
+                    uuid.UUID(session.session_id),
+                    session.notebook_path,
+                    session.created_by,
+                    session.created_at,
+                    session.expires_at,
+                    json.dumps(session.permissions),
+                    session.participants,
+                    session.status,
+                    json.dumps(session.metadata)
+                )
+                
+                logger.info(f"Session created in PostgreSQL: {session_id}")
+                return str(session_id)
+                
+            except Exception as e:
+                logger.error(f"Error creating session in PostgreSQL: {e}")
+                raise
+    
+    async def get_session(self, session_id: str) -> Optional[CollaborationSession]:
+        """Retrieve session with all metadata"""
+        async with self.pool.acquire() as conn:
+            try:
+                row = await conn.fetchrow("""
+                    SELECT session_id, notebook_path, created_by, created_at, expires_at,
+                           permissions, participants, status, metadata
+                    FROM collaboration.sessions 
+                    WHERE session_id = $1
+                """, uuid.UUID(session_id))
+                
+                if not row:
+                    return None
+                
+                return CollaborationSession(
+                    session_id=str(row['session_id']),
+                    notebook_path=row['notebook_path'],
+                    created_by=row['created_by'],
+                    created_at=row['created_at'],
+                    expires_at=row['expires_at'],
+                    permissions=json.loads(row['permissions']),
+                    participants=list(row['participants']),
+                    status=row['status'],
+                    metadata=json.loads(row['metadata'])
+                )
+                
+            except Exception as e:
+                logger.error(f"Error retrieving session from PostgreSQL: {e}")
+                return None
+    
+    async def store_version_history(self, version: VersionHistory):
+        """Store version history entry with comprehensive metadata"""
+        async with self.pool.acquire() as conn:
+            try:
+                await conn.execute("""
+                    INSERT INTO collaboration.version_history 
+                    (version_id, session_id, operation_id, user_id, timestamp, 
+                     operation_type, operation_data, cell_id, diff_data, parent_version)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                """,
+                    uuid.UUID(version.version_id),
+                    uuid.UUID(version.session_id),
+                    version.operation_id,
+                    version.user_id,
+                    version.timestamp,
+                    version.operation_type,
+                    json.dumps(version.operation_data),
+                    version.cell_id,
+                    json.dumps(version.diff_data) if version.diff_data else None,
+                    version.parent_version
+                )
+                
+                logger.debug(f"Version history stored: {version.version_id}")
+                
+            except Exception as e:
+                logger.error(f"Error storing version history: {e}")
+                raise
+    
+    async def get_version_history(self, session_id: str, limit: int = 100) -> List[VersionHistory]:
+        """Retrieve version history with optional limit and filtering"""
+        async with self.pool.acquire() as conn:
+            try:
+                rows = await conn.fetch("""
+                    SELECT version_id, session_id, operation_id, user_id, timestamp,
+                           operation_type, operation_data, cell_id, diff_data, parent_version
+                    FROM collaboration.version_history 
+                    WHERE session_id = $1
+                    ORDER BY timestamp DESC
+                    LIMIT $2
+                """, uuid.UUID(session_id), limit)
+                
+                history = []
+                for row in rows:
+                    history.append(VersionHistory(
+                        version_id=str(row['version_id']),
+                        session_id=str(row['session_id']),
+                        operation_id=row['operation_id'],
+                        user_id=row['user_id'],
+                        timestamp=row['timestamp'],
+                        operation_type=row['operation_type'],
+                        operation_data=json.loads(row['operation_data']),
+                        cell_id=row['cell_id'],
+                        diff_data=json.loads(row['diff_data']) if row['diff_data'] else None
+                    ))
+                
+                return history
+                
+            except Exception as e:
+                logger.error(f"Error retrieving version history: {e}")
+                return []
+    
+    async def store_user_permission(self, permission: UserPermission):
+        """Store or update user permissions with upsert logic"""
+        async with self.pool.acquire() as conn:
+            try:
+                await conn.execute("""
+                    INSERT INTO collaboration.user_permissions 
+                    (user_id, session_id, permission_level, granted_by, granted_at, 
+                     expires_at, cell_permissions)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    ON CONFLICT (user_id, session_id) 
+                    DO UPDATE SET 
+                        permission_level = EXCLUDED.permission_level,
+                        granted_by = EXCLUDED.granted_by,
+                        granted_at = EXCLUDED.granted_at,
+                        expires_at = EXCLUDED.expires_at,
+                        cell_permissions = EXCLUDED.cell_permissions
+                """,
+                    permission.user_id,
+                    uuid.UUID(permission.session_id),
+                    permission.permission_level,
+                    permission.granted_by,
+                    permission.granted_at,
+                    permission.expires_at,
+                    json.dumps(permission.cell_permissions)
+                )
+                
+                logger.debug(f"User permission stored: {permission.user_id} -> {permission.permission_level}")
+                
+            except Exception as e:
+                logger.error(f"Error storing user permission: {e}")
+                raise
+    
+    async def get_user_permissions(self, user_id: str, session_id: str) -> Optional[UserPermission]:
+        """Retrieve user permissions for specific session"""
+        async with self.pool.acquire() as conn:
+            try:
+                row = await conn.fetchrow("""
+                    SELECT user_id, session_id, permission_level, granted_by, granted_at,
+                           expires_at, cell_permissions
+                    FROM collaboration.user_permissions 
+                    WHERE user_id = $1 AND session_id = $2
+                    AND (expires_at IS NULL OR expires_at > NOW())
+                """, user_id, uuid.UUID(session_id))
+                
+                if not row:
+                    return None
+                
+                return UserPermission(
+                    user_id=row['user_id'],
+                    session_id=str(row['session_id']),
+                    permission_level=row['permission_level'],
+                    granted_by=row['granted_by'],
+                    granted_at=row['granted_at'],
+                    expires_at=row['expires_at'],
+                    cell_permissions=json.loads(row['cell_permissions'])
+                )
+                
+            except Exception as e:
+                logger.error(f"Error retrieving user permissions: {e}")
+                return None
+    
+    async def log_audit_event(self, session_id: str, user_id: str, action: str, 
+                            resource_type: str, resource_id: Optional[str] = None,
+                            metadata: Optional[Dict[str, Any]] = None,
+                            ip_address: Optional[str] = None, user_agent: Optional[str] = None):
+        """Log audit event for compliance and security monitoring"""
+        async with self.pool.acquire() as conn:
+            try:
+                await conn.execute("""
+                    INSERT INTO collaboration.audit_trail 
+                    (session_id, user_id, action, resource_type, resource_id, timestamp,
+                     ip_address, user_agent, metadata)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                """,
+                    uuid.UUID(session_id),
+                    user_id,
+                    action,
+                    resource_type,
+                    resource_id,
+                    datetime.utcnow(),
+                    ip_address,
+                    user_agent,
+                    json.dumps(metadata or {})
+                )
+                
+                logger.debug(f"Audit event logged: {action} by {user_id}")
+                
+            except Exception as e:
+                logger.error(f"Error logging audit event: {e}")
 
 
 class MongoDBManager:
-    """MongoDB manager for warm-path CRDT state storage"""
+    """MongoDB integration for BSON storage of Yjs document states and CRDT operation logs"""
     
-    def __init__(self, config: PersistenceConfig, encryption_manager: EncryptionManager):
-        self.config = config
+    def __init__(self, mongodb_url: str, encryption_manager: EncryptionManager):
+        self.mongodb_url = mongodb_url
         self.encryption = encryption_manager
-        self.metrics = PersistenceMetrics()
-        self.client: Optional[AsyncIOMotorClient] = None
-        self.database = None
+        self.client: Optional[motor.motor_asyncio.AsyncIOMotorClient] = None
+        self.db: Optional[motor.motor_asyncio.AsyncIOMotorDatabase] = None
+        
+        # Configuration
+        self.database_name = os.getenv('JUPYTER_COLLAB_MONGODB_DB', 'jupyter_collaboration')
+        self.operation_log_ttl = int(os.getenv('JUPYTER_COLLAB_OPERATION_LOG_TTL', '2592000'))  # 30 days
+        
+        logger.info("Initializing MongoDB manager")
     
     async def initialize(self):
-        """Initialize MongoDB connection"""
+        """Initialize MongoDB connection with optimized settings"""
         try:
-            self.client = AsyncIOMotorClient(
-                self.config.mongodb_url,
-                maxPoolSize=self.config.mongodb_pool_size,
-                minPoolSize=2,
-                maxIdleTimeMS=30000,
-                serverSelectionTimeoutMS=5000
+            self.client = motor.motor_asyncio.AsyncIOMotorClient(
+                self.mongodb_url,
+                maxPoolSize=20,
+                minPoolSize=5,
+                maxIdleTimeMS=300000,  # 5 minutes
+                serverSelectionTimeoutMS=5000,
+                socketTimeoutMS=20000,
+                connectTimeoutMS=20000,
+                heartbeatFrequencyMS=10000,
+                retryWrites=True,
+                retryReads=True
             )
             
-            self.database = self.client[self.config.mongodb_database]
+            self.db = self.client[self.database_name]
             
             # Test connection
             await self.client.admin.command('ping')
             
-            # Create indexes
-            await self._create_indexes()
+            # Create collections and indexes
+            await self._setup_collections()
             
-            self.metrics.connection_pool_size.labels(storage_tier='mongodb').set(
-                self.config.mongodb_pool_size
-            )
-            
-            logger.info("MongoDB connection initialized successfully")
+            logger.info("MongoDB connection established successfully")
             
         except Exception as e:
-            self.metrics.connection_errors.labels(
-                storage_tier='mongodb',
-                error_type='initialization'
-            ).inc()
-            logger.error(f"Failed to initialize MongoDB: {e}")
+            logger.error(f"Failed to initialize MongoDB connection: {e}")
             raise
     
-    async def close(self):
-        """Close MongoDB connection"""
-        if self.client:
-            self.client.close()
-    
-    async def _create_indexes(self):
-        """Create necessary indexes for performance"""
-        collections = {
-            'yjs_documents': [
-                {'key': [('document_id', 1)], 'unique': True},
-                {'key': [('last_modified', -1)]},
-                {'key': [('document_id', 1), ('version', -1)]}
-            ],
-            'operation_logs': [
-                {'key': [('document_id', 1), ('timestamp', -1)]},
-                {'key': [('session_id', 1), ('operation_id', 1)], 'unique': True},
-                {'key': [('user_id', 1), ('timestamp', -1)]},
-                {'key': [('expires_at', 1)], 'expireAfterSeconds': 0}
-            ],
-            'collaboration_metadata': [
-                {'key': [('session_id', 1)], 'unique': True},
-                {'key': [('created_at', -1)]},
-                {'key': [('participants', 1)]}
-            ]
-        }
-        
-        for collection_name, indexes in collections.items():
-            collection = self.database[collection_name]
-            for index in indexes:
-                await collection.create_index(**index)
-    
-    @asynccontextmanager
-    async def _operation_timer(self, operation_type: str):
-        """Context manager for operation timing"""
-        start_time = time.time()
+    async def _setup_collections(self):
+        """Setup MongoDB collections with appropriate indexes and TTL"""
         try:
-            yield
-            self.metrics.operation_total.labels(
-                storage_tier='mongodb',
-                operation_type=operation_type,
-                status='success'
-            ).inc()
+            # Yjs documents collection
+            yjs_docs = self.db.yjs_documents
+            await yjs_docs.create_index([("document_id", 1), ("version", -1)], unique=True)
+            await yjs_docs.create_index([("last_modified", -1)])
+            await yjs_docs.create_index([("metadata.participants", 1)])
+            
+            # Operation logs collection with TTL
+            operation_logs = self.db.operation_logs
+            await operation_logs.create_index([("document_id", 1), ("timestamp", -1)])
+            await operation_logs.create_index([("client_id", 1), ("timestamp", -1)])
+            await operation_logs.create_index([("user_id", 1), ("timestamp", -1)])
+            await operation_logs.create_index([("expires_at", 1)], expireAfterSeconds=0)  # TTL index
+            
+            # Collaboration metadata collection
+            collab_metadata = self.db.collaboration_metadata
+            await collab_metadata.create_index([("session_id", 1), ("metadata_type", 1)])
+            await collab_metadata.create_index([("created_at", -1)])
+            
+            logger.debug("MongoDB collections and indexes created successfully")
+            
         except Exception as e:
-            self.metrics.operation_total.labels(
-                storage_tier='mongodb',
-                operation_type=operation_type,
-                status='error'
-            ).inc()
+            logger.error(f"Error setting up MongoDB collections: {e}")
             raise
-        finally:
-            duration = time.time() - start_time
-            self.metrics.operation_duration.labels(
-                storage_tier='mongodb',
-                operation_type=operation_type
-            ).observe(duration)
     
-    async def store_yjs_document(self, document_id: str, state_vector: bytes, 
-                                document_state: bytes, metadata: Dict[str, Any]) -> bool:
-        """Store Yjs document state"""
-        async with self._operation_timer('store_yjs_document'):
-            collection = self.database['yjs_documents']
+    async def store_yjs_document_state(self, document_id: str, state_vector: bytes, 
+                                     document_state: bytes, metadata: Dict[str, Any]) -> str:
+        """Store Yjs document state with version tracking"""
+        try:
+            # Encrypt binary data
+            encrypted_state_vector = self.encryption.encrypt_data(state_vector)
+            encrypted_document_state = self.encryption.encrypt_data(document_state)
             
-            # Compress document state if enabled
-            if self.config.compression_enabled:
-                document_state = lz4.frame.compress(document_state)
-                metadata['compression'] = 'lz4'
-            
-            document = {
-                'document_id': document_id,
-                'state_vector': state_vector,
-                'document_state': document_state,
-                'last_modified': datetime.utcnow(),
-                'metadata': metadata,
-                'size_bytes': len(document_state)
+            # Create document with metadata
+            doc = {
+                "_id": ObjectId(),
+                "document_id": document_id,
+                "version": int(time.time() * 1000),  # Millisecond timestamp as version
+                "state_vector": Binary(encrypted_state_vector),
+                "document_state": Binary(encrypted_document_state),
+                "last_modified": datetime.utcnow(),
+                "metadata": metadata
             }
             
-            await collection.replace_one(
-                {'document_id': document_id},
-                document,
+            # Upsert document (replace if exists)
+            result = await self.db.yjs_documents.replace_one(
+                {"document_id": document_id},
+                doc,
                 upsert=True
             )
             
-            self.metrics.data_size_bytes.labels(
-                storage_tier='mongodb',
-                data_type='yjs_document'
-            ).observe(len(document_state))
+            document_oid = str(result.upserted_id) if result.upserted_id else str(doc["_id"])
+            logger.debug(f"Yjs document state stored: {document_id}")
+            return document_oid
             
-            return True
+        except Exception as e:
+            logger.error(f"Error storing Yjs document state: {e}")
+            raise
     
-    async def get_yjs_document(self, document_id: str) -> Optional[Dict[str, Any]]:
-        """Retrieve Yjs document state"""
-        async with self._operation_timer('get_yjs_document'):
-            collection = self.database['yjs_documents']
-            document = await collection.find_one({'document_id': document_id})
+    async def get_yjs_document_state(self, document_id: str) -> Optional[Tuple[bytes, bytes, Dict[str, Any]]]:
+        """Retrieve latest Yjs document state"""
+        try:
+            doc = await self.db.yjs_documents.find_one(
+                {"document_id": document_id},
+                sort=[("version", -1)]
+            )
             
-            if document and document.get('metadata', {}).get('compression') == 'lz4':
-                document['document_state'] = lz4.frame.decompress(document['document_state'])
+            if not doc:
+                return None
             
-            return document
+            # Decrypt binary data
+            state_vector = self.encryption.decrypt_data(doc["state_vector"])
+            document_state = self.encryption.decrypt_data(doc["document_state"])
+            metadata = doc["metadata"]
+            
+            return state_vector, document_state, metadata
+            
+        except Exception as e:
+            logger.error(f"Error retrieving Yjs document state: {e}")
+            return None
     
-    async def store_operation_log(self, operation: CRDTOperation) -> bool:
-        """Store CRDT operation in operation log"""
-        async with self._operation_timer('store_operation_log'):
-            collection = self.database['operation_logs']
+    async def store_crdt_operation(self, operation: CRDTOperation):
+        """Store CRDT operation with automatic TTL for log rotation"""
+        try:
+            # Encrypt operation data
+            encrypted_operation_data = self.encryption.encrypt_data(operation.operation_data)
             
-            # Calculate expiration time
-            expires_at = datetime.utcnow() + timedelta(seconds=self.config.warm_tier_retention)
-            
-            operation_doc = {
-                'operation_id': operation.operation_id,
-                'session_id': operation.session_id,
-                'document_id': f"notebook:{operation.session_id}",
-                'user_id': operation.user_id,
-                'operation_type': operation.operation_type.value,
-                'cell_id': operation.cell_id,
-                'content': operation.content,
-                'timestamp': operation.timestamp,
-                'vector_clock': operation.vector_clock,
-                'metadata': operation.metadata,
-                'expires_at': expires_at
+            # Create operation document
+            op_doc = {
+                "_id": ObjectId(),
+                "document_id": operation.document_id,
+                "client_id": operation.client_id,
+                "operation_id": operation.operation_id,
+                "timestamp": operation.timestamp,
+                "operation_type": operation.operation_type,
+                "operation_data": Binary(encrypted_operation_data),
+                "user_id": operation.user_id,
+                "cell_id": operation.cell_id,
+                "parent_version": operation.parent_version,
+                "expires_at": datetime.utcnow() + timedelta(seconds=self.operation_log_ttl)
             }
             
-            await collection.insert_one(operation_doc)
+            await self.db.operation_logs.insert_one(op_doc)
+            logger.debug(f"CRDT operation stored: {operation.operation_id}")
             
-            self.metrics.data_size_bytes.labels(
-                storage_tier='mongodb',
-                data_type='operation_log'
-            ).observe(len(json.dumps(operation_doc, default=str)))
-            
-            return True
+        except Exception as e:
+            logger.error(f"Error storing CRDT operation: {e}")
+            raise
     
-    async def get_operation_history(self, session_id: str, limit: int = 100) -> List[Dict[str, Any]]:
-        """Get operation history for session"""
-        async with self._operation_timer('get_operation_history'):
-            collection = self.database['operation_logs']
+    async def get_crdt_operations(self, document_id: str, since_timestamp: Optional[datetime] = None,
+                                limit: int = 1000) -> List[CRDTOperation]:
+        """Retrieve CRDT operations for document synchronization"""
+        try:
+            query = {"document_id": document_id}
+            if since_timestamp:
+                query["timestamp"] = {"$gte": since_timestamp}
             
-            cursor = collection.find(
-                {'session_id': session_id}
-            ).sort('timestamp', -1).limit(limit)
+            cursor = self.db.operation_logs.find(query).sort("timestamp", 1).limit(limit)
+            operations = []
             
-            return await cursor.to_list(length=limit)
+            async for doc in cursor:
+                try:
+                    # Decrypt operation data
+                    operation_data = self.encryption.decrypt_data(doc["operation_data"])
+                    
+                    operations.append(CRDTOperation(
+                        operation_id=doc["operation_id"],
+                        document_id=doc["document_id"],
+                        client_id=doc["client_id"],
+                        user_id=doc["user_id"],
+                        timestamp=doc["timestamp"],
+                        operation_type=doc["operation_type"],
+                        operation_data=operation_data,
+                        cell_id=doc.get("cell_id"),
+                        parent_version=doc.get("parent_version")
+                    ))
+                    
+                except Exception as e:
+                    logger.warning(f"Error decrypting operation {doc.get('operation_id')}: {e}")
+            
+            return operations
+            
+        except Exception as e:
+            logger.error(f"Error retrieving CRDT operations: {e}")
+            return []
     
-    async def store_collaboration_metadata(self, metadata: SessionMetadata) -> bool:
-        """Store collaboration session metadata"""
-        async with self._operation_timer('store_collaboration_metadata'):
-            collection = self.database['collaboration_metadata']
+    async def store_collaboration_metadata(self, session_id: str, metadata_type: str, 
+                                         metadata: Dict[str, Any]) -> str:
+        """Store flexible collaboration metadata"""
+        try:
+            # Encrypt sensitive metadata
+            encrypted_metadata = self.encryption.encrypt_json(metadata)
             
-            metadata_doc = {
-                'session_id': metadata.session_id,
-                'notebook_path': metadata.notebook_path,
-                'created_by': metadata.created_by,
-                'created_at': metadata.created_at,
-                'participants': metadata.participants,
-                'permissions': metadata.permissions,
-                'status': metadata.status,
-                'last_updated': datetime.utcnow()
+            doc = {
+                "_id": ObjectId(),
+                "session_id": session_id,
+                "metadata_type": metadata_type,
+                "metadata": Binary(encrypted_metadata),
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
             }
             
-            await collection.replace_one(
-                {'session_id': metadata.session_id},
-                metadata_doc,
+            # Upsert metadata by session_id and type
+            result = await self.db.collaboration_metadata.replace_one(
+                {"session_id": session_id, "metadata_type": metadata_type},
+                doc,
                 upsert=True
             )
             
-            return True
-
-
-class PostgreSQLManager:
-    """PostgreSQL manager for cold-path structured data storage"""
-    
-    def __init__(self, config: PersistenceConfig, encryption_manager: EncryptionManager):
-        self.config = config
-        self.encryption = encryption_manager
-        self.metrics = PersistenceMetrics()
-        self.pool: Optional[asyncpg.Pool] = None
-        self.engine = None
-        self.session_factory = None
-    
-    async def initialize(self):
-        """Initialize PostgreSQL connection pool"""
-        try:
-            # Create asyncpg connection pool
-            self.pool = await asyncpg.create_pool(
-                self.config.postgres_url,
-                min_size=2,
-                max_size=self.config.postgres_pool_size,
-                command_timeout=60
-            )
-            
-            # Create SQLAlchemy async engine
-            self.engine = create_async_engine(
-                self.config.postgres_url.replace('postgresql://', 'postgresql+asyncpg://'),
-                pool_size=self.config.postgres_pool_size,
-                max_overflow=self.config.postgres_max_overflow,
-                echo=False
-            )
-            
-            self.session_factory = async_sessionmaker(self.engine)
-            
-            # Create tables
-            await self._create_tables()
-            
-            self.metrics.connection_pool_size.labels(storage_tier='postgresql').set(
-                self.config.postgres_pool_size
-            )
-            
-            logger.info("PostgreSQL connection pool initialized successfully")
+            metadata_oid = str(result.upserted_id) if result.upserted_id else str(doc["_id"])
+            logger.debug(f"Collaboration metadata stored: {session_id}:{metadata_type}")
+            return metadata_oid
             
         except Exception as e:
-            self.metrics.connection_errors.labels(
-                storage_tier='postgresql',
-                error_type='initialization'
-            ).inc()
-            logger.error(f"Failed to initialize PostgreSQL: {e}")
+            logger.error(f"Error storing collaboration metadata: {e}")
             raise
     
-    async def close(self):
-        """Close PostgreSQL connections"""
-        if self.pool:
-            await self.pool.close()
-        if self.engine:
-            await self.engine.dispose()
-    
-    async def _create_tables(self):
-        """Create necessary tables"""
-        async with self.pool.acquire() as conn:
-            # Create collaboration schema
-            await conn.execute('CREATE SCHEMA IF NOT EXISTS collaboration')
-            
-            # Sessions table
-            await conn.execute('''
-                CREATE TABLE IF NOT EXISTS collaboration.sessions (
-                    session_id UUID PRIMARY KEY,
-                    notebook_path TEXT NOT NULL,
-                    created_by TEXT NOT NULL,
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                    permissions JSONB NOT NULL,
-                    metadata JSONB DEFAULT '{}',
-                    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'paused', 'terminated'))
-                )
-            ''')
-            
-            # Version history table
-            await conn.execute('''
-                CREATE TABLE IF NOT EXISTS collaboration.version_history (
-                    id SERIAL PRIMARY KEY,
-                    session_id UUID REFERENCES collaboration.sessions(session_id),
-                    operation_id TEXT NOT NULL,
-                    user_id TEXT NOT NULL,
-                    timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                    operation_type TEXT NOT NULL,
-                    operation_data JSONB NOT NULL,
-                    cell_id TEXT,
-                    parent_version INTEGER REFERENCES collaboration.version_history(id)
-                )
-            ''')
-            
-            # Comments table
-            await conn.execute('''
-                CREATE TABLE IF NOT EXISTS collaboration.comments (
-                    comment_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    session_id UUID REFERENCES collaboration.sessions(session_id),
-                    cell_id TEXT NOT NULL,
-                    user_id TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                    parent_comment_id UUID REFERENCES collaboration.comments(comment_id),
-                    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'resolved', 'deleted')),
-                    metadata JSONB DEFAULT '{}'
-                )
-            ''')
-            
-            # User permissions table
-            await conn.execute('''
-                CREATE TABLE IF NOT EXISTS collaboration.user_permissions (
-                    id SERIAL PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    session_id UUID REFERENCES collaboration.sessions(session_id),
-                    role TEXT NOT NULL,
-                    permissions TEXT[] NOT NULL,
-                    granted_by TEXT NOT NULL,
-                    granted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                    expires_at TIMESTAMP WITH TIME ZONE,
-                    active BOOLEAN DEFAULT TRUE
-                )
-            ''')
-            
-            # Create indexes
-            indexes = [
-                'CREATE INDEX IF NOT EXISTS idx_sessions_notebook_path ON collaboration.sessions(notebook_path)',
-                'CREATE INDEX IF NOT EXISTS idx_sessions_created_by ON collaboration.sessions(created_by)',
-                'CREATE INDEX IF NOT EXISTS idx_version_history_session_timestamp ON collaboration.version_history(session_id, timestamp)',
-                'CREATE INDEX IF NOT EXISTS idx_comments_session_cell ON collaboration.comments(session_id, cell_id)',
-                'CREATE INDEX IF NOT EXISTS idx_user_permissions_user_session ON collaboration.user_permissions(user_id, session_id)',
-                'CREATE INDEX IF NOT EXISTS idx_sessions_permissions_gin ON collaboration.sessions USING gin(permissions)',
-                'CREATE INDEX IF NOT EXISTS idx_version_operation_data_gin ON collaboration.version_history USING gin(operation_data)'
-            ]
-            
-            for index_sql in indexes:
-                await conn.execute(index_sql)
-    
-    @asynccontextmanager
-    async def _operation_timer(self, operation_type: str):
-        """Context manager for operation timing"""
-        start_time = time.time()
+    async def get_collaboration_metadata(self, session_id: str, metadata_type: str) -> Optional[Dict[str, Any]]:
+        """Retrieve collaboration metadata by type"""
         try:
-            yield
-            self.metrics.operation_total.labels(
-                storage_tier='postgresql',
-                operation_type=operation_type,
-                status='success'
-            ).inc()
+            doc = await self.db.collaboration_metadata.find_one({
+                "session_id": session_id,
+                "metadata_type": metadata_type
+            })
+            
+            if not doc:
+                return None
+            
+            # Decrypt metadata
+            metadata = self.encryption.decrypt_json(doc["metadata"])
+            return metadata
+            
         except Exception as e:
-            self.metrics.operation_total.labels(
-                storage_tier='postgresql',
-                operation_type=operation_type,
-                status='error'
-            ).inc()
-            raise
-        finally:
-            duration = time.time() - start_time
-            self.metrics.operation_duration.labels(
-                storage_tier='postgresql',
-                operation_type=operation_type
-            ).observe(duration)
-    
-    async def store_user_permission(self, permission: UserPermission) -> bool:
-        """Store user permission"""
-        async with self._operation_timer('store_user_permission'):
-            async with self.pool.acquire() as conn:
-                await conn.execute('''
-                    INSERT INTO collaboration.user_permissions 
-                    (user_id, session_id, role, permissions, granted_by, granted_at, expires_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                ''', 
-                permission.user_id, permission.session_id, permission.role,
-                permission.permissions, permission.granted_by, 
-                permission.granted_at, permission.expires_at)
-                
-                return True
-    
-    async def get_user_permissions(self, user_id: str, session_id: str) -> List[Dict[str, Any]]:
-        """Get user permissions for session"""
-        async with self._operation_timer('get_user_permissions'):
-            async with self.pool.acquire() as conn:
-                rows = await conn.fetch('''
-                    SELECT * FROM collaboration.user_permissions 
-                    WHERE user_id = $1 AND session_id = $2 AND active = TRUE
-                    AND (expires_at IS NULL OR expires_at > NOW())
-                ''', user_id, session_id)
-                
-                return [dict(row) for row in rows]
-    
-    async def store_version_history(self, session_id: str, operation: CRDTOperation) -> bool:
-        """Store version history entry"""
-        async with self._operation_timer('store_version_history'):
-            async with self.pool.acquire() as conn:
-                operation_data = {
-                    'operation_type': operation.operation_type.value,
-                    'content': operation.content,
-                    'vector_clock': operation.vector_clock,
-                    'metadata': operation.metadata
-                }
-                
-                await conn.execute('''
-                    INSERT INTO collaboration.version_history 
-                    (session_id, operation_id, user_id, timestamp, operation_type, operation_data, cell_id)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                ''',
-                session_id, operation.operation_id, operation.user_id,
-                operation.timestamp, operation.operation_type.value,
-                json.dumps(operation_data), operation.cell_id)
-                
-                return True
-    
-    async def get_version_history(self, session_id: str, limit: int = 100) -> List[Dict[str, Any]]:
-        """Get version history for session"""
-        async with self._operation_timer('get_version_history'):
-            async with self.pool.acquire() as conn:
-                rows = await conn.fetch('''
-                    SELECT * FROM collaboration.version_history 
-                    WHERE session_id = $1 
-                    ORDER BY timestamp DESC 
-                    LIMIT $2
-                ''', session_id, limit)
-                
-                return [dict(row) for row in rows]
-    
-    async def store_comment(self, session_id: str, cell_id: str, user_id: str, 
-                           content: str, metadata: Dict[str, Any] = None) -> str:
-        """Store comment"""
-        async with self._operation_timer('store_comment'):
-            async with self.pool.acquire() as conn:
-                comment_id = str(uuid.uuid4())
-                await conn.execute('''
-                    INSERT INTO collaboration.comments 
-                    (comment_id, session_id, cell_id, user_id, content, metadata)
-                    VALUES ($1, $2, $3, $4, $5, $6)
-                ''',
-                comment_id, session_id, cell_id, user_id, content,
-                json.dumps(metadata or {}))
-                
-                return comment_id
-    
-    async def get_comments(self, session_id: str, cell_id: str = None) -> List[Dict[str, Any]]:
-        """Get comments for session or cell"""
-        async with self._operation_timer('get_comments'):
-            async with self.pool.acquire() as conn:
-                if cell_id:
-                    rows = await conn.fetch('''
-                        SELECT * FROM collaboration.comments 
-                        WHERE session_id = $1 AND cell_id = $2 AND status = 'active'
-                        ORDER BY created_at ASC
-                    ''', session_id, cell_id)
-                else:
-                    rows = await conn.fetch('''
-                        SELECT * FROM collaboration.comments 
-                        WHERE session_id = $1 AND status = 'active'
-                        ORDER BY created_at ASC
-                    ''', session_id)
-                
-                return [dict(row) for row in rows]
+            logger.error(f"Error retrieving collaboration metadata: {e}")
+            return None
 
 
 class S3Manager:
-    """S3 manager for archive-path storage"""
+    """S3 integration for collaborative session persistence, document versioning, and backup storage"""
     
-    def __init__(self, config: PersistenceConfig, encryption_manager: EncryptionManager):
-        self.config = config
+    def __init__(self, encryption_manager: EncryptionManager):
         self.encryption = encryption_manager
-        self.metrics = PersistenceMetrics()
         self.s3_client = None
+        
+        # Configuration from environment
+        self.endpoint_url = os.getenv('JUPYTER_COLLAB_S3_ENDPOINT')
+        self.bucket_name = os.getenv('JUPYTER_COLLAB_S3_BUCKET', 'jupyter-collaboration')
+        self.region = os.getenv('JUPYTER_COLLAB_S3_REGION', 'us-east-1')
+        self.access_key = os.getenv('JUPYTER_COLLAB_S3_ACCESS_KEY')
+        self.secret_key = os.getenv('JUPYTER_COLLAB_S3_SECRET_KEY')
+        
+        logger.info(f"Initializing S3 manager with bucket: {self.bucket_name}")
     
     async def initialize(self):
-        """Initialize S3 client"""
+        """Initialize S3 client with retry configuration"""
         try:
-            # Configure S3 client
-            s3_config = {
-                'aws_access_key_id': self.config.s3_access_key,
-                'aws_secret_access_key': self.config.s3_secret_key,
-                'region_name': self.config.s3_region
+            if not all([self.access_key, self.secret_key]):
+                logger.warning("S3 credentials not provided, S3 storage will be disabled")
+                return
+            
+            # Configure S3 client with retry and timeout settings
+            config = Config(
+                retries={'max_attempts': 3, 'mode': 'adaptive'},
+                max_pool_connections=20,
+                read_timeout=60,
+                connect_timeout=10,
+                region_name=self.region
+            )
+            
+            session = aioboto3.Session()
+            self.s3_client = session.client(
+                's3',
+                endpoint_url=self.endpoint_url,
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key,
+                config=config
+            )
+            
+            # Test connection and create bucket if needed
+            async with self.s3_client as s3:
+                try:
+                    await s3.head_bucket(Bucket=self.bucket_name)
+                except ClientError as e:
+                    if e.response['Error']['Code'] == '404':
+                        await s3.create_bucket(Bucket=self.bucket_name)
+                        logger.info(f"Created S3 bucket: {self.bucket_name}")
+            
+            logger.info("S3 connection established successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize S3 connection: {e}")
+            # Don't raise - S3 is optional for basic operation
+    
+    async def store_crdt_snapshot(self, notebook_path: str, yjs_state: bytes) -> Optional[str]:
+        """Store CRDT snapshot to S3 with versioning"""
+        if not self.s3_client:
+            return None
+        
+        try:
+            timestamp = int(time.time())
+            notebook_hash = hashlib.sha256(notebook_path.encode()).hexdigest()[:16]
+            object_key = f"snapshots/{notebook_hash}/{timestamp}.yjs"
+            
+            # Encrypt and compress state data
+            encrypted_state = self.encryption.encrypt_data(yjs_state)
+            
+            # Upload with metadata
+            metadata = {
+                'notebook-path': notebook_path,
+                'timestamp': str(timestamp),
+                'content-type': 'application/octet-stream',
+                'encryption': 'aes-256-gcm'
             }
             
-            if self.config.s3_endpoint:
-                s3_config['endpoint_url'] = self.config.s3_endpoint
+            async with self.s3_client as s3:
+                await s3.put_object(
+                    Bucket=self.bucket_name,
+                    Key=object_key,
+                    Body=encrypted_state,
+                    Metadata=metadata,
+                    StorageClass='STANDARD_IA'  # Infrequent access for cost optimization
+                )
             
-            self.s3_client = boto3.client('s3', **s3_config)
-            
-            # Test connection
-            await self._test_connection()
-            
-            logger.info("S3 client initialized successfully")
+            logger.info(f"CRDT snapshot stored: {object_key}")
+            return object_key
             
         except Exception as e:
-            self.metrics.connection_errors.labels(
-                storage_tier='s3',
-                error_type='initialization'
-            ).inc()
-            logger.error(f"Failed to initialize S3: {e}")
-            raise
+            logger.error(f"Error storing CRDT snapshot: {e}")
+            return None
     
-    async def _test_connection(self):
-        """Test S3 connection"""
-        loop = asyncio.get_event_loop()
+    async def retrieve_latest_snapshot(self, notebook_path: str) -> Optional[bytes]:
+        """Retrieve most recent CRDT snapshot for document restoration"""
+        if not self.s3_client:
+            return None
+        
         try:
-            await loop.run_in_executor(
-                None, 
-                self.s3_client.head_bucket,
-                Bucket=self.config.s3_bucket
-            )
-        except ClientError as e:
-            if e.response['Error']['Code'] == '404':
-                # Bucket doesn't exist, create it
-                await loop.run_in_executor(
-                    None,
-                    self.s3_client.create_bucket,
-                    Bucket=self.config.s3_bucket
+            notebook_hash = hashlib.sha256(notebook_path.encode()).hexdigest()[:16]
+            prefix = f"snapshots/{notebook_hash}/"
+            
+            async with self.s3_client as s3:
+                # List objects to find latest snapshot
+                response = await s3.list_objects_v2(
+                    Bucket=self.bucket_name,
+                    Prefix=prefix,
+                    MaxKeys=1
                 )
-            else:
-                raise
-    
-    @asynccontextmanager
-    async def _operation_timer(self, operation_type: str):
-        """Context manager for operation timing"""
-        start_time = time.time()
-        try:
-            yield
-            self.metrics.operation_total.labels(
-                storage_tier='s3',
-                operation_type=operation_type,
-                status='success'
-            ).inc()
+                
+                if response.get('Contents'):
+                    latest_object = max(response['Contents'], key=lambda x: x['LastModified'])
+                    
+                    # Retrieve object content
+                    obj_response = await s3.get_object(
+                        Bucket=self.bucket_name,
+                        Key=latest_object['Key']
+                    )
+                    
+                    encrypted_data = await obj_response['Body'].read()
+                    
+                    # Decrypt state data
+                    yjs_state = self.encryption.decrypt_data(encrypted_data)
+                    
+                    logger.info(f"CRDT snapshot retrieved: {latest_object['Key']}")
+                    return yjs_state
+            
+            return None
+            
         except Exception as e:
-            self.metrics.operation_total.labels(
-                storage_tier='s3',
-                operation_type=operation_type,
-                status='error'
-            ).inc()
-            raise
-        finally:
-            duration = time.time() - start_time
-            self.metrics.operation_duration.labels(
-                storage_tier='s3',
-                operation_type=operation_type
-            ).observe(duration)
+            logger.error(f"Error retrieving CRDT snapshot: {e}")
+            return None
     
-    async def store_document_snapshot(self, session_id: str, document_state: bytes, 
-                                    metadata: Dict[str, Any]) -> str:
-        """Store document snapshot to S3"""
-        async with self._operation_timer('store_document_snapshot'):
-            timestamp = int(time.time())
-            session_hash = hashlib.sha256(session_id.encode()).hexdigest()[:16]
-            object_key = f"snapshots/{session_hash}/{timestamp}.yjs"
+    async def store_version_archive(self, notebook_path: str, version_id: str, 
+                                  notebook_content: Dict[str, Any]) -> Optional[str]:
+        """Store versioned notebook archive for audit and compliance"""
+        if not self.s3_client:
+            return None
+        
+        try:
+            notebook_hash = hashlib.sha256(notebook_path.encode()).hexdigest()[:16]
+            object_key = f"versions/{notebook_hash}/{version_id}.ipynb"
             
-            # Compress and encrypt data
-            if self.config.compression_enabled:
-                document_state = lz4.frame.compress(document_state)
-                metadata['compression'] = 'lz4'
+            # Encrypt notebook content
+            encrypted_content = self.encryption.encrypt_json(notebook_content)
             
-            encrypted_data = self.encryption.encrypt(document_state.hex())
+            # Upload with versioning metadata
+            metadata = {
+                'notebook-path': notebook_path,
+                'version-id': version_id,
+                'content-type': 'application/json',
+                'archive-type': 'notebook-version'
+            }
             
-            # Upload to S3
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                self.s3_client.put_object,
-                {
-                    'Bucket': self.config.s3_bucket,
-                    'Key': object_key,
-                    'Body': encrypted_data,
-                    'Metadata': {
-                        'session-id': session_id,
-                        'timestamp': str(timestamp),
-                        'content-type': 'application/octet-stream',
-                        **{k: str(v) for k, v in metadata.items()}
-                    },
-                    'StorageClass': 'STANDARD_IA'
-                }
-            )
-            
-            self.metrics.data_size_bytes.labels(
-                storage_tier='s3',
-                data_type='document_snapshot'
-            ).observe(len(encrypted_data))
-            
-            return object_key
-    
-    async def get_latest_snapshot(self, session_id: str) -> Optional[bytes]:
-        """Get latest document snapshot"""
-        async with self._operation_timer('get_latest_snapshot'):
-            session_hash = hashlib.sha256(session_id.encode()).hexdigest()[:16]
-            prefix = f"snapshots/{session_hash}/"
-            
-            loop = asyncio.get_event_loop()
-            
-            # List objects to find latest
-            try:
-                response = await loop.run_in_executor(
-                    None,
-                    self.s3_client.list_objects_v2,
-                    {
-                        'Bucket': self.config.s3_bucket,
-                        'Prefix': prefix,
-                        'MaxKeys': 1
-                    }
+            async with self.s3_client as s3:
+                await s3.put_object(
+                    Bucket=self.bucket_name,
+                    Key=object_key,
+                    Body=encrypted_content,
+                    Metadata=metadata,
+                    StorageClass='STANDARD_IA'
                 )
-                
-                if not response.get('Contents'):
-                    return None
-                
-                latest_object = max(response['Contents'], key=lambda x: x['LastModified'])
-                
-                # Get object content
-                obj_response = await loop.run_in_executor(
-                    None,
-                    self.s3_client.get_object,
-                    {
-                        'Bucket': self.config.s3_bucket,
-                        'Key': latest_object['Key']
-                    }
-                )
-                
-                encrypted_data = obj_response['Body'].read()
-                decrypted_hex = self.encryption.decrypt(encrypted_data)
-                document_state = bytes.fromhex(decrypted_hex)
-                
-                # Decompress if needed
-                metadata = obj_response.get('Metadata', {})
-                if metadata.get('compression') == 'lz4':
-                    document_state = lz4.frame.decompress(document_state)
-                
-                return document_state
-                
-            except ClientError as e:
-                if e.response['Error']['Code'] == 'NoSuchKey':
-                    return None
-                raise
-    
-    async def store_version_archive(self, session_id: str, version_data: Dict[str, Any]) -> str:
-        """Store version archive"""
-        async with self._operation_timer('store_version_archive'):
-            timestamp = int(time.time())
-            object_key = f"versions/{session_id}/{timestamp}.json"
             
-            # Encrypt version data
-            version_json = json.dumps(version_data, separators=(',', ':'))
-            encrypted_data = self.encryption.encrypt(version_json)
-            
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                self.s3_client.put_object,
-                {
-                    'Bucket': self.config.s3_bucket,
-                    'Key': object_key,
-                    'Body': encrypted_data,
-                    'Metadata': {
-                        'session-id': session_id,
-                        'timestamp': str(timestamp),
-                        'content-type': 'application/json'
-                    },
-                    'StorageClass': 'STANDARD_IA'
-                }
-            )
-            
+            logger.info(f"Version archive stored: {object_key}")
             return object_key
+            
+        except Exception as e:
+            logger.error(f"Error storing version archive: {e}")
+            return None
+    
+    async def create_backup_bundle(self, session_id: str, backup_data: Dict[str, Any]) -> Optional[str]:
+        """Create comprehensive backup bundle for disaster recovery"""
+        if not self.s3_client:
+            return None
+        
+        try:
+            date_str = datetime.utcnow().strftime('%Y-%m-%d')
+            object_key = f"backups/{date_str}/{session_id}_backup.json"
+            
+            # Encrypt entire backup bundle
+            encrypted_backup = self.encryption.encrypt_json(backup_data)
+            
+            # Upload with backup metadata
+            metadata = {
+                'session-id': session_id,
+                'backup-date': date_str,
+                'backup-type': 'full-session',
+                'content-type': 'application/json'
+            }
+            
+            async with self.s3_client as s3:
+                await s3.put_object(
+                    Bucket=self.bucket_name,
+                    Key=object_key,
+                    Body=encrypted_backup,
+                    Metadata=metadata,
+                    StorageClass='GLACIER'  # Long-term archival storage
+                )
+            
+            logger.info(f"Backup bundle created: {object_key}")
+            return object_key
+            
+        except Exception as e:
+            logger.error(f"Error creating backup bundle: {e}")
+            return None
 
 
 class PersistenceLayer:
     """
-    Multi-tier collaborative persistence layer
+    Main persistence coordinator implementing multi-tier storage strategy.
     
-    Coordinates data storage across Redis (hot), MongoDB (warm), PostgreSQL (cold),
-    and S3 (archive) tiers for optimal performance and reliability.
+    Provides unified interface for collaborative data persistence across:
+    - Hot Path (Redis): Sub-millisecond session coordination and locks
+    - Warm Path (MongoDB): Fast CRDT state and operation storage
+    - Cold Path (PostgreSQL): Structured metadata and audit trails
+    - Archive Path (S3): Long-term snapshots and backup storage
     """
     
-    def __init__(self, config: PersistenceConfig = None):
-        self.config = config or PersistenceConfig()
-        self.encryption = EncryptionManager(self.config.encryption_key)
-        self.metrics = PersistenceMetrics()
+    def __init__(self, config: Optional[Dict[str, str]] = None):
+        """Initialize persistence layer with configuration"""
+        self.config = config or {}
         
-        # Storage managers
-        self.redis = RedisManager(self.config, self.encryption)
-        self.mongodb = MongoDBManager(self.config, self.encryption)
-        self.postgresql = PostgreSQLManager(self.config, self.encryption)
-        self.s3 = S3Manager(self.config, self.encryption)
+        # Initialize encryption manager
+        self.encryption = EncryptionManager(self.config.get('encryption_key'))
         
-        self._initialized = False
-    
-    async def initialize(self):
-        """Initialize all storage tiers"""
-        if self._initialized:
-            return
+        # Initialize storage managers
+        self.redis = None
+        self.postgres = None
+        self.mongodb = None
+        self.s3 = None
         
-        try:
-            # Initialize storage managers in parallel
-            await asyncio.gather(
-                self.redis.initialize(),
-                self.mongodb.initialize(),
-                self.postgresql.initialize(),
-                self.s3.initialize()
-            )
-            
-            self._initialized = True
-            logger.info("Multi-tier persistence layer initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize persistence layer: {e}")
-            raise
-    
-    async def close(self):
-        """Close all connections"""
-        if not self._initialized:
-            return
+        # Configuration from environment or config
+        self.redis_url = self.config.get('redis_url') or os.getenv('JUPYTER_COLLAB_REDIS_URL', 'redis://localhost:6379/0')
+        self.postgres_url = self.config.get('postgres_url') or os.getenv('JUPYTER_COLLAB_POSTGRES_URL')
+        self.mongodb_url = self.config.get('mongodb_url') or os.getenv('JUPYTER_COLLAB_MONGODB_URL')
         
-        await asyncio.gather(
-            self.redis.close(),
-            self.mongodb.close(),
-            self.postgresql.close(),
-            return_exceptions=True
-        )
-        
-        self._initialized = False
-        logger.info("Persistence layer closed")
-    
-    async def store_crdt_operation(self, operation: CRDTOperation) -> bool:
-        """
-        Store CRDT operation across all appropriate tiers
-        
-        Hot path (Redis): Immediate caching for real-time access
-        Warm path (MongoDB): Operation log for replay and debugging
-        Cold path (PostgreSQL): Version history for audit
-        """
-        try:
-            # Store in hot tier (Redis) for immediate access
-            redis_task = self.redis.cache_crdt_operation(operation)
-            
-            # Store in warm tier (MongoDB) for operation log
-            mongodb_task = self.mongodb.store_operation_log(operation)
-            
-            # Store in cold tier (PostgreSQL) for version history
-            postgres_task = self.postgresql.store_version_history(operation.session_id, operation)
-            
-            # Execute storage operations
-            if self.config.async_replication:
-                # Async replication - don't wait for all tiers
-                await redis_task
-                asyncio.create_task(mongodb_task)
-                asyncio.create_task(postgres_task)
-            else:
-                # Sync replication - wait for all tiers
-                await asyncio.gather(redis_task, mongodb_task, postgres_task)
-            
-            self.metrics.operation_total.labels(
-                storage_tier='multi_tier',
-                operation_type='store_crdt_operation',
-                status='success'
-            ).inc()
-            
-            return True
-            
-        except Exception as e:
-            self.metrics.operation_total.labels(
-                storage_tier='multi_tier',
-                operation_type='store_crdt_operation',
-                status='error'
-            ).inc()
-            logger.error(f"Failed to store CRDT operation: {e}")
-            raise
-    
-    async def get_session_state(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Get session state with tier fallback
-        
-        Priority: Redis → MongoDB → PostgreSQL → S3
-        """
-        try:
-            # Try hot tier first (Redis)
-            state = await self.redis.get_session_state(session_id)
-            if state:
-                return state
-            
-            # Fallback to warm tier (MongoDB)
-            metadata = await self.mongodb.database['collaboration_metadata'].find_one(
-                {'session_id': session_id}
-            )
-            if metadata:
-                # Reconstruct state from metadata
-                state = {
-                    'session_id': metadata['session_id'],
-                    'notebook_path': metadata['notebook_path'],
-                    'participants': metadata['participants'],
-                    'status': metadata['status'],
-                    'last_updated': metadata.get('last_updated')
-                }
-                
-                # Cache in hot tier for future access
-                await self.redis.store_session_state(session_id, state)
-                return state
-            
-            # If no state found, return None
-            return None
-            
-        except Exception as e:
-            logger.error(f"Failed to get session state: {e}")
-            raise
-    
-    async def store_document_state(self, session_id: str, state_vector: bytes, 
-                                 document_state: bytes, metadata: Dict[str, Any]) -> bool:
-        """Store document state across tiers"""
-        try:
-            document_id = f"notebook:{session_id}"
-            
-            # Store in warm tier (MongoDB) for fast access
-            mongodb_task = self.mongodb.store_yjs_document(
-                document_id, state_vector, document_state, metadata
-            )
-            
-            # Archive snapshot to S3 for backup
-            s3_task = self.s3.store_document_snapshot(session_id, document_state, metadata)
-            
-            # Execute storage operations
-            if self.config.async_replication:
-                await mongodb_task
-                asyncio.create_task(s3_task)
-            else:
-                await asyncio.gather(mongodb_task, s3_task)
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to store document state: {e}")
-            raise
-    
-    async def reconstruct_session_state(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Reconstruct session state from available data across all tiers
-        
-        Priority-based recovery: Redis → MongoDB → PostgreSQL → S3
-        """
-        try:
-            # Try to get latest state from MongoDB
-            metadata = await self.mongodb.database['collaboration_metadata'].find_one(
-                {'session_id': session_id}
-            )
-            
-            if not metadata:
-                # Try to reconstruct from PostgreSQL version history
-                version_history = await self.postgresql.get_version_history(session_id, limit=1)
-                if version_history:
-                    # Basic reconstruction from version history
-                    latest_version = version_history[0]
-                    metadata = {
-                        'session_id': session_id,
-                        'notebook_path': latest_version.get('operation_data', {}).get('notebook_path'),
-                        'created_by': latest_version['user_id'],
-                        'participants': [latest_version['user_id']],
-                        'status': 'reconstructed',
-                        'last_updated': latest_version['timestamp']
-                    }
-            
-            if metadata:
-                # Cache reconstructed state in Redis
-                state = {
-                    'session_id': metadata['session_id'],
-                    'notebook_path': metadata.get('notebook_path'),
-                    'participants': metadata.get('participants', []),
-                    'status': metadata.get('status', 'unknown'),
-                    'last_updated': metadata.get('last_updated'),
-                    'reconstructed': True
-                }
-                
-                await self.redis.store_session_state(session_id, state)
-                return state
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Failed to reconstruct session state: {e}")
-            raise
-    
-    async def get_health_status(self) -> Dict[str, Any]:
-        """Get health status of all storage tiers"""
-        health_status = {
-            'overall_healthy': True,
-            'tiers': {},
-            'timestamp': datetime.utcnow().isoformat()
+        # Health check status
+        self.health_status = {
+            'redis': False,
+            'postgres': False,
+            'mongodb': False,
+            's3': False
         }
         
-        # Check Redis health
-        try:
-            await self.redis.redis.ping()
-            health_status['tiers']['redis'] = {'status': 'healthy', 'latency_ms': 1}
-        except Exception as e:
-            health_status['tiers']['redis'] = {'status': 'unhealthy', 'error': str(e)}
-            health_status['overall_healthy'] = False
+        logger.info("PersistenceLayer initialized with multi-tier storage architecture")
+    
+    async def initialize(self):
+        """Initialize all storage backends with graceful degradation"""
+        initialization_tasks = []
         
-        # Check MongoDB health
-        try:
-            await self.mongodb.client.admin.command('ping')
-            health_status['tiers']['mongodb'] = {'status': 'healthy', 'latency_ms': 5}
-        except Exception as e:
-            health_status['tiers']['mongodb'] = {'status': 'unhealthy', 'error': str(e)}
-            health_status['overall_healthy'] = False
+        # Initialize Redis (required for basic collaboration)
+        if self.redis_url:
+            try:
+                self.redis = RedisManager(self.redis_url, self.encryption)
+                await self.redis.initialize()
+                self.health_status['redis'] = True
+                logger.info("Redis storage initialized successfully")
+            except Exception as e:
+                logger.error(f"Redis initialization failed: {e}")
+                raise RuntimeError("Redis is required for collaborative features")
         
-        # Check PostgreSQL health
-        try:
-            async with self.postgresql.pool.acquire() as conn:
-                await conn.fetchval('SELECT 1')
-            health_status['tiers']['postgresql'] = {'status': 'healthy', 'latency_ms': 10}
-        except Exception as e:
-            health_status['tiers']['postgresql'] = {'status': 'unhealthy', 'error': str(e)}
-            health_status['overall_healthy'] = False
+        # Initialize PostgreSQL (required for structured data)
+        if self.postgres_url:
+            try:
+                self.postgres = PostgreSQLManager(self.postgres_url, self.encryption)
+                await self.postgres.initialize()
+                self.health_status['postgres'] = True
+                logger.info("PostgreSQL storage initialized successfully")
+            except Exception as e:
+                logger.error(f"PostgreSQL initialization failed: {e}")
+                raise RuntimeError("PostgreSQL is required for metadata storage")
         
-        # Check S3 health
+        # Initialize MongoDB (optional, degrades to PostgreSQL for CRDT storage)
+        if self.mongodb_url:
+            try:
+                self.mongodb = MongoDBManager(self.mongodb_url, self.encryption)
+                await self.mongodb.initialize()
+                self.health_status['mongodb'] = True
+                logger.info("MongoDB storage initialized successfully")
+            except Exception as e:
+                logger.warning(f"MongoDB initialization failed, continuing without: {e}")
+        
+        # Initialize S3 (optional, for long-term storage)
         try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                self.s3.s3_client.head_bucket,
-                Bucket=self.config.s3_bucket
+            self.s3 = S3Manager(self.encryption)
+            await self.s3.initialize()
+            self.health_status['s3'] = True
+            logger.info("S3 storage initialized successfully")
+        except Exception as e:
+            logger.warning(f"S3 initialization failed, continuing without: {e}")
+        
+        # Start background maintenance tasks
+        asyncio.create_task(self._background_maintenance())
+        
+        logger.info(f"Persistence layer initialized. Health status: {self.health_status}")
+    
+    async def create_collaboration_session(self, session: CollaborationSession) -> str:
+        """Create new collaboration session across all storage tiers"""
+        try:
+            # Store in PostgreSQL (authoritative)
+            session_id = await self.postgres.create_session(session)
+            
+            # Cache in Redis for fast access
+            await self.redis.store_session_cache(session)
+            
+            # Store metadata in MongoDB if available
+            if self.mongodb:
+                await self.mongodb.store_collaboration_metadata(
+                    session.session_id, 
+                    'session_metadata', 
+                    asdict(session)
+                )
+            
+            # Log audit event
+            await self.postgres.log_audit_event(
+                session.session_id, 
+                session.created_by, 
+                'session_created', 
+                'collaboration_session',
+                session.session_id
             )
-            health_status['tiers']['s3'] = {'status': 'healthy', 'latency_ms': 50}
+            
+            logger.info(f"Collaboration session created: {session_id}")
+            return session_id
+            
         except Exception as e:
-            health_status['tiers']['s3'] = {'status': 'unhealthy', 'error': str(e)}
-            # S3 failure doesn't make overall system unhealthy
-        
-        return health_status
+            logger.error(f"Error creating collaboration session: {e}")
+            raise
     
-    # Convenience methods for common operations
-    
-    async def acquire_cell_lock(self, session_id: str, cell_id: str, user_id: str) -> bool:
-        """Acquire cell lock"""
-        return await self.redis.acquire_cell_lock(session_id, cell_id, user_id)
-    
-    async def release_cell_lock(self, session_id: str, cell_id: str, user_id: str) -> bool:
-        """Release cell lock"""
-        return await self.redis.release_cell_lock(session_id, cell_id, user_id)
-    
-    async def update_user_presence(self, session_id: str, user_id: str, presence_data: Dict[str, Any]) -> bool:
-        """Update user presence"""
-        return await self.redis.update_user_presence(session_id, user_id, presence_data)
-    
-    async def get_session_participants(self, session_id: str) -> List[str]:
-        """Get session participants"""
-        return await self.redis.get_session_participants(session_id)
-    
-    async def store_user_permission(self, permission: UserPermission) -> bool:
-        """Store user permission"""
-        return await self.postgresql.store_user_permission(permission)
-    
-    async def get_user_permissions(self, user_id: str, session_id: str) -> List[Dict[str, Any]]:
-        """Get user permissions"""
-        return await self.postgresql.get_user_permissions(user_id, session_id)
-    
-    async def store_comment(self, session_id: str, cell_id: str, user_id: str, 
-                           content: str, metadata: Dict[str, Any] = None) -> str:
-        """Store comment"""
-        return await self.postgresql.store_comment(session_id, cell_id, user_id, content, metadata)
-    
-    async def get_comments(self, session_id: str, cell_id: str = None) -> List[Dict[str, Any]]:
-        """Get comments"""
-        return await self.postgresql.get_comments(session_id, cell_id)
-    
-    async def cleanup_expired_data(self):
-        """Clean up expired data across all tiers"""
+    async def get_collaboration_session(self, session_id: str) -> Optional[CollaborationSession]:
+        """Retrieve collaboration session with priority-based recovery"""
         try:
-            # MongoDB cleanup happens automatically via TTL indexes
-            # PostgreSQL cleanup for old sessions
-            async with self.postgresql.pool.acquire() as conn:
-                # Clean up old sessions
-                await conn.execute('''
-                    UPDATE collaboration.sessions 
-                    SET status = 'expired' 
-                    WHERE expires_at < NOW() AND status = 'active'
-                ''')
-                
-                # Clean up old version history (keep last 1000 entries per session)
-                await conn.execute('''
-                    DELETE FROM collaboration.version_history 
-                    WHERE id NOT IN (
-                        SELECT id FROM (
-                            SELECT id, ROW_NUMBER() OVER (
-                                PARTITION BY session_id ORDER BY timestamp DESC
-                            ) as rn
-                            FROM collaboration.version_history
-                        ) ranked WHERE rn <= 1000
-                    )
-                ''')
+            # Try Redis cache first (hot path)
+            session = await self.redis.get_session_cache(session_id)
+            if session:
+                return session
             
-            logger.info("Expired data cleanup completed")
+            # Fall back to PostgreSQL (authoritative)
+            session = await self.postgres.get_session(session_id)
+            if session:
+                # Restore to Redis cache
+                await self.redis.store_session_cache(session)
+                return session
+            
+            # Try MongoDB if available
+            if self.mongodb:
+                metadata = await self.mongodb.get_collaboration_metadata(session_id, 'session_metadata')
+                if metadata:
+                    session = CollaborationSession(**metadata)
+                    # Restore to cache and PostgreSQL
+                    await self.redis.store_session_cache(session)
+                    await self.postgres.create_session(session)
+                    return session
+            
+            logger.warning(f"Session not found in any storage tier: {session_id}")
+            return None
             
         except Exception as e:
-            logger.error(f"Failed to cleanup expired data: {e}")
+            logger.error(f"Error retrieving collaboration session: {e}")
+            return None
+    
+    async def store_crdt_operation(self, operation: CRDTOperation):
+        """Store CRDT operation across warm and cold paths"""
+        try:
+            # Store in MongoDB for fast retrieval (warm path)
+            if self.mongodb:
+                await self.mongodb.store_crdt_operation(operation)
+            
+            # Store in PostgreSQL as version history (cold path)
+            version = VersionHistory(
+                version_id=str(uuid.uuid4()),
+                session_id=operation.document_id.split(':')[1] if ':' in operation.document_id else operation.document_id,
+                operation_id=operation.operation_id,
+                user_id=operation.user_id,
+                timestamp=operation.timestamp,
+                operation_type=operation.operation_type,
+                operation_data={
+                    'client_id': operation.client_id,
+                    'operation_data_size': len(operation.operation_data),
+                    'cell_id': operation.cell_id
+                },
+                cell_id=operation.cell_id
+            )
+            
+            await self.postgres.store_version_history(version)
+            
+            logger.debug(f"CRDT operation stored: {operation.operation_id}")
+            
+        except Exception as e:
+            logger.error(f"Error storing CRDT operation: {e}")
+            raise
+    
+    async def get_crdt_operations(self, document_id: str, since_timestamp: Optional[datetime] = None) -> List[CRDTOperation]:
+        """Retrieve CRDT operations with fallback across storage tiers"""
+        try:
+            # Try MongoDB first (warm path)
+            if self.mongodb:
+                operations = await self.mongodb.get_crdt_operations(document_id, since_timestamp)
+                if operations:
+                    return operations
+            
+            # Fall back to reconstructing from PostgreSQL version history
+            session_id = document_id.split(':')[1] if ':' in document_id else document_id
+            history = await self.postgres.get_version_history(session_id)
+            
+            # Convert version history to CRDT operations (limited reconstruction)
+            operations = []
+            for version in history:
+                if since_timestamp and version.timestamp < since_timestamp:
+                    continue
+                
+                operation = CRDTOperation(
+                    operation_id=version.operation_id,
+                    document_id=document_id,
+                    client_id=version.operation_data.get('client_id', 0),
+                    user_id=version.user_id,
+                    timestamp=version.timestamp,
+                    operation_type=version.operation_type,
+                    operation_data=b'',  # Data not recoverable from PostgreSQL
+                    cell_id=version.cell_id
+                )
+                operations.append(operation)
+            
+            return operations
+            
+        except Exception as e:
+            logger.error(f"Error retrieving CRDT operations: {e}")
+            return []
+    
+    async def store_document_snapshot(self, document_id: str, state_vector: bytes, 
+                                    document_state: bytes, metadata: Dict[str, Any]):
+        """Store document snapshot across warm and archive paths"""
+        try:
+            # Store in MongoDB (warm path)
+            if self.mongodb:
+                await self.mongodb.store_yjs_document_state(
+                    document_id, state_vector, document_state, metadata
+                )
+            
+            # Store in S3 for long-term archival (archive path)
+            if self.s3:
+                notebook_path = metadata.get('notebook_path', document_id)
+                await self.s3.store_crdt_snapshot(notebook_path, document_state)
+            
+            logger.debug(f"Document snapshot stored: {document_id}")
+            
+        except Exception as e:
+            logger.error(f"Error storing document snapshot: {e}")
+            raise
+    
+    async def get_document_snapshot(self, document_id: str) -> Optional[Tuple[bytes, bytes, Dict[str, Any]]]:
+        """Retrieve document snapshot with fallback to archive storage"""
+        try:
+            # Try MongoDB first (warm path)
+            if self.mongodb:
+                result = await self.mongodb.get_yjs_document_state(document_id)
+                if result:
+                    return result
+            
+            # Fall back to S3 archive (archive path)
+            if self.s3:
+                # Extract notebook path from document_id
+                notebook_path = document_id.replace('notebook:', '')
+                document_state = await self.s3.retrieve_latest_snapshot(notebook_path)
+                
+                if document_state:
+                    # Return with empty state vector and minimal metadata
+                    return b'', document_state, {'source': 's3_archive'}
+            
+            logger.warning(f"Document snapshot not found: {document_id}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error retrieving document snapshot: {e}")
+            return None
+    
+    async def manage_user_permissions(self, permission: UserPermission):
+        """Manage user permissions with caching"""
+        try:
+            # Store in PostgreSQL (authoritative)
+            await self.postgres.store_user_permission(permission)
+            
+            # Cache permission in Redis for fast access
+            permission_key = f"permission:{permission.user_id}:{permission.session_id}"
+            await self.redis.redis_client.setex(
+                permission_key,
+                3600,  # 1 hour cache
+                self.encryption.encrypt_json(asdict(permission))
+            )
+            
+            logger.debug(f"User permission stored: {permission.user_id} -> {permission.permission_level}")
+            
+        except Exception as e:
+            logger.error(f"Error managing user permissions: {e}")
+            raise
+    
+    async def validate_user_permission(self, user_id: str, session_id: str, 
+                                     required_permission: str) -> bool:
+        """Validate user permission with caching"""
+        try:
+            # Check Redis cache first
+            permission_key = f"permission:{user_id}:{session_id}"
+            cached_permission = await self.redis.redis_client.get(permission_key)
+            
+            if cached_permission:
+                try:
+                    permission_data = self.encryption.decrypt_json(cached_permission)
+                    permission = UserPermission(**permission_data)
+                except Exception as e:
+                    logger.warning(f"Error decrypting cached permission: {e}")
+                    permission = None
+            else:
+                permission = None
+            
+            # Fall back to PostgreSQL if not cached
+            if not permission:
+                permission = await self.postgres.get_user_permissions(user_id, session_id)
+                if permission:
+                    # Cache the permission
+                    await self.redis.redis_client.setex(
+                        permission_key,
+                        3600,
+                        self.encryption.encrypt_json(asdict(permission))
+                    )
+            
+            if not permission:
+                return False
+            
+            # Check if permission has expired
+            if permission.expires_at and permission.expires_at < datetime.utcnow():
+                return False
+            
+            # Validate permission level
+            permission_hierarchy = {'viewer': 1, 'editor': 2, 'admin': 3}
+            required_level = permission_hierarchy.get(required_permission, 0)
+            user_level = permission_hierarchy.get(permission.permission_level, 0)
+            
+            return user_level >= required_level
+            
+        except Exception as e:
+            logger.error(f"Error validating user permission: {e}")
+            return False
+    
+    async def acquire_cell_lock(self, notebook_path: str, cell_id: str, user_id: str) -> bool:
+        """Acquire cell-level lock for conflict prevention"""
+        try:
+            return await self.redis.acquire_cell_lock(notebook_path, cell_id, user_id)
+        except Exception as e:
+            logger.error(f"Error acquiring cell lock: {e}")
+            return False
+    
+    async def release_cell_lock(self, notebook_path: str, cell_id: str, user_id: str) -> bool:
+        """Release cell-level lock"""
+        try:
+            return await self.redis.release_cell_lock(notebook_path, cell_id, user_id)
+        except Exception as e:
+            logger.error(f"Error releasing cell lock: {e}")
+            return False
+    
+    async def update_user_presence(self, session_id: str, user_id: str, presence_data: Dict[str, Any]):
+        """Update user presence information"""
+        try:
+            await self.redis.update_user_presence(session_id, user_id, presence_data)
+        except Exception as e:
+            logger.error(f"Error updating user presence: {e}")
+    
+    async def get_session_participants(self, session_id: str) -> List[Dict[str, Any]]:
+        """Get all active participants in a session"""
+        try:
+            return await self.redis.get_session_participants(session_id)
+        except Exception as e:
+            logger.error(f"Error retrieving session participants: {e}")
+            return []
+    
+    async def create_backup_bundle(self, session_id: str) -> Optional[str]:
+        """Create comprehensive backup bundle for disaster recovery"""
+        try:
+            if not self.s3:
+                logger.warning("S3 not available, skipping backup bundle creation")
+                return None
+            
+            # Gather data from all storage tiers
+            session = await self.get_collaboration_session(session_id)
+            if not session:
+                logger.error(f"Session not found for backup: {session_id}")
+                return None
+            
+            participants = await self.get_session_participants(session_id)
+            version_history = await self.postgres.get_version_history(session_id)
+            
+            # Create backup bundle
+            backup_data = {
+                'session': asdict(session),
+                'participants': participants,
+                'version_history': [asdict(v) for v in version_history],
+                'backup_timestamp': datetime.utcnow().isoformat(),
+                'backup_version': '1.0'
+            }
+            
+            return await self.s3.create_backup_bundle(session_id, backup_data)
+            
+        except Exception as e:
+            logger.error(f"Error creating backup bundle: {e}")
+            return None
+    
+    async def get_health_status(self) -> Dict[str, Any]:
+        """Get comprehensive health status of all storage tiers"""
+        health_checks = {}
+        
+        # Check Redis
+        try:
+            if self.redis and self.redis.redis_client:
+                await self.redis.redis_client.ping()
+                health_checks['redis'] = {'status': 'healthy', 'latency_ms': 0}
+            else:
+                health_checks['redis'] = {'status': 'unavailable'}
+        except Exception as e:
+            health_checks['redis'] = {'status': 'error', 'error': str(e)}
+        
+        # Check PostgreSQL
+        try:
+            if self.postgres and self.postgres.pool:
+                async with self.postgres.pool.acquire() as conn:
+                    await conn.execute("SELECT 1")
+                health_checks['postgres'] = {'status': 'healthy'}
+            else:
+                health_checks['postgres'] = {'status': 'unavailable'}
+        except Exception as e:
+            health_checks['postgres'] = {'status': 'error', 'error': str(e)}
+        
+        # Check MongoDB
+        try:
+            if self.mongodb and self.mongodb.client:
+                await self.mongodb.client.admin.command('ping')
+                health_checks['mongodb'] = {'status': 'healthy'}
+            else:
+                health_checks['mongodb'] = {'status': 'unavailable'}
+        except Exception as e:
+            health_checks['mongodb'] = {'status': 'error', 'error': str(e)}
+        
+        # Check S3
+        try:
+            if self.s3 and self.s3.s3_client:
+                async with self.s3.s3_client as s3:
+                    await s3.head_bucket(Bucket=self.s3.bucket_name)
+                health_checks['s3'] = {'status': 'healthy'}
+            else:
+                health_checks['s3'] = {'status': 'unavailable'}
+        except Exception as e:
+            health_checks['s3'] = {'status': 'error', 'error': str(e)}
+        
+        # Calculate overall health
+        healthy_services = sum(1 for status in health_checks.values() if status['status'] == 'healthy')
+        total_critical_services = 2  # Redis and PostgreSQL are critical
+        
+        overall_health = 'healthy' if healthy_services >= total_critical_services else 'degraded'
+        
+        return {
+            'overall_health': overall_health,
+            'services': health_checks,
+            'collaboration_ready': health_checks.get('redis', {}).get('status') == 'healthy' and 
+                                 health_checks.get('postgres', {}).get('status') == 'healthy',
+            'timestamp': datetime.utcnow().isoformat()
+        }
+    
+    async def _background_maintenance(self):
+        """Background maintenance tasks for storage optimization"""
+        while True:
+            try:
+                # Clean up expired sessions and locks every 5 minutes
+                await asyncio.sleep(300)
+                
+                if self.redis:
+                    await self.redis.cleanup_expired_sessions()
+                
+                logger.debug("Background maintenance completed")
+                
+            except Exception as e:
+                logger.error(f"Error in background maintenance: {e}")
+    
+    async def close(self):
+        """Clean shutdown of all storage connections"""
+        try:
+            if self.redis and self.redis.redis_client:
+                await self.redis.redis_client.aclose()
+            
+            if self.postgres and self.postgres.pool:
+                await self.postgres.pool.close()
+            
+            if self.mongodb and self.mongodb.client:
+                self.mongodb.client.close()
+            
+            if self.s3 and self.s3.s3_client:
+                await self.s3.s3_client.aclose()
+            
+            logger.info("Persistence layer shutdown completed")
+            
+        except Exception as e:
+            logger.error(f"Error during persistence layer shutdown: {e}")
 
 
-# Export main classes
-__all__ = [
-    'PersistenceLayer',
-    'PersistenceConfig', 
-    'CRDTOperation',
-    'SessionMetadata',
-    'UserPermission',
-    'OperationType',
-    'StorageTier'
-]
+# Convenience function for easy initialization
+async def create_persistence_layer(config: Optional[Dict[str, str]] = None) -> PersistenceLayer:
+    """Create and initialize persistence layer with configuration"""
+    persistence = PersistenceLayer(config)
+    await persistence.initialize()
+    return persistence
