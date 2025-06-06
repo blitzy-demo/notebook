@@ -4,33 +4,43 @@
  * 
  * This provider manages bidirectional synchronization between notebook cells and CRDT operations,
  * handles WebSocket connections for real-time updates, and provides sub-100ms latency for
- * collaborative operations. It integrates seamlessly with the existing notebook model architecture
- * while maintaining backward compatibility for single-user mode.
+ * collaborative operations. It serves as the fundamental CRDT synchronization capability required
+ * for real-time multi-user editing while maintaining seamless integration with existing notebook
+ * model architecture and backward compatibility.
  * 
  * Key Features:
- * - CRDT-based conflict-free document synchronization using Yjs
- * - WebSocket provider for real-time communication with automatic reconnection
- * - Integration with awareness, lock, and history systems
- * - Sub-100ms synchronization latency for optimal user experience
- * - Graceful degradation when collaboration services are unavailable
- * - Complete lifecycle management for collaborative sessions
- * - Memory-efficient document state management with automatic cleanup
+ * - Yjs CRDT integration with notebook model for conflict-free collaborative editing
+ * - WebSocket-based real-time communication with sub-100ms synchronization latency
+ * - Bidirectional sync between NotebookModel and Yjs document state
+ * - Conflict-free merge algorithms using y-protocols for automatic resolution
+ * - Document initialization and cleanup lifecycle management for collaborative sessions
+ * - Connection recovery and state synchronization for WebSocket reconnection scenarios
+ * - Integration with awareness, locks, and history systems for comprehensive collaboration
+ * - Backward compatibility with single-user mode and graceful degradation
  * 
  * Architecture:
- * - Uses Yjs Y.Doc as the underlying CRDT document structure
- * - Maps notebook cells, metadata, and outputs to corresponding Yjs shared types
- * - Provides ICollaborationProvider interface for dependency injection
- * - Implements robust error handling and recovery mechanisms
- * - Supports cross-tab communication and state persistence
+ * - CRDT-based document state management using Yjs for mathematical conflict resolution
+ * - WebSocket provider integration for real-time communication infrastructure
+ * - Event-driven synchronization with comprehensive error handling and recovery
+ * - Modular integration with awareness (presence), locks (coordination), and history (versioning)
+ * - Performance optimization for 100+ concurrent collaborative users
+ * - Enterprise-grade reliability with automatic reconnection and state recovery
+ * 
+ * Performance Characteristics:
+ * - Sub-100ms synchronization latency through optimized CRDT operations
+ * - Memory-efficient document representation with incremental updates
+ * - Intelligent batching for high-frequency collaborative operations
+ * - Connection pooling and state caching for optimal network utilization
+ * - Graceful fallback to single-user mode during connectivity issues
  * 
  * @author Jupyter Notebook Collaboration Team
  * @version 7.5.0-alpha.0
  * @since 2024-12-15
  */
 
-import { Awareness } from 'y-protocols/awareness';
-import { WebsocketProvider } from 'y-websocket';
 import * as Y from 'yjs';
+import { WebsocketProvider } from 'y-websocket';
+import { UndoManager } from 'yjs';
 import { 
     IDisposable, 
     IObservableDisposable 
@@ -45,45 +55,253 @@ import {
     UUID 
 } from '@lumino/coreutils';
 
-// Import collaboration modules
+// Import collaboration dependencies
 import { 
     CollaborativeAwareness,
     IUserPresence,
-    IAwarenessConfig,
-    AwarenessEventType,
+    UserActivityStatus,
+    ICursorPosition,
+    ICellSelection,
     IAwarenessEvent,
-    DEFAULT_AWARENESS_CONFIG,
+    AwarenessEventType,
     createAwareness
 } from './awareness';
 import { 
     LockManager,
-    ILockConfiguration,
-    ILockMetadata,
     ILockRequest,
+    ILockMetadata,
     LockStatus,
     LockPriority,
-    DEFAULT_LOCK_CONFIG
+    ILockEvent,
+    LockOperationType
 } from './locks';
 import { 
     HistoryService,
-    IHistoryService,
-    IVersionSnapshot,
     ICRDTOperation,
-    ISnapshotPolicy,
-    DEFAULT_SNAPSHOT_POLICY,
-    createHistoryService
+    IVersionSnapshot,
+    IVersionDiff,
+    ISnapshotPolicy
 } from './history';
 
 /**
- * Notebook cell representation compatible with Jupyter format
+ * Enumeration of document synchronization states for comprehensive status tracking.
+ */
+export enum SyncState {
+    /** Initial state before synchronization begins */
+    UNINITIALIZED = 'uninitialized',
+    /** Currently establishing connection and initializing */
+    INITIALIZING = 'initializing',
+    /** Successfully connected and synchronized */
+    SYNCHRONIZED = 'synchronized',
+    /** Actively synchronizing changes */
+    SYNCING = 'syncing',
+    /** Connection lost, attempting to reconnect */
+    DISCONNECTED = 'disconnected',
+    /** Reconnecting and resynchronizing state */
+    RECONNECTING = 'reconnecting',
+    /** Synchronization failed, unable to recover */
+    FAILED = 'failed',
+    /** Provider disposed, no longer functional */
+    DISPOSED = 'disposed'
+}
+
+/**
+ * Enumeration of provider operation modes for different collaboration scenarios.
+ */
+export enum ProviderMode {
+    /** Single-user mode without collaboration features */
+    SINGLE_USER = 'single_user',
+    /** Collaborative mode with real-time synchronization */
+    COLLABORATIVE = 'collaborative',
+    /** Read-only mode for observers */
+    READ_ONLY = 'read_only',
+    /** Offline mode with queued synchronization */
+    OFFLINE = 'offline'
+}
+
+/**
+ * Cell operation types for CRDT synchronization and change tracking.
+ */
+export enum CellOperationType {
+    /** Cell content modified */
+    CONTENT_CHANGED = 'content_changed',
+    /** Cell metadata updated */
+    METADATA_CHANGED = 'metadata_changed',
+    /** Cell moved to different position */
+    CELL_MOVED = 'cell_moved',
+    /** New cell inserted */
+    CELL_INSERTED = 'cell_inserted',
+    /** Cell deleted */
+    CELL_DELETED = 'cell_deleted',
+    /** Cell execution state changed */
+    EXECUTION_CHANGED = 'execution_changed',
+    /** Cell type changed (code, markdown, etc.) */
+    TYPE_CHANGED = 'type_changed'
+}
+
+/**
+ * Configuration interface for YjsNotebookProvider with comprehensive options.
+ */
+export interface IYjsNotebookConfig {
+    /** WebSocket server URL for real-time communication */
+    websocketUrl: string;
+    /** Unique room/document identifier for collaborative session */
+    roomId: string;
+    /** Provider operation mode */
+    mode: ProviderMode;
+    /** User information for awareness and attribution */
+    userInfo: {
+        userId: string;
+        displayName: string;
+        avatar?: string;
+        role?: string;
+    };
+    /** WebSocket connection configuration */
+    websocketConfig: {
+        /** Connection timeout in milliseconds */
+        connectionTimeout: number;
+        /** Maximum number of reconnection attempts */
+        maxReconnectAttempts: number;
+        /** Reconnection delay multiplier */
+        reconnectDelay: number;
+        /** Enable automatic reconnection */
+        enableAutoReconnect: boolean;
+        /** WebSocket protocols to use */
+        protocols?: string[];
+        /** Custom headers for WebSocket connection */
+        headers?: Record<string, string>;
+    };
+    /** Synchronization behavior settings */
+    syncConfig: {
+        /** Enable real-time synchronization */
+        enableRealTimeSync: boolean;
+        /** Batch size for operation synchronization */
+        operationBatchSize: number;
+        /** Synchronization throttle delay in milliseconds */
+        syncThrottleMs: number;
+        /** Enable conflict resolution */
+        enableConflictResolution: boolean;
+        /** Maximum sync retries on failure */
+        maxSyncRetries: number;
+    };
+    /** Awareness system configuration */
+    awarenessConfig: {
+        /** Enable user presence tracking */
+        enablePresence: boolean;
+        /** Enable cursor position synchronization */
+        enableCursorSync: boolean;
+        /** Enable cell selection broadcasting */
+        enableCellSelection: boolean;
+        /** Presence update throttle interval */
+        updateThrottleMs: number;
+    };
+    /** Lock management configuration */
+    lockConfig: {
+        /** Enable cell-level locking */
+        enableLocking: boolean;
+        /** Default lock timeout in milliseconds */
+        defaultLockTimeout: number;
+        /** Enable automatic lock release */
+        enableAutoRelease: boolean;
+        /** Lock acquisition priority */
+        defaultPriority: LockPriority;
+    };
+    /** History tracking configuration */
+    historyConfig: {
+        /** Enable version history tracking */
+        enableHistory: boolean;
+        /** Enable undo/redo functionality */
+        enableUndoRedo: boolean;
+        /** Maximum undo stack size */
+        maxUndoStackSize: number;
+        /** Snapshot generation policy */
+        snapshotPolicy: Partial<ISnapshotPolicy>;
+    };
+    /** Performance optimization settings */
+    performanceConfig: {
+        /** Enable performance monitoring */
+        enableMetrics: boolean;
+        /** Target synchronization latency in milliseconds */
+        targetLatencyMs: number;
+        /** Enable operation batching */
+        enableBatching: boolean;
+        /** Memory usage optimization level */
+        memoryOptimization: 'low' | 'medium' | 'high';
+    };
+    /** Debug and logging configuration */
+    debugConfig: {
+        /** Enable debug logging */
+        enableDebugLogging: boolean;
+        /** Log level for collaboration events */
+        logLevel: 'error' | 'warn' | 'info' | 'debug';
+        /** Enable performance profiling */
+        enableProfiling: boolean;
+    };
+}
+
+/**
+ * Default configuration with production-ready settings optimized for collaborative editing.
+ */
+export const DEFAULT_YJS_NOTEBOOK_CONFIG: Partial<IYjsNotebookConfig> = {
+    mode: ProviderMode.COLLABORATIVE,
+    websocketConfig: {
+        connectionTimeout: 5000,
+        maxReconnectAttempts: 10,
+        reconnectDelay: 1000,
+        enableAutoReconnect: true
+    },
+    syncConfig: {
+        enableRealTimeSync: true,
+        operationBatchSize: 20,
+        syncThrottleMs: 50, // Sub-100ms target
+        enableConflictResolution: true,
+        maxSyncRetries: 3
+    },
+    awarenessConfig: {
+        enablePresence: true,
+        enableCursorSync: true,
+        enableCellSelection: true,
+        updateThrottleMs: 50
+    },
+    lockConfig: {
+        enableLocking: true,
+        defaultLockTimeout: 120000, // 2 minutes
+        enableAutoRelease: true,
+        defaultPriority: LockPriority.Normal
+    },
+    historyConfig: {
+        enableHistory: true,
+        enableUndoRedo: true,
+        maxUndoStackSize: 100,
+        snapshotPolicy: {
+            enableAutoSnapshots: true,
+            autoSnapshotInterval: 15, // 15 minutes
+            maxOperationsBeforeSnapshot: 500
+        }
+    },
+    performanceConfig: {
+        enableMetrics: true,
+        targetLatencyMs: 100,
+        enableBatching: true,
+        memoryOptimization: 'medium'
+    },
+    debugConfig: {
+        enableDebugLogging: false,
+        logLevel: 'info',
+        enableProfiling: false
+    }
+};
+
+/**
+ * Notebook cell representation for CRDT synchronization.
  */
 export interface INotebookCell {
     /** Unique cell identifier */
     id: string;
     /** Cell type (code, markdown, raw) */
-    cell_type: 'code' | 'markdown' | 'raw';
+    cell_type: string;
     /** Cell source content */
-    source: string | string[];
+    source: string;
     /** Cell metadata */
     metadata: JSONObject;
     /** Cell outputs (for code cells) */
@@ -93,327 +311,261 @@ export interface INotebookCell {
 }
 
 /**
- * Notebook document structure compatible with .ipynb format
+ * Notebook metadata representation for CRDT synchronization.
  */
-export interface INotebookContent {
+export interface INotebookMetadata {
+    /** Kernel specification */
+    kernelspec?: {
+        name: string;
+        display_name: string;
+        language: string;
+    };
+    /** Language information */
+    language_info?: JSONObject;
+    /** Custom metadata */
+    [key: string]: JSONValue;
+}
+
+/**
+ * Complete notebook document structure for CRDT operations.
+ */
+export interface INotebookDocument {
     /** Notebook format version */
     nbformat: number;
     /** Notebook format minor version */
     nbformat_minor: number;
     /** Document metadata */
-    metadata: JSONObject;
+    metadata: INotebookMetadata;
     /** Array of notebook cells */
     cells: INotebookCell[];
 }
 
 /**
- * Provider configuration for collaboration settings
+ * Synchronization event data for provider notifications.
  */
-export interface ICollaborationProviderConfig {
-    /** WebSocket server URL for real-time synchronization */
-    websocketUrl: string;
-    /** Unique session identifier for the collaborative document */
-    sessionId: string;
-    /** Document identifier (typically the notebook file path) */
-    documentId: string;
-    /** User information for presence and attribution */
-    userInfo: {
-        userId: string;
-        displayName: string;
-        avatar?: string;
-        role?: string;
-    };
-    /** Awareness system configuration */
-    awareness?: Partial<IAwarenessConfig>;
-    /** Lock manager configuration */
-    locks?: Partial<ILockConfiguration>;
-    /** History service configuration */
-    history?: Partial<ISnapshotPolicy>;
-    /** Connection timeout in milliseconds */
-    connectionTimeout?: number;
-    /** Enable debug logging */
-    enableDebugLogging?: boolean;
-    /** Maximum reconnection attempts */
-    maxReconnectAttempts?: number;
-    /** Reconnection delay multiplier */
-    reconnectDelay?: number;
-    /** Enable cross-tab communication */
-    enableCrossTab?: boolean;
-    /** Enable offline mode support */
-    enableOfflineMode?: boolean;
-}
-
-/**
- * Connection state enumeration for provider status tracking
- */
-export enum ConnectionState {
-    DISCONNECTED = 'disconnected',
-    CONNECTING = 'connecting',
-    CONNECTED = 'connected',
-    RECONNECTING = 'reconnecting',
-    ERROR = 'error',
-    OFFLINE = 'offline'
-}
-
-/**
- * Synchronization events emitted by the provider
- */
-export interface IProviderEvent {
+export interface ISyncEvent {
     /** Event type identifier */
-    type: string;
-    /** Event payload data */
-    data: JSONValue;
+    type: 'sync_start' | 'sync_complete' | 'sync_error' | 'state_change' | 'operation';
+    /** Current synchronization state */
+    state: SyncState;
+    /** Previous state (for state change events) */
+    previousState?: SyncState;
+    /** Operation details (for operation events) */
+    operation?: {
+        type: CellOperationType;
+        cellId?: string;
+        data: JSONValue;
+    };
     /** Event timestamp */
     timestamp: number;
-    /** User associated with the event */
-    userId?: string;
+    /** Additional event metadata */
+    metadata?: JSONObject;
 }
 
 /**
- * Interface for collaboration provider dependency injection
+ * Performance metrics for synchronization operations.
  */
-export interface ICollaborationProvider extends IObservableDisposable {
-    /** Unique document identifier */
-    readonly documentId: string;
-    /** Current session identifier */
-    readonly sessionId: string;
-    /** Current connection state */
-    readonly connectionState: ConnectionState;
-    /** Underlying Yjs document */
-    readonly yjsDocument: Y.Doc;
-    /** Awareness system instance */
-    readonly awareness: CollaborativeAwareness;
-    /** Lock manager instance */
-    readonly lockManager: LockManager | null;
-    /** History service instance */
-    readonly historyService: IHistoryService | null;
-    /** Provider configuration */
-    readonly config: ICollaborationProviderConfig;
-
-    /** Signal emitted when document content changes */
-    readonly contentChanged: ISignal<this, IProviderEvent>;
-    /** Signal emitted when connection state changes */
-    readonly connectionStateChanged: ISignal<this, ConnectionState>;
-    /** Signal emitted when synchronization occurs */
-    readonly synchronized: ISignal<this, IProviderEvent>;
-    /** Signal emitted when errors occur */
-    readonly errorOccurred: ISignal<this, Error>;
-
-    /**
-     * Initialize the collaboration provider
-     */
-    initialize(): Promise<void>;
-
-    /**
-     * Get current notebook content
-     */
-    getNotebookContent(): INotebookContent;
-
-    /**
-     * Update notebook content with CRDT synchronization
-     */
-    updateNotebookContent(content: Partial<INotebookContent>): Promise<void>;
-
-    /**
-     * Insert a new cell at the specified index
-     */
-    insertCell(index: number, cell: INotebookCell): Promise<void>;
-
-    /**
-     * Delete a cell by ID or index
-     */
-    deleteCell(cellId: string): Promise<void>;
-
-    /**
-     * Update cell content with conflict resolution
-     */
-    updateCell(cellId: string, updates: Partial<INotebookCell>): Promise<void>;
-
-    /**
-     * Move a cell to a different position
-     */
-    moveCell(cellId: string, newIndex: number): Promise<void>;
-
-    /**
-     * Force synchronization with remote state
-     */
-    forceSynchronization(): Promise<void>;
-
-    /**
-     * Check if provider is ready for operations
-     */
-    isReady(): boolean;
+export interface ISyncMetrics {
+    /** Total number of operations synchronized */
+    totalOperations: number;
+    /** Average synchronization latency in milliseconds */
+    averageLatency: number;
+    /** Current synchronization state */
+    currentState: SyncState;
+    /** Number of active connections */
+    connectionCount: number;
+    /** Last successful synchronization timestamp */
+    lastSyncTimestamp: number;
+    /** Total number of conflicts resolved */
+    conflictsResolved: number;
+    /** Memory usage in bytes */
+    memoryUsage: number;
+    /** Network bandwidth utilization */
+    bandwidthUsage: {
+        incoming: number; // bytes per second
+        outgoing: number; // bytes per second
+    };
 }
 
 /**
- * Default provider configuration with production-ready settings
- */
-export const DEFAULT_PROVIDER_CONFIG: Partial<ICollaborationProviderConfig> = {
-    connectionTimeout: 10000, // 10 seconds
-    enableDebugLogging: false,
-    maxReconnectAttempts: 10,
-    reconnectDelay: 1000, // 1 second, with exponential backoff
-    enableCrossTab: true,
-    enableOfflineMode: true
-};
-
-/**
- * Core implementation of the Yjs-based notebook collaboration provider.
+ * Core synchronization engine that bridges existing NotebookModel with Yjs CRDT document
+ * structure to enable conflict-free collaborative editing.
  * 
- * This class serves as the primary interface between the Jupyter notebook system
- * and the collaborative editing infrastructure. It manages CRDT synchronization,
- * real-time communication, and provides comprehensive error handling with automatic
- * recovery capabilities.
+ * This provider serves as the central coordination point for all collaborative editing
+ * operations, managing real-time synchronization, user awareness, cell-level locking,
+ * and version history while maintaining backward compatibility with single-user workflows.
  * 
  * Key Responsibilities:
- * - Bridges NotebookModel with Yjs CRDT document structure
- * - Manages WebSocket connections for real-time synchronization
- * - Coordinates with awareness, lock, and history systems
- * - Provides conflict-free merge algorithms for concurrent edits
- * - Handles connection recovery and state synchronization
- * - Implements graceful degradation for offline scenarios
+ * - CRDT document state management and synchronization
+ * - WebSocket connection management with automatic reconnection
+ * - Integration with awareness system for user presence tracking
+ * - Coordination with lock manager for cell-level edit coordination
+ * - History service integration for version tracking and rollback
+ * - Performance optimization and metrics collection
+ * - Error handling and graceful degradation
  * 
  * Performance Characteristics:
- * - Sub-100ms synchronization latency for local operations
- * - Efficient memory usage with automatic garbage collection
- * - Optimized for 100+ concurrent collaborative users
- * - Intelligent batching for high-frequency operations
- * - Cross-browser compatibility with state validation
+ * - Sub-100ms synchronization latency through optimized CRDT operations
+ * - Efficient memory usage with incremental document updates
+ * - Intelligent operation batching for high-frequency changes
+ * - Automatic connection management with state recovery
+ * - Graceful fallback to single-user mode during connectivity issues
  */
-export class YjsNotebookProvider implements ICollaborationProvider {
-    private readonly _documentId: string;
+export class YjsNotebookProvider implements IObservableDisposable {
+    private readonly _config: IYjsNotebookConfig;
     private readonly _sessionId: string;
-    private readonly _config: ICollaborationProviderConfig;
+    
+    // Core CRDT infrastructure
     private readonly _yjsDocument: Y.Doc;
-    private readonly _notebookMap: Y.Map<any>;
-    private readonly _cellsArray: Y.Array<any>;
+    private readonly _cellsArray: Y.Array<Y.Map<any>>;
     private readonly _metadataMap: Y.Map<any>;
+    private readonly _undoManager: UndoManager;
     
-    // Collaboration services
+    // WebSocket communication
     private _websocketProvider: WebsocketProvider | null = null;
-    private _awareness: CollaborativeAwareness | null = null;
-    private _lockManager: LockManager | null = null;
-    private _historyService: IHistoryService | null = null;
-    
-    // State management
-    private _connectionState: ConnectionState = ConnectionState.DISCONNECTED;
-    private _isInitialized = false;
-    private _isDisposed = false;
+    private _isConnected = false;
     private _reconnectAttempts = 0;
     private _reconnectTimer: NodeJS.Timeout | null = null;
-    private _syncTimer: NodeJS.Timeout | null = null;
+    
+    // Collaboration modules
+    private _awareness: CollaborativeAwareness | null = null;
+    private _lockManager: LockManager | null = null;
+    private _historyService: HistoryService | null = null;
+    
+    // State management
+    private _currentState: SyncState = SyncState.UNINITIALIZED;
+    private _mode: ProviderMode = ProviderMode.SINGLE_USER;
+    private _isDisposed = false;
+    private _isInitialized = false;
+    
+    // Synchronization control
+    private _syncQueue: Array<{ operation: () => Promise<void>; priority: number }> = [];
+    private _isSyncing = false;
+    private _syncThrottleTimer: NodeJS.Timeout | null = null;
     private _lastSyncTime = 0;
-    private _pendingOperations: Map<string, any> = new Map();
+    
+    // Performance monitoring
+    private _metrics: ISyncMetrics = {
+        totalOperations: 0,
+        averageLatency: 0,
+        currentState: SyncState.UNINITIALIZED,
+        connectionCount: 0,
+        lastSyncTimestamp: 0,
+        conflictsResolved: 0,
+        memoryUsage: 0,
+        bandwidthUsage: { incoming: 0, outgoing: 0 }
+    };
+    private _performanceTimer: NodeJS.Timeout | null = null;
+    private _operationTimestamps: number[] = [];
     
     // Event signals
     private readonly _disposed = new Signal<this, void>(this);
-    private readonly _contentChanged = new Signal<this, IProviderEvent>(this);
-    private readonly _connectionStateChanged = new Signal<this, ConnectionState>(this);
-    private readonly _synchronized = new Signal<this, IProviderEvent>(this);
-    private readonly _errorOccurred = new Signal<this, Error>(this);
+    private readonly _stateChanged = new Signal<this, ISyncEvent>(this);
+    private readonly _documentChanged = new Signal<this, ISyncEvent>(this);
+    private readonly _syncCompleted = new Signal<this, ISyncEvent>(this);
+    private readonly _syncError = new Signal<this, Error>(this);
+    private readonly _connectionChanged = new Signal<this, boolean>(this);
 
     /**
-     * Create a new YjsNotebookProvider instance.
+     * Creates a new YjsNotebookProvider instance.
      * 
-     * @param config - Provider configuration including connection and user settings
+     * @param config - Provider configuration settings
+     * @param sessionId - Unique session identifier
      */
-    constructor(config: ICollaborationProviderConfig) {
-        // Validate required configuration
-        if (!config.documentId || !config.sessionId || !config.websocketUrl) {
-            throw new Error('YjsNotebookProvider requires documentId, sessionId, and websocketUrl');
-        }
-
-        this._documentId = config.documentId;
-        this._sessionId = config.sessionId;
-        this._config = { ...DEFAULT_PROVIDER_CONFIG, ...config };
-
-        // Initialize Yjs document with proper typing
+    constructor(config: IYjsNotebookConfig, sessionId?: string) {
+        this._config = { ...DEFAULT_YJS_NOTEBOOK_CONFIG, ...config } as IYjsNotebookConfig;
+        this._sessionId = sessionId || `session_${Date.now()}_${Math.random().toString(36).substring(2)}`;
+        this._mode = config.mode || ProviderMode.COLLABORATIVE;
+        
+        // Initialize Yjs document structure
         this._yjsDocument = new Y.Doc();
-        this._yjsDocument.clientID = this._generateClientId();
-
-        // Set up shared document structure matching .ipynb format
-        this._notebookMap = this._yjsDocument.getMap('notebook');
         this._cellsArray = this._yjsDocument.getArray('cells');
         this._metadataMap = this._yjsDocument.getMap('metadata');
-
-        // Initialize document structure if empty
-        this._initializeDocumentStructure();
-
-        // Set up document change listeners
+        
+        // Set up undo/redo management
+        this._undoManager = new UndoManager([this._cellsArray, this._metadataMap], {
+            captureTimeout: 500
+        });
+        
+        // Set up document event listeners
         this._setupDocumentListeners();
-
-        // Enable debug logging if configured
-        if (this._config.enableDebugLogging) {
-            this._enableDebugLogging();
+        
+        // Initialize performance monitoring
+        if (this._config.performanceConfig?.enableMetrics) {
+            this._startPerformanceMonitoring();
         }
-
-        console.log(`[YjsProvider] Created provider for document ${this._documentId} in session ${this._sessionId}`);
+        
+        this._logDebug(`Created YjsNotebookProvider for session ${this._sessionId} in ${this._mode} mode`);
     }
 
     /**
-     * Get the document identifier.
+     * Gets the current synchronization state.
      */
-    get documentId(): string {
-        return this._documentId;
+    get state(): SyncState {
+        return this._currentState;
     }
 
     /**
-     * Get the session identifier.
+     * Gets the provider operation mode.
+     */
+    get mode(): ProviderMode {
+        return this._mode;
+    }
+
+    /**
+     * Gets whether the provider is connected and ready for collaboration.
+     */
+    get isConnected(): boolean {
+        return this._isConnected && this._currentState === SyncState.SYNCHRONIZED;
+    }
+
+    /**
+     * Gets whether the provider has been disposed.
+     */
+    get isDisposed(): boolean {
+        return this._isDisposed;
+    }
+
+    /**
+     * Gets the session identifier.
      */
     get sessionId(): string {
         return this._sessionId;
     }
 
     /**
-     * Get the current connection state.
-     */
-    get connectionState(): ConnectionState {
-        return this._connectionState;
-    }
-
-    /**
-     * Get the underlying Yjs document.
+     * Gets the underlying Yjs document.
      */
     get yjsDocument(): Y.Doc {
         return this._yjsDocument;
     }
 
     /**
-     * Get the awareness system instance.
+     * Gets the awareness system instance.
      */
-    get awareness(): CollaborativeAwareness {
-        if (!this._awareness) {
-            throw new Error('Awareness system not initialized');
-        }
+    get awareness(): CollaborativeAwareness | null {
         return this._awareness;
     }
 
     /**
-     * Get the lock manager instance.
+     * Gets the lock manager instance.
      */
     get lockManager(): LockManager | null {
         return this._lockManager;
     }
 
     /**
-     * Get the history service instance.
+     * Gets the history service instance.
      */
-    get historyService(): IHistoryService | null {
+    get historyService(): HistoryService | null {
         return this._historyService;
     }
 
     /**
-     * Get the provider configuration.
+     * Gets current performance metrics.
      */
-    get config(): ICollaborationProviderConfig {
-        return { ...this._config };
-    }
-
-    /**
-     * Check if the provider has been disposed.
-     */
-    get isDisposed(): boolean {
-        return this._isDisposed;
+    get metrics(): ISyncMetrics {
+        return { ...this._metrics };
     }
 
     /**
@@ -424,79 +576,78 @@ export class YjsNotebookProvider implements ICollaborationProvider {
     }
 
     /**
-     * Signal emitted when document content changes.
+     * Signal emitted when the synchronization state changes.
      */
-    get contentChanged(): ISignal<this, IProviderEvent> {
-        return this._contentChanged;
+    get stateChanged(): ISignal<this, ISyncEvent> {
+        return this._stateChanged;
     }
 
     /**
-     * Signal emitted when connection state changes.
+     * Signal emitted when the document content changes.
      */
-    get connectionStateChanged(): ISignal<this, ConnectionState> {
-        return this._connectionStateChanged;
+    get documentChanged(): ISignal<this, ISyncEvent> {
+        return this._documentChanged;
     }
 
     /**
-     * Signal emitted when synchronization occurs.
+     * Signal emitted when synchronization completes.
      */
-    get synchronized(): ISignal<this, IProviderEvent> {
-        return this._synchronized;
+    get syncCompleted(): ISignal<this, ISyncEvent> {
+        return this._syncCompleted;
     }
 
     /**
-     * Signal emitted when errors occur.
+     * Signal emitted when synchronization errors occur.
      */
-    get errorOccurred(): ISignal<this, Error> {
-        return this._errorOccurred;
+    get syncError(): ISignal<this, Error> {
+        return this._syncError;
     }
 
     /**
-     * Initialize the collaboration provider with all services.
+     * Signal emitted when connection status changes.
+     */
+    get connectionChanged(): ISignal<this, boolean> {
+        return this._connectionChanged;
+    }
+
+    /**
+     * Initializes the provider and establishes collaborative connections.
      * 
+     * @param initialDocument - Optional initial document state
      * @returns Promise that resolves when initialization is complete
      */
-    async initialize(): Promise<void> {
+    async initialize(initialDocument?: INotebookDocument): Promise<void> {
         if (this._isDisposed) {
-            throw new Error('Cannot initialize disposed provider');
+            throw new Error('Cannot initialize disposed YjsNotebookProvider');
         }
 
         if (this._isInitialized) {
-            console.warn('[YjsProvider] Provider already initialized');
+            this._logDebug('Provider already initialized');
             return;
         }
 
         try {
-            this._setConnectionState(ConnectionState.CONNECTING);
+            this._setState(SyncState.INITIALIZING);
 
-            // Initialize WebSocket provider for real-time communication
-            await this._initializeWebSocketProvider();
-
-            // Initialize awareness system for user presence
-            await this._initializeAwareness();
-
-            // Initialize lock manager for conflict resolution
-            if (this._config.locks !== false) {
-                await this._initializeLockManager();
+            // Initialize document content if provided
+            if (initialDocument) {
+                await this._initializeDocument(initialDocument);
             }
 
-            // Initialize history service for version tracking
-            if (this._config.history !== false) {
-                await this._initializeHistoryService();
+            // Initialize collaboration features based on mode
+            if (this._mode === ProviderMode.COLLABORATIVE) {
+                await this._initializeCollaborativeMode();
+            } else if (this._mode === ProviderMode.READ_ONLY) {
+                await this._initializeReadOnlyMode();
             }
 
-            // Set up cross-tab communication if enabled
-            if (this._config.enableCrossTab) {
-                this._setupCrossTabCommunication();
-            }
-
-            // Mark as initialized
             this._isInitialized = true;
+            this._setState(SyncState.SYNCHRONIZED);
 
-            console.log(`[YjsProvider] Successfully initialized provider for document ${this._documentId}`);
+            this._logInfo(`Provider initialized successfully in ${this._mode} mode`);
 
         } catch (error) {
-            this._setConnectionState(ConnectionState.ERROR);
+            this._setState(SyncState.FAILED);
             const initError = new Error(`Failed to initialize YjsNotebookProvider: ${error.message}`);
             this._emitError(initError);
             throw initError;
@@ -504,362 +655,468 @@ export class YjsNotebookProvider implements ICollaborationProvider {
     }
 
     /**
-     * Get current notebook content from CRDT document.
+     * Loads notebook document into the CRDT structure.
      * 
-     * @returns Current notebook content in .ipynb format
+     * @param document - Notebook document to load
+     * @returns Promise that resolves when document is loaded
      */
-    getNotebookContent(): INotebookContent {
+    async loadDocument(document: INotebookDocument): Promise<void> {
         this._ensureInitialized();
 
         try {
-            // Extract document structure from Yjs shared types
-            const nbformat = this._notebookMap.get('nbformat') || 4;
-            const nbformat_minor = this._notebookMap.get('nbformat_minor') || 4;
-            const metadata = this._metadataMap.toJSON() as JSONObject;
-            
-            // Convert cells array to proper format
-            const cells: INotebookCell[] = this._cellsArray.toArray().map(cellData => {
-                return this._deserializeCell(cellData);
-            });
+            this._setState(SyncState.SYNCING);
 
-            return {
-                nbformat,
-                nbformat_minor,
-                metadata,
-                cells
-            };
-
-        } catch (error) {
-            const contentError = new Error(`Failed to get notebook content: ${error.message}`);
-            this._emitError(contentError);
-            throw contentError;
-        }
-    }
-
-    /**
-     * Update notebook content with CRDT synchronization.
-     * 
-     * @param content - Partial notebook content to update
-     * @returns Promise that resolves when update is synchronized
-     */
-    async updateNotebookContent(content: Partial<INotebookContent>): Promise<void> {
-        this._ensureInitialized();
-
-        try {
-            const startTime = performance.now();
-
-            // Create Yjs transaction for atomic updates
+            // Clear existing document content
             this._yjsDocument.transact(() => {
-                // Update document metadata
-                if (content.nbformat !== undefined) {
-                    this._notebookMap.set('nbformat', content.nbformat);
-                }
-                if (content.nbformat_minor !== undefined) {
-                    this._notebookMap.set('nbformat_minor', content.nbformat_minor);
-                }
-                if (content.metadata) {
-                    this._updateMapFromObject(this._metadataMap, content.metadata);
-                }
-
-                // Update cells if provided
-                if (content.cells) {
-                    this._updateCellsArray(content.cells);
-                }
-            }, this._getUserContext());
-
-            // Track synchronization latency
-            const latency = performance.now() - startTime;
-            this._trackSyncLatency(latency);
-
-            // Emit content changed event
-            this._emitContentChanged('notebook_updated', {
-                updateType: 'full',
-                latency,
-                cellCount: content.cells?.length || 0
+                this._cellsArray.delete(0, this._cellsArray.length);
+                this._metadataMap.clear();
             });
 
-            console.log(`[YjsProvider] Updated notebook content (${latency.toFixed(2)}ms)`);
+            // Load document content into CRDT structure
+            await this._loadDocumentContent(document);
+
+            this._setState(SyncState.SYNCHRONIZED);
+            this._emitDocumentChanged('document_loaded', { document });
+
+            this._logDebug('Document loaded successfully');
 
         } catch (error) {
-            const updateError = new Error(`Failed to update notebook content: ${error.message}`);
-            this._emitError(updateError);
-            throw updateError;
+            this._setState(SyncState.FAILED);
+            const loadError = new Error(`Failed to load document: ${error.message}`);
+            this._emitError(loadError);
+            throw loadError;
         }
     }
 
     /**
-     * Insert a new cell at the specified index.
+     * Saves the current CRDT state to notebook document format.
+     * 
+     * @returns Promise that resolves with the current document state
+     */
+    async saveDocument(): Promise<INotebookDocument> {
+        this._ensureInitialized();
+
+        try {
+            const document = this._serializeDocument();
+            this._emitDocumentChanged('document_saved', { document });
+            this._logDebug('Document saved successfully');
+            return document;
+
+        } catch (error) {
+            const saveError = new Error(`Failed to save document: ${error.message}`);
+            this._emitError(saveError);
+            throw saveError;
+        }
+    }
+
+    /**
+     * Inserts a new cell at the specified index.
      * 
      * @param index - Index where to insert the cell
      * @param cell - Cell data to insert
-     * @returns Promise that resolves when insertion is synchronized
+     * @returns Promise that resolves when cell is inserted
      */
     async insertCell(index: number, cell: INotebookCell): Promise<void> {
         this._ensureInitialized();
 
-        // Validate cell data
-        if (!cell.id || !cell.cell_type) {
-            throw new Error('Cell must have id and cell_type properties');
-        }
-
         try {
-            const startTime = performance.now();
-
-            // Attempt to acquire lock for cell operations
-            if (this._lockManager) {
-                await this._acquireCellOperationLock(cell.id);
+            // Acquire lock for cell insertion if locking is enabled
+            let lockMetadata: ILockMetadata | null = null;
+            if (this._lockManager && this._config.lockConfig?.enableLocking) {
+                const lockRequest: ILockRequest = {
+                    cellId: `insert_${index}`,
+                    userId: this._config.userInfo.userId,
+                    userName: this._config.userInfo.displayName,
+                    sessionId: this._sessionId,
+                    priority: this._config.lockConfig.defaultPriority || LockPriority.Normal,
+                    timeoutMs: this._config.lockConfig.defaultLockTimeout || 120000,
+                    reason: 'Cell insertion operation'
+                };
+                lockMetadata = await this._lockManager.acquireLock(lockRequest);
             }
 
-            // Insert cell with CRDT operation
+            // Create Yjs map for the cell
+            const cellMap = new Y.Map();
+            cellMap.set('id', cell.id);
+            cellMap.set('cell_type', cell.cell_type);
+            cellMap.set('source', cell.source);
+            cellMap.set('metadata', cell.metadata);
+            if (cell.outputs) {
+                cellMap.set('outputs', cell.outputs);
+            }
+            if (cell.execution_count !== undefined) {
+                cellMap.set('execution_count', cell.execution_count);
+            }
+
+            // Insert cell into CRDT array
             this._yjsDocument.transact(() => {
-                const serializedCell = this._serializeCell(cell);
-                this._cellsArray.insert(index, [serializedCell]);
-            }, this._getUserContext());
-
-            // Track operation latency
-            const latency = performance.now() - startTime;
-            this._trackSyncLatency(latency);
-
-            // Emit content changed event
-            this._emitContentChanged('cell_inserted', {
-                cellId: cell.id,
-                cellType: cell.cell_type,
-                index,
-                latency
+                this._cellsArray.insert(index, [cellMap]);
             });
 
-            console.log(`[YjsProvider] Inserted cell ${cell.id} at index ${index} (${latency.toFixed(2)}ms)`);
+            // Release lock if acquired
+            if (lockMetadata && this._lockManager) {
+                await this._lockManager.releaseLock({
+                    lockId: lockMetadata.lockId,
+                    userId: this._config.userInfo.userId,
+                    sessionId: this._sessionId,
+                    reason: 'Cell insertion complete'
+                });
+            }
+
+            // Update awareness if available
+            if (this._awareness) {
+                this._awareness.updateActivityStatus(UserActivityStatus.EDITING, 'cell_insertion');
+            }
+
+            this._emitDocumentChanged('cell_inserted', { cellId: cell.id, index });
+            this._logDebug(`Cell ${cell.id} inserted at index ${index}`);
 
         } catch (error) {
             const insertError = new Error(`Failed to insert cell: ${error.message}`);
             this._emitError(insertError);
             throw insertError;
-        } finally {
-            // Release lock if acquired
-            if (this._lockManager) {
-                await this._releaseCellOperationLock(cell.id);
-            }
         }
     }
 
     /**
-     * Delete a cell by ID.
+     * Deletes a cell at the specified index.
      * 
-     * @param cellId - Unique identifier of the cell to delete
-     * @returns Promise that resolves when deletion is synchronized
+     * @param index - Index of the cell to delete
+     * @returns Promise that resolves when cell is deleted
      */
-    async deleteCell(cellId: string): Promise<void> {
+    async deleteCell(index: number): Promise<void> {
         this._ensureInitialized();
 
+        if (index < 0 || index >= this._cellsArray.length) {
+            throw new Error(`Invalid cell index: ${index}`);
+        }
+
         try {
-            const startTime = performance.now();
+            const cellMap = this._cellsArray.get(index) as Y.Map<any>;
+            const cellId = cellMap.get('id');
 
-            // Find cell index
-            const cellIndex = this._findCellIndex(cellId);
-            if (cellIndex === -1) {
-                throw new Error(`Cell with ID ${cellId} not found`);
+            // Acquire lock for cell deletion if locking is enabled
+            let lockMetadata: ILockMetadata | null = null;
+            if (this._lockManager && this._config.lockConfig?.enableLocking) {
+                const lockRequest: ILockRequest = {
+                    cellId: cellId,
+                    userId: this._config.userInfo.userId,
+                    userName: this._config.userInfo.displayName,
+                    sessionId: this._sessionId,
+                    priority: this._config.lockConfig.defaultPriority || LockPriority.Normal,
+                    timeoutMs: this._config.lockConfig.defaultLockTimeout || 120000,
+                    reason: 'Cell deletion operation'
+                };
+                lockMetadata = await this._lockManager.acquireLock(lockRequest);
             }
 
-            // Attempt to acquire lock for cell operations
-            if (this._lockManager) {
-                await this._acquireCellOperationLock(cellId);
-            }
-
-            // Delete cell with CRDT operation
+            // Delete cell from CRDT array
             this._yjsDocument.transact(() => {
-                this._cellsArray.delete(cellIndex, 1);
-            }, this._getUserContext());
-
-            // Track operation latency
-            const latency = performance.now() - startTime;
-            this._trackSyncLatency(latency);
-
-            // Emit content changed event
-            this._emitContentChanged('cell_deleted', {
-                cellId,
-                index: cellIndex,
-                latency
+                this._cellsArray.delete(index, 1);
             });
 
-            console.log(`[YjsProvider] Deleted cell ${cellId} (${latency.toFixed(2)}ms)`);
+            // Release lock if acquired
+            if (lockMetadata && this._lockManager) {
+                await this._lockManager.releaseLock({
+                    lockId: lockMetadata.lockId,
+                    userId: this._config.userInfo.userId,
+                    sessionId: this._sessionId,
+                    reason: 'Cell deletion complete'
+                });
+            }
+
+            // Update awareness if available
+            if (this._awareness) {
+                this._awareness.updateActivityStatus(UserActivityStatus.EDITING, 'cell_deletion');
+            }
+
+            this._emitDocumentChanged('cell_deleted', { cellId, index });
+            this._logDebug(`Cell ${cellId} deleted at index ${index}`);
 
         } catch (error) {
             const deleteError = new Error(`Failed to delete cell: ${error.message}`);
             this._emitError(deleteError);
             throw deleteError;
-        } finally {
-            // Release lock if acquired
-            if (this._lockManager) {
-                await this._releaseCellOperationLock(cellId);
-            }
         }
     }
 
     /**
-     * Update cell content with conflict resolution.
+     * Updates cell content with CRDT synchronization.
      * 
-     * @param cellId - Unique identifier of the cell to update
-     * @param updates - Partial cell data to update
-     * @returns Promise that resolves when update is synchronized
+     * @param cellId - ID of the cell to update
+     * @param updates - Partial cell updates to apply
+     * @returns Promise that resolves when cell is updated
      */
     async updateCell(cellId: string, updates: Partial<INotebookCell>): Promise<void> {
         this._ensureInitialized();
 
         try {
-            const startTime = performance.now();
-
             // Find cell index
             const cellIndex = this._findCellIndex(cellId);
             if (cellIndex === -1) {
-                throw new Error(`Cell with ID ${cellId} not found`);
+                throw new Error(`Cell not found: ${cellId}`);
             }
 
-            // Attempt to acquire lock for cell editing
-            if (this._lockManager) {
-                await this._acquireCellEditLock(cellId);
+            // Acquire lock for cell update if locking is enabled
+            let lockMetadata: ILockMetadata | null = null;
+            if (this._lockManager && this._config.lockConfig?.enableLocking) {
+                const lockRequest: ILockRequest = {
+                    cellId: cellId,
+                    userId: this._config.userInfo.userId,
+                    userName: this._config.userInfo.displayName,
+                    sessionId: this._sessionId,
+                    priority: this._config.lockConfig.defaultPriority || LockPriority.Normal,
+                    timeoutMs: this._config.lockConfig.defaultLockTimeout || 120000,
+                    reason: 'Cell content update'
+                };
+                lockMetadata = await this._lockManager.acquireLock(lockRequest);
             }
 
-            // Update cell with CRDT operation
+            // Update cell in CRDT structure
+            const cellMap = this._cellsArray.get(cellIndex) as Y.Map<any>;
             this._yjsDocument.transact(() => {
-                const currentCell = this._cellsArray.get(cellIndex);
-                const updatedCell = { ...currentCell, ...updates };
-                this._cellsArray.delete(cellIndex, 1);
-                this._cellsArray.insert(cellIndex, [this._serializeCell(updatedCell)]);
-            }, this._getUserContext());
-
-            // Track operation latency
-            const latency = performance.now() - startTime;
-            this._trackSyncLatency(latency);
-
-            // Emit content changed event
-            this._emitContentChanged('cell_updated', {
-                cellId,
-                updateKeys: Object.keys(updates),
-                latency
+                Object.entries(updates).forEach(([key, value]) => {
+                    if (value !== undefined) {
+                        cellMap.set(key, value);
+                    }
+                });
             });
 
-            console.log(`[YjsProvider] Updated cell ${cellId} (${latency.toFixed(2)}ms)`);
+            // Release lock if acquired
+            if (lockMetadata && this._lockManager) {
+                await this._lockManager.releaseLock({
+                    lockId: lockMetadata.lockId,
+                    userId: this._config.userInfo.userId,
+                    sessionId: this._sessionId,
+                    reason: 'Cell update complete'
+                });
+            }
+
+            // Update awareness if available
+            if (this._awareness) {
+                this._awareness.updateActivityStatus(UserActivityStatus.EDITING, 'cell_update');
+            }
+
+            this._emitDocumentChanged('cell_updated', { cellId, updates });
+            this._logDebug(`Cell ${cellId} updated`);
 
         } catch (error) {
             const updateError = new Error(`Failed to update cell: ${error.message}`);
             this._emitError(updateError);
             throw updateError;
-        } finally {
-            // Release lock if acquired
-            if (this._lockManager) {
-                await this._releaseCellEditLock(cellId);
-            }
         }
     }
 
     /**
-     * Move a cell to a different position.
+     * Moves a cell from one index to another.
      * 
-     * @param cellId - Unique identifier of the cell to move
-     * @param newIndex - New index position for the cell
-     * @returns Promise that resolves when move is synchronized
+     * @param fromIndex - Current index of the cell
+     * @param toIndex - Target index for the cell
+     * @returns Promise that resolves when cell is moved
      */
-    async moveCell(cellId: string, newIndex: number): Promise<void> {
+    async moveCell(fromIndex: number, toIndex: number): Promise<void> {
         this._ensureInitialized();
 
+        if (fromIndex < 0 || fromIndex >= this._cellsArray.length ||
+            toIndex < 0 || toIndex >= this._cellsArray.length) {
+            throw new Error(`Invalid cell indices: ${fromIndex} -> ${toIndex}`);
+        }
+
+        if (fromIndex === toIndex) {
+            return; // No operation needed
+        }
+
         try {
-            const startTime = performance.now();
+            const cellMap = this._cellsArray.get(fromIndex) as Y.Map<any>;
+            const cellId = cellMap.get('id');
 
-            // Find current cell index
-            const currentIndex = this._findCellIndex(cellId);
-            if (currentIndex === -1) {
-                throw new Error(`Cell with ID ${cellId} not found`);
+            // Acquire lock for cell move if locking is enabled
+            let lockMetadata: ILockMetadata | null = null;
+            if (this._lockManager && this._config.lockConfig?.enableLocking) {
+                const lockRequest: ILockRequest = {
+                    cellId: cellId,
+                    userId: this._config.userInfo.userId,
+                    userName: this._config.userInfo.displayName,
+                    sessionId: this._sessionId,
+                    priority: this._config.lockConfig.defaultPriority || LockPriority.Normal,
+                    timeoutMs: this._config.lockConfig.defaultLockTimeout || 120000,
+                    reason: 'Cell move operation'
+                };
+                lockMetadata = await this._lockManager.acquireLock(lockRequest);
             }
 
-            // Validate new index
-            if (newIndex < 0 || newIndex >= this._cellsArray.length) {
-                throw new Error(`Invalid new index: ${newIndex}`);
-            }
-
-            // Skip if already at target position
-            if (currentIndex === newIndex) {
-                return;
-            }
-
-            // Attempt to acquire lock for cell operations
-            if (this._lockManager) {
-                await this._acquireCellOperationLock(cellId);
-            }
-
-            // Move cell with CRDT operations
+            // Move cell in CRDT array
             this._yjsDocument.transact(() => {
-                // Get cell data
-                const cellData = this._cellsArray.get(currentIndex);
+                // Remove cell from current position
+                const cell = this._cellsArray.get(fromIndex);
+                this._cellsArray.delete(fromIndex, 1);
                 
-                // Remove from current position
-                this._cellsArray.delete(currentIndex, 1);
-                
-                // Adjust target index if necessary
-                const adjustedIndex = newIndex > currentIndex ? newIndex - 1 : newIndex;
-                
-                // Insert at new position
-                this._cellsArray.insert(adjustedIndex, [cellData]);
-            }, this._getUserContext());
-
-            // Track operation latency
-            const latency = performance.now() - startTime;
-            this._trackSyncLatency(latency);
-
-            // Emit content changed event
-            this._emitContentChanged('cell_moved', {
-                cellId,
-                fromIndex: currentIndex,
-                toIndex: newIndex,
-                latency
+                // Insert cell at new position
+                const insertIndex = toIndex > fromIndex ? toIndex - 1 : toIndex;
+                this._cellsArray.insert(insertIndex, [cell]);
             });
 
-            console.log(`[YjsProvider] Moved cell ${cellId} from ${currentIndex} to ${newIndex} (${latency.toFixed(2)}ms)`);
+            // Release lock if acquired
+            if (lockMetadata && this._lockManager) {
+                await this._lockManager.releaseLock({
+                    lockId: lockMetadata.lockId,
+                    userId: this._config.userInfo.userId,
+                    sessionId: this._sessionId,
+                    reason: 'Cell move complete'
+                });
+            }
+
+            // Update awareness if available
+            if (this._awareness) {
+                this._awareness.updateActivityStatus(UserActivityStatus.EDITING, 'cell_move');
+            }
+
+            this._emitDocumentChanged('cell_moved', { cellId, fromIndex, toIndex });
+            this._logDebug(`Cell ${cellId} moved from index ${fromIndex} to ${toIndex}`);
 
         } catch (error) {
             const moveError = new Error(`Failed to move cell: ${error.message}`);
             this._emitError(moveError);
             throw moveError;
-        } finally {
-            // Release lock if acquired
-            if (this._lockManager) {
-                await this._releaseCellOperationLock(cellId);
-            }
         }
     }
 
     /**
-     * Force synchronization with remote state.
+     * Updates notebook metadata with CRDT synchronization.
      * 
-     * @returns Promise that resolves when synchronization is complete
+     * @param updates - Partial metadata updates to apply
+     * @returns Promise that resolves when metadata is updated
+     */
+    async updateMetadata(updates: Partial<INotebookMetadata>): Promise<void> {
+        this._ensureInitialized();
+
+        try {
+            // Update metadata in CRDT structure
+            this._yjsDocument.transact(() => {
+                Object.entries(updates).forEach(([key, value]) => {
+                    if (value !== undefined) {
+                        this._metadataMap.set(key, value);
+                    }
+                });
+            });
+
+            // Update awareness if available
+            if (this._awareness) {
+                this._awareness.updateActivityStatus(UserActivityStatus.EDITING, 'metadata_update');
+            }
+
+            this._emitDocumentChanged('metadata_updated', { updates });
+            this._logDebug('Notebook metadata updated');
+
+        } catch (error) {
+            const updateError = new Error(`Failed to update metadata: ${error.message}`);
+            this._emitError(updateError);
+            throw updateError;
+        }
+    }
+
+    /**
+     * Starts editing a specific cell and notifies awareness system.
+     * 
+     * @param cellId - ID of the cell to start editing
+     * @param cursorPosition - Optional cursor position
+     * @returns Promise that resolves when editing starts
+     */
+    async startEditingCell(cellId: string, cursorPosition?: ICursorPosition): Promise<void> {
+        this._ensureInitialized();
+
+        try {
+            // Update awareness if available
+            if (this._awareness) {
+                this._awareness.startEditingCell(cellId);
+                
+                if (cursorPosition) {
+                    this._awareness.updateCursorPosition(cursorPosition);
+                }
+            }
+
+            this._logDebug(`Started editing cell ${cellId}`);
+
+        } catch (error) {
+            const editError = new Error(`Failed to start editing cell: ${error.message}`);
+            this._emitError(editError);
+            throw editError;
+        }
+    }
+
+    /**
+     * Stops editing a specific cell and notifies awareness system.
+     * 
+     * @param cellId - ID of the cell to stop editing
+     * @returns Promise that resolves when editing stops
+     */
+    async stopEditingCell(cellId: string): Promise<void> {
+        this._ensureInitialized();
+
+        try {
+            // Update awareness if available
+            if (this._awareness) {
+                this._awareness.stopEditingCell(cellId);
+            }
+
+            this._logDebug(`Stopped editing cell ${cellId}`);
+
+        } catch (error) {
+            const editError = new Error(`Failed to stop editing cell: ${error.message}`);
+            this._emitError(editError);
+            throw editError;
+        }
+    }
+
+    /**
+     * Updates cursor position for real-time collaboration.
+     * 
+     * @param cursorPosition - New cursor position information
+     */
+    updateCursorPosition(cursorPosition: ICursorPosition): void {
+        if (this._awareness && this._config.awarenessConfig?.enableCursorSync) {
+            this._awareness.updateCursorPosition(cursorPosition);
+        }
+    }
+
+    /**
+     * Updates cell selection for collaborative coordination.
+     * 
+     * @param cellSelection - New cell selection information
+     */
+    updateCellSelection(cellSelection: ICellSelection): void {
+        if (this._awareness && this._config.awarenessConfig?.enableCellSelection) {
+            this._awareness.updateCellSelection(cellSelection);
+        }
+    }
+
+    /**
+     * Forces synchronization of the CRDT document.
+     * 
+     * @returns Promise that resolves when synchronization completes
      */
     async forceSynchronization(): Promise<void> {
         this._ensureInitialized();
 
         try {
-            console.log('[YjsProvider] Forcing synchronization with remote state');
+            this._setState(SyncState.SYNCING);
 
-            // Force awareness synchronization
+            // Force awareness synchronization if available
             if (this._awareness) {
                 await this._awareness.forceSynchronization();
             }
 
-            // Force WebSocket resync
-            if (this._websocketProvider && this._websocketProvider.wsconnected) {
-                // Request full document state
-                this._websocketProvider.disconnect();
-                await new Promise(resolve => setTimeout(resolve, 100));
-                this._websocketProvider.connect();
+            // Trigger document update to sync CRDT state
+            if (this._websocketProvider) {
+                this._websocketProvider.sync();
             }
 
-            // Emit synchronization event
-            this._emitSynchronized('force_sync', {
-                timestamp: Date.now(),
-                trigger: 'manual'
-            });
-
-            console.log('[YjsProvider] Force synchronization completed');
+            this._setState(SyncState.SYNCHRONIZED);
+            this._emitSyncCompleted();
+            this._logDebug('Forced synchronization completed');
 
         } catch (error) {
+            this._setState(SyncState.FAILED);
             const syncError = new Error(`Failed to force synchronization: ${error.message}`);
             this._emitError(syncError);
             throw syncError;
@@ -867,62 +1124,239 @@ export class YjsNotebookProvider implements ICollaborationProvider {
     }
 
     /**
-     * Check if provider is ready for operations.
+     * Switches the provider to a different operation mode.
      * 
-     * @returns True if provider is ready, false otherwise
+     * @param mode - New operation mode
+     * @returns Promise that resolves when mode switch completes
      */
-    isReady(): boolean {
-        return this._isInitialized && 
-               this._connectionState === ConnectionState.CONNECTED &&
-               !this._isDisposed;
+    async switchMode(mode: ProviderMode): Promise<void> {
+        if (mode === this._mode) {
+            return; // Already in the target mode
+        }
+
+        this._logInfo(`Switching from ${this._mode} to ${mode} mode`);
+
+        try {
+            // Cleanup current mode
+            await this._cleanupCurrentMode();
+
+            // Initialize new mode
+            this._mode = mode;
+            if (mode === ProviderMode.COLLABORATIVE) {
+                await this._initializeCollaborativeMode();
+            } else if (mode === ProviderMode.READ_ONLY) {
+                await this._initializeReadOnlyMode();
+            } else {
+                // Single user or offline mode
+                this._setState(SyncState.SYNCHRONIZED);
+            }
+
+            this._logInfo(`Successfully switched to ${mode} mode`);
+
+        } catch (error) {
+            const switchError = new Error(`Failed to switch mode: ${error.message}`);
+            this._emitError(switchError);
+            throw switchError;
+        }
     }
 
     /**
-     * Dispose of the provider and clean up resources.
+     * Performs undo operation on the document.
+     * 
+     * @returns Whether undo operation was successful
+     */
+    undo(): boolean {
+        if (!this._config.historyConfig?.enableUndoRedo) {
+            return false;
+        }
+
+        try {
+            const success = this._undoManager.undo();
+            if (success) {
+                this._emitDocumentChanged('undo_performed', {});
+                this._logDebug('Undo operation performed');
+            }
+            return success;
+        } catch (error) {
+            this._logError('Failed to perform undo:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Performs redo operation on the document.
+     * 
+     * @returns Whether redo operation was successful
+     */
+    redo(): boolean {
+        if (!this._config.historyConfig?.enableUndoRedo) {
+            return false;
+        }
+
+        try {
+            const success = this._undoManager.redo();
+            if (success) {
+                this._emitDocumentChanged('redo_performed', {});
+                this._logDebug('Redo operation performed');
+            }
+            return success;
+        } catch (error) {
+            this._logError('Failed to perform redo:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Gets the current document state as a serialized object.
+     * 
+     * @returns Current notebook document
+     */
+    getDocument(): INotebookDocument {
+        return this._serializeDocument();
+    }
+
+    /**
+     * Gets all cells in the current document.
+     * 
+     * @returns Array of notebook cells
+     */
+    getCells(): INotebookCell[] {
+        const cells: INotebookCell[] = [];
+        
+        for (let i = 0; i < this._cellsArray.length; i++) {
+            const cellMap = this._cellsArray.get(i) as Y.Map<any>;
+            cells.push({
+                id: cellMap.get('id'),
+                cell_type: cellMap.get('cell_type'),
+                source: cellMap.get('source'),
+                metadata: cellMap.get('metadata') || {},
+                outputs: cellMap.get('outputs'),
+                execution_count: cellMap.get('execution_count')
+            });
+        }
+        
+        return cells;
+    }
+
+    /**
+     * Gets a specific cell by ID.
+     * 
+     * @param cellId - ID of the cell to retrieve
+     * @returns Cell data or null if not found
+     */
+    getCell(cellId: string): INotebookCell | null {
+        const index = this._findCellIndex(cellId);
+        if (index === -1) {
+            return null;
+        }
+
+        const cellMap = this._cellsArray.get(index) as Y.Map<any>;
+        return {
+            id: cellMap.get('id'),
+            cell_type: cellMap.get('cell_type'),
+            source: cellMap.get('source'),
+            metadata: cellMap.get('metadata') || {},
+            outputs: cellMap.get('outputs'),
+            execution_count: cellMap.get('execution_count')
+        };
+    }
+
+    /**
+     * Gets the current notebook metadata.
+     * 
+     * @returns Notebook metadata
+     */
+    getMetadata(): INotebookMetadata {
+        const metadata: INotebookMetadata = {};
+        
+        for (const [key, value] of this._metadataMap.entries()) {
+            metadata[key] = value;
+        }
+        
+        return metadata;
+    }
+
+    /**
+     * Disconnects from collaborative features while preserving document state.
+     */
+    disconnect(): void {
+        if (this._isDisposed) {
+            return;
+        }
+
+        this._logInfo('Disconnecting YjsNotebookProvider');
+
+        // Disconnect WebSocket provider
+        if (this._websocketProvider) {
+            this._websocketProvider.disconnect();
+        }
+
+        // Disconnect awareness
+        if (this._awareness) {
+            this._awareness.disconnect();
+        }
+
+        // Update state
+        this._isConnected = false;
+        this._setState(SyncState.DISCONNECTED);
+        this._connectionChanged.emit(false);
+
+        this._logInfo('YjsNotebookProvider disconnected');
+    }
+
+    /**
+     * Disposes the provider and cleans up all resources.
      */
     dispose(): void {
         if (this._isDisposed) {
             return;
         }
 
-        console.log(`[YjsProvider] Disposing provider for document ${this._documentId}`);
+        this._logInfo('Disposing YjsNotebookProvider');
 
-        // Clear timers
+        // Clear all timers
         if (this._reconnectTimer) {
             clearTimeout(this._reconnectTimer);
             this._reconnectTimer = null;
         }
-        if (this._syncTimer) {
-            clearInterval(this._syncTimer);
-            this._syncTimer = null;
+        if (this._syncThrottleTimer) {
+            clearTimeout(this._syncThrottleTimer);
+            this._syncThrottleTimer = null;
+        }
+        if (this._performanceTimer) {
+            clearInterval(this._performanceTimer);
+            this._performanceTimer = null;
         }
 
-        // Dispose collaboration services
+        // Disconnect from collaborative features
+        this.disconnect();
+
+        // Dispose collaboration modules
         if (this._awareness) {
-            this._awareness.disconnect();
+            this._awareness.dispose();
+            this._awareness = null;
         }
-        if (this._lockManager && !this._lockManager.disposed) {
+        if (this._lockManager) {
             this._lockManager.dispose();
+            this._lockManager = null;
         }
-        if (this._historyService && !this._historyService.isDisposed) {
+        if (this._historyService) {
             this._historyService.dispose();
+            this._historyService = null;
         }
 
-        // Disconnect WebSocket provider
+        // Dispose WebSocket provider
         if (this._websocketProvider) {
-            this._websocketProvider.disconnect();
             this._websocketProvider.destroy();
+            this._websocketProvider = null;
         }
 
-        // Clean up Yjs document
+        // Dispose Yjs document
         this._yjsDocument.destroy();
 
-        // Clear pending operations
-        this._pendingOperations.clear();
-
-        // Mark as disposed
+        // Update state
         this._isDisposed = true;
-        this._setConnectionState(ConnectionState.DISCONNECTED);
+        this._setState(SyncState.DISPOSED);
 
         // Emit disposal signal
         this._disposed.emit();
@@ -930,458 +1364,269 @@ export class YjsNotebookProvider implements ICollaborationProvider {
         // Clear all signals
         Signal.clearData(this);
 
-        console.log(`[YjsProvider] Provider disposed for document ${this._documentId}`);
+        this._logInfo('YjsNotebookProvider disposed');
     }
 
     // Private implementation methods
 
     /**
-     * Generate a unique client ID for this provider instance.
+     * Ensures the provider is properly initialized.
      */
-    private _generateClientId(): number {
-        const timestamp = Date.now();
-        const random = Math.floor(Math.random() * 1000);
-        return timestamp + random;
-    }
-
-    /**
-     * Initialize the Yjs document structure to match .ipynb format.
-     */
-    private _initializeDocumentStructure(): void {
-        // Set default notebook structure if not already present
-        if (!this._notebookMap.has('nbformat')) {
-            this._notebookMap.set('nbformat', 4);
+    private _ensureInitialized(): void {
+        if (this._isDisposed) {
+            throw new Error('YjsNotebookProvider has been disposed');
         }
-        if (!this._notebookMap.has('nbformat_minor')) {
-            this._notebookMap.set('nbformat_minor', 4);
-        }
-        if (this._metadataMap.size === 0) {
-            this._metadataMap.set('kernelspec', {
-                display_name: 'Python 3',
-                language: 'python',
-                name: 'python3'
-            });
+        if (!this._isInitialized) {
+            throw new Error('YjsNotebookProvider not initialized');
         }
     }
 
     /**
-     * Set up document change listeners for CRDT operations.
+     * Sets the current synchronization state and emits appropriate events.
+     */
+    private _setState(newState: SyncState): void {
+        const previousState = this._currentState;
+        this._currentState = newState;
+        this._metrics.currentState = newState;
+
+        if (previousState !== newState) {
+            const event: ISyncEvent = {
+                type: 'state_change',
+                state: newState,
+                previousState,
+                timestamp: Date.now()
+            };
+            this._stateChanged.emit(event);
+            this._logDebug(`State changed: ${previousState} -> ${newState}`);
+        }
+    }
+
+    /**
+     * Sets up event listeners for the Yjs document.
      */
     private _setupDocumentListeners(): void {
         // Listen for document updates
-        this._yjsDocument.on('update', this._onDocumentUpdate.bind(this));
+        this._yjsDocument.on('update', (update: Uint8Array, origin: any) => {
+            this._onDocumentUpdate(update, origin);
+        });
 
-        // Listen for subdocument changes
-        this._cellsArray.observe(this._onCellsArrayChange.bind(this));
-        this._metadataMap.observe(this._onMetadataChange.bind(this));
+        // Listen for subdocument events
+        this._yjsDocument.on('subdocs', (event: { added: Set<Y.Doc>; removed: Set<Y.Doc> }) => {
+            this._onSubdocsChanged(event);
+        });
 
-        // Listen for connection events
-        this._yjsDocument.on('destroy', () => {
-            console.log('[YjsProvider] Yjs document destroyed');
+        // Listen for array changes
+        this._cellsArray.observe((event: Y.YArrayEvent<Y.Map<any>>) => {
+            this._onCellsArrayChanged(event);
+        });
+
+        // Listen for metadata changes
+        this._metadataMap.observe((event: Y.YMapEvent<any>) => {
+            this._onMetadataChanged(event);
         });
     }
 
     /**
-     * Handle Yjs document updates.
+     * Initializes the document with provided content.
      */
-    private _onDocumentUpdate(update: Uint8Array, origin: any): void {
-        if (this._isDisposed || origin === this) {
-            return;
-        }
-
-        try {
-            // Log operation to history service
-            if (this._historyService && origin !== 'history-service') {
-                const operation: ICRDTOperation = {
-                    operationId: UUID.uuid4(),
-                    sequenceNumber: Date.now(),
-                    documentId: this._documentId,
-                    userId: origin?.userId || this._config.userInfo.userId,
-                    timestamp: new Date(),
-                    operationType: 'update',
-                    operationData: update,
-                    vectorClock: {
-                        clientId: this._yjsDocument.clientID,
-                        clock: Date.now()
-                    },
-                    attribution: {
-                        changeType: 'structure'
-                    }
-                };
-
-                this._historyService.logOperation(operation).catch(error => {
-                    console.warn('[YjsProvider] Failed to log operation to history:', error);
-                });
-            }
-
-            // Update awareness with user activity
-            if (this._awareness && origin?.userId) {
-                this._awareness.updateActivityStatus('active', 'editing');
-            }
-
-            // Emit content changed event
-            this._emitContentChanged('document_updated', {
-                origin: origin?.userId || 'unknown',
-                updateSize: update.length,
-                timestamp: Date.now()
-            });
-
-        } catch (error) {
-            console.error('[YjsProvider] Error handling document update:', error);
-        }
+    private async _initializeDocument(document: INotebookDocument): Promise<void> {
+        await this._loadDocumentContent(document);
+        this._logDebug('Document initialized with provided content');
     }
 
     /**
-     * Handle cells array changes.
+     * Initializes collaborative mode with WebSocket connection and collaboration services.
      */
-    private _onCellsArrayChange(event: Y.YArrayEvent<any>): void {
-        if (this._isDisposed) {
-            return;
-        }
-
+    private async _initializeCollaborativeMode(): Promise<void> {
         try {
-            event.changes.added.forEach(item => {
-                console.log('[YjsProvider] Cell added:', item.content);
-            });
-
-            event.changes.deleted.forEach(item => {
-                console.log('[YjsProvider] Cell deleted:', item.content);
-            });
-
-            // Emit specific cell change events
-            this._emitContentChanged('cells_changed', {
-                added: event.changes.added.size,
-                deleted: event.changes.deleted.size,
-                retained: event.changes.retain
-            });
-
-        } catch (error) {
-            console.error('[YjsProvider] Error handling cells array change:', error);
-        }
-    }
-
-    /**
-     * Handle metadata changes.
-     */
-    private _onMetadataChange(event: Y.YMapEvent<any>): void {
-        if (this._isDisposed) {
-            return;
-        }
-
-        try {
-            const changes = Array.from(event.changes.keys.entries());
-            console.log('[YjsProvider] Metadata changed:', changes);
-
-            this._emitContentChanged('metadata_changed', {
-                changedKeys: changes.map(([key, change]) => ({ key, action: change.action }))
-            });
-
-        } catch (error) {
-            console.error('[YjsProvider] Error handling metadata change:', error);
-        }
-    }
-
-    /**
-     * Initialize WebSocket provider for real-time communication.
-     */
-    private async _initializeWebSocketProvider(): Promise<void> {
-        try {
+            // Initialize WebSocket provider
             this._websocketProvider = new WebsocketProvider(
                 this._config.websocketUrl,
-                this._sessionId,
+                this._config.roomId,
                 this._yjsDocument,
                 {
                     connect: true,
-                    resyncInterval: 5000, // 5 seconds
-                    maxBackoffTime: 30000, // 30 seconds max
+                    ...this._config.websocketConfig
                 }
             );
 
-            // Set up connection event handlers
-            this._websocketProvider.on('status', this._onWebSocketStatus.bind(this));
-            this._websocketProvider.on('connection-close', this._onWebSocketClose.bind(this));
-            this._websocketProvider.on('connection-error', this._onWebSocketError.bind(this));
-            this._websocketProvider.on('sync', this._onWebSocketSync.bind(this));
+            // Set up WebSocket event listeners
+            this._setupWebSocketListeners();
 
-            // Wait for initial connection
-            await this._waitForConnection();
-
-            console.log('[YjsProvider] WebSocket provider initialized');
-
-        } catch (error) {
-            throw new Error(`Failed to initialize WebSocket provider: ${error.message}`);
-        }
-    }
-
-    /**
-     * Initialize awareness system for user presence.
-     */
-    private async _initializeAwareness(): Promise<void> {
-        try {
+            // Initialize awareness system
             this._awareness = createAwareness(
                 this._yjsDocument,
                 this._sessionId,
-                this._config.awareness
+                this._config.awarenessConfig
             );
 
-            // Initialize with WebSocket provider and user info
-            await this._awareness.initialize(
-                this._websocketProvider!,
+            await this._awareness.initialize(this._websocketProvider, this._config.userInfo);
+
+            // Initialize lock manager if enabled
+            if (this._config.lockConfig?.enableLocking) {
+                this._lockManager = new LockManager(
+                    this._sessionId,
+                    this._awareness,
+                    this._config.lockConfig
+                );
+                await this._lockManager.initialize();
+            }
+
+            // Initialize history service if enabled
+            if (this._config.historyConfig?.enableHistory) {
+                this._historyService = new HistoryService(
+                    this._yjsDocument,
+                    this._sessionId,
+                    this._config.historyConfig
+                );
+                await this._historyService.initialize();
+            }
+
+            this._logInfo('Collaborative mode initialized successfully');
+
+        } catch (error) {
+            throw new Error(`Failed to initialize collaborative mode: ${error.message}`);
+        }
+    }
+
+    /**
+     * Initializes read-only mode with limited collaborative features.
+     */
+    private async _initializeReadOnlyMode(): Promise<void> {
+        try {
+            // Initialize WebSocket provider for receiving updates
+            this._websocketProvider = new WebsocketProvider(
+                this._config.websocketUrl,
+                this._config.roomId,
+                this._yjsDocument,
                 {
-                    userId: this._config.userInfo.userId,
-                    displayName: this._config.userInfo.displayName,
-                    avatar: this._config.userInfo.avatar,
-                    role: this._config.userInfo.role || 'editor'
+                    connect: true,
+                    ...this._config.websocketConfig
                 }
             );
 
-            console.log('[YjsProvider] Awareness system initialized');
+            // Set up WebSocket event listeners
+            this._setupWebSocketListeners();
 
-        } catch (error) {
-            throw new Error(`Failed to initialize awareness system: ${error.message}`);
-        }
-    }
-
-    /**
-     * Initialize lock manager for conflict resolution.
-     */
-    private async _initializeLockManager(): Promise<void> {
-        try {
-            // Note: This would need actual storage and broadcaster implementations
-            console.log('[YjsProvider] Lock manager initialization skipped (requires Redis/WebSocket setup)');
-            
-        } catch (error) {
-            console.warn('[YjsProvider] Failed to initialize lock manager:', error);
-        }
-    }
-
-    /**
-     * Initialize history service for version tracking.
-     */
-    private async _initializeHistoryService(): Promise<void> {
-        try {
-            this._historyService = createHistoryService(
-                this._documentId,
-                this._config.history
+            // Initialize awareness in read-only mode
+            this._awareness = createAwareness(
+                this._yjsDocument,
+                this._sessionId,
+                {
+                    ...this._config.awarenessConfig,
+                    enablePresence: true,
+                    enableCursorSync: false,
+                    enableCellSelection: false
+                }
             );
 
-            // Note: This would need actual storage configuration
-            console.log('[YjsProvider] History service created (storage configuration needed)');
-
-        } catch (error) {
-            console.warn('[YjsProvider] Failed to initialize history service:', error);
-        }
-    }
-
-    /**
-     * Set up cross-tab communication for browser instances.
-     */
-    private _setupCrossTabCommunication(): void {
-        if (typeof window === 'undefined') {
-            return; // Not in browser environment
-        }
-
-        // Handle beforeunload to clean up
-        window.addEventListener('beforeunload', () => {
-            this.dispose();
-        });
-
-        // Handle focus/blur for activity tracking
-        window.addEventListener('focus', () => {
-            if (this._awareness) {
-                this._awareness.updateActivityStatus('active');
-            }
-        });
-
-        window.addEventListener('blur', () => {
-            if (this._awareness) {
-                this._awareness.updateActivityStatus('away');
-            }
-        });
-
-        console.log('[YjsProvider] Cross-tab communication setup complete');
-    }
-
-    /**
-     * Wait for WebSocket connection to be established.
-     */
-    private async _waitForConnection(): Promise<void> {
-        return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                reject(new Error('Connection timeout'));
-            }, this._config.connectionTimeout || 10000);
-
-            const checkConnection = () => {
-                if (this._websocketProvider?.wsconnected) {
-                    clearTimeout(timeout);
-                    resolve();
-                } else {
-                    setTimeout(checkConnection, 100);
-                }
-            };
-
-            checkConnection();
-        });
-    }
-
-    /**
-     * Handle WebSocket status changes.
-     */
-    private _onWebSocketStatus(event: { status: string }): void {
-        console.log('[YjsProvider] WebSocket status:', event.status);
-        
-        switch (event.status) {
-            case 'connected':
-                this._setConnectionState(ConnectionState.CONNECTED);
-                this._reconnectAttempts = 0;
-                break;
-            case 'connecting':
-                this._setConnectionState(ConnectionState.CONNECTING);
-                break;
-            case 'disconnected':
-                this._setConnectionState(ConnectionState.DISCONNECTED);
-                this._scheduleReconnect();
-                break;
-        }
-    }
-
-    /**
-     * Handle WebSocket connection close.
-     */
-    private _onWebSocketClose(): void {
-        console.log('[YjsProvider] WebSocket connection closed');
-        this._setConnectionState(ConnectionState.DISCONNECTED);
-        this._scheduleReconnect();
-    }
-
-    /**
-     * Handle WebSocket connection errors.
-     */
-    private _onWebSocketError(error: Error): void {
-        console.error('[YjsProvider] WebSocket error:', error);
-        this._setConnectionState(ConnectionState.ERROR);
-        this._emitError(error);
-        this._scheduleReconnect();
-    }
-
-    /**
-     * Handle WebSocket synchronization events.
-     */
-    private _onWebSocketSync(isSynced: boolean): void {
-        if (isSynced) {
-            this._lastSyncTime = Date.now();
-            this._emitSynchronized('websocket_sync', {
-                timestamp: this._lastSyncTime,
-                trigger: 'websocket'
+            await this._awareness.initialize(this._websocketProvider, {
+                ...this._config.userInfo,
+                role: 'viewer'
             });
+
+            this._logInfo('Read-only mode initialized successfully');
+
+        } catch (error) {
+            throw new Error(`Failed to initialize read-only mode: ${error.message}`);
         }
     }
 
     /**
-     * Schedule reconnection attempt with exponential backoff.
+     * Sets up WebSocket provider event listeners.
      */
-    private _scheduleReconnect(): void {
-        if (this._isDisposed || this._reconnectAttempts >= (this._config.maxReconnectAttempts || 10)) {
-            console.warn('[YjsProvider] Max reconnection attempts reached');
-            this._setConnectionState(ConnectionState.ERROR);
+    private _setupWebSocketListeners(): void {
+        if (!this._websocketProvider) {
             return;
         }
 
-        if (this._reconnectTimer) {
-            clearTimeout(this._reconnectTimer);
-        }
+        this._websocketProvider.on('status', (event: { status: string }) => {
+            this._onWebSocketStatus(event.status);
+        });
 
-        const delay = Math.min(
-            (this._config.reconnectDelay || 1000) * Math.pow(2, this._reconnectAttempts),
-            30000 // Max 30 seconds
-        );
+        this._websocketProvider.on('connection-close', () => {
+            this._onWebSocketDisconnect();
+        });
 
-        this._reconnectTimer = setTimeout(async () => {
-            this._reconnectAttempts++;
-            this._setConnectionState(ConnectionState.RECONNECTING);
+        this._websocketProvider.on('connection-error', (error: Error) => {
+            this._onWebSocketError(error);
+        });
 
-            try {
-                if (this._websocketProvider) {
-                    this._websocketProvider.connect();
-                }
-            } catch (error) {
-                console.error('[YjsProvider] Reconnection failed:', error);
-                this._scheduleReconnect();
-            }
-        }, delay);
-
-        console.log(`[YjsProvider] Scheduled reconnection attempt ${this._reconnectAttempts + 1} in ${delay}ms`);
-    }
-
-    /**
-     * Set connection state and emit change event.
-     */
-    private _setConnectionState(state: ConnectionState): void {
-        if (this._connectionState !== state) {
-            const previousState = this._connectionState;
-            this._connectionState = state;
-            
-            console.log(`[YjsProvider] Connection state changed: ${previousState} -> ${state}`);
-            this._connectionStateChanged.emit(state);
-        }
-    }
-
-    /**
-     * Serialize cell for CRDT storage.
-     */
-    private _serializeCell(cell: INotebookCell): JSONObject {
-        return {
-            id: cell.id,
-            cell_type: cell.cell_type,
-            source: Array.isArray(cell.source) ? cell.source : [cell.source],
-            metadata: cell.metadata || {},
-            outputs: cell.outputs || [],
-            execution_count: cell.execution_count || null
-        };
-    }
-
-    /**
-     * Deserialize cell from CRDT storage.
-     */
-    private _deserializeCell(cellData: any): INotebookCell {
-        return {
-            id: cellData.id,
-            cell_type: cellData.cell_type,
-            source: Array.isArray(cellData.source) ? cellData.source.join('') : cellData.source,
-            metadata: cellData.metadata || {},
-            outputs: cellData.outputs || [],
-            execution_count: cellData.execution_count
-        };
-    }
-
-    /**
-     * Update a Y.Map from a plain object.
-     */
-    private _updateMapFromObject(yMap: Y.Map<any>, obj: JSONObject): void {
-        Object.entries(obj).forEach(([key, value]) => {
-            yMap.set(key, value);
+        this._websocketProvider.on('sync', (synced: boolean) => {
+            this._onWebSocketSync(synced);
         });
     }
 
     /**
-     * Update the cells array from cell data.
+     * Loads document content into the CRDT structure.
      */
-    private _updateCellsArray(cells: INotebookCell[]): void {
-        // Clear existing cells
-        this._cellsArray.delete(0, this._cellsArray.length);
-        
-        // Insert new cells
-        const serializedCells = cells.map(cell => this._serializeCell(cell));
-        this._cellsArray.insert(0, serializedCells);
+    private async _loadDocumentContent(document: INotebookDocument): Promise<void> {
+        this._yjsDocument.transact(() => {
+            // Load metadata
+            this._metadataMap.clear();
+            Object.entries(document.metadata).forEach(([key, value]) => {
+                this._metadataMap.set(key, value);
+            });
+
+            // Load cells
+            this._cellsArray.delete(0, this._cellsArray.length);
+            document.cells.forEach(cell => {
+                const cellMap = new Y.Map();
+                cellMap.set('id', cell.id);
+                cellMap.set('cell_type', cell.cell_type);
+                cellMap.set('source', cell.source);
+                cellMap.set('metadata', cell.metadata);
+                if (cell.outputs) {
+                    cellMap.set('outputs', cell.outputs);
+                }
+                if (cell.execution_count !== undefined) {
+                    cellMap.set('execution_count', cell.execution_count);
+                }
+                this._cellsArray.push([cellMap]);
+            });
+        });
     }
 
     /**
-     * Find cell index by ID.
+     * Serializes the current CRDT state to notebook document format.
+     */
+    private _serializeDocument(): INotebookDocument {
+        const cells: INotebookCell[] = [];
+        const metadata: INotebookMetadata = {};
+
+        // Serialize cells
+        for (let i = 0; i < this._cellsArray.length; i++) {
+            const cellMap = this._cellsArray.get(i) as Y.Map<any>;
+            cells.push({
+                id: cellMap.get('id'),
+                cell_type: cellMap.get('cell_type'),
+                source: cellMap.get('source'),
+                metadata: cellMap.get('metadata') || {},
+                outputs: cellMap.get('outputs'),
+                execution_count: cellMap.get('execution_count')
+            });
+        }
+
+        // Serialize metadata
+        for (const [key, value] of this._metadataMap.entries()) {
+            metadata[key] = value;
+        }
+
+        return {
+            nbformat: 4,
+            nbformat_minor: 5,
+            metadata,
+            cells
+        };
+    }
+
+    /**
+     * Finds the index of a cell by its ID.
      */
     private _findCellIndex(cellId: string): number {
         for (let i = 0; i < this._cellsArray.length; i++) {
-            const cell = this._cellsArray.get(i);
-            if (cell && cell.id === cellId) {
+            const cellMap = this._cellsArray.get(i) as Y.Map<any>;
+            if (cellMap.get('id') === cellId) {
                 return i;
             }
         }
@@ -1389,247 +1634,394 @@ export class YjsNotebookProvider implements ICollaborationProvider {
     }
 
     /**
-     * Get user context for Yjs transactions.
+     * Cleans up current mode before switching.
      */
-    private _getUserContext(): any {
-        return {
-            userId: this._config.userInfo.userId,
-            displayName: this._config.userInfo.displayName,
+    private async _cleanupCurrentMode(): Promise<void> {
+        // Disconnect awareness
+        if (this._awareness) {
+            this._awareness.disconnect();
+        }
+
+        // Dispose lock manager
+        if (this._lockManager) {
+            this._lockManager.dispose();
+            this._lockManager = null;
+        }
+
+        // Disconnect WebSocket provider
+        if (this._websocketProvider) {
+            this._websocketProvider.disconnect();
+        }
+    }
+
+    /**
+     * Starts performance monitoring timer.
+     */
+    private _startPerformanceMonitoring(): void {
+        this._performanceTimer = setInterval(() => {
+            this._updatePerformanceMetrics();
+        }, 10000); // Update every 10 seconds
+    }
+
+    /**
+     * Updates performance metrics.
+     */
+    private _updatePerformanceMetrics(): void {
+        const now = Date.now();
+        
+        // Calculate average latency
+        const recentOperations = this._operationTimestamps.filter(
+            timestamp => now - timestamp < 60000 // Last minute
+        );
+        
+        if (recentOperations.length > 0) {
+            const latencies = recentOperations.map(timestamp => now - timestamp);
+            this._metrics.averageLatency = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+        }
+
+        // Update connection count
+        this._metrics.connectionCount = this._isConnected ? 1 : 0;
+
+        // Estimate memory usage
+        this._metrics.memoryUsage = this._estimateMemoryUsage();
+
+        // Clean up old timestamps
+        this._operationTimestamps = this._operationTimestamps.filter(
+            timestamp => now - timestamp < 300000 // Keep last 5 minutes
+        );
+
+        if (this._config.debugConfig?.enableProfiling) {
+            this._logDebug('Performance metrics updated:', this._metrics);
+        }
+    }
+
+    /**
+     * Estimates memory usage of the CRDT document.
+     */
+    private _estimateMemoryUsage(): number {
+        try {
+            const docState = Y.encodeStateAsUpdate(this._yjsDocument);
+            return docState.length;
+        } catch (error) {
+            return 0;
+        }
+    }
+
+    // Event handlers
+
+    /**
+     * Handles Yjs document update events.
+     */
+    private _onDocumentUpdate(update: Uint8Array, origin: any): void {
+        this._operationTimestamps.push(Date.now());
+        this._metrics.totalOperations++;
+        this._metrics.lastSyncTimestamp = Date.now();
+
+        if (origin !== this) {
+            this._emitDocumentChanged('document_updated', { updateSize: update.length });
+        }
+    }
+
+    /**
+     * Handles subdocument change events.
+     */
+    private _onSubdocsChanged(event: { added: Set<Y.Doc>; removed: Set<Y.Doc> }): void {
+        this._logDebug('Subdocuments changed:', event);
+    }
+
+    /**
+     * Handles cells array change events.
+     */
+    private _onCellsArrayChanged(event: Y.YArrayEvent<Y.Map<any>>): void {
+        this._emitDocumentChanged('cells_changed', { 
+            changes: event.changes.delta 
+        });
+    }
+
+    /**
+     * Handles metadata change events.
+     */
+    private _onMetadataChanged(event: Y.YMapEvent<any>): void {
+        this._emitDocumentChanged('metadata_changed', { 
+            changes: event.changes.keys 
+        });
+    }
+
+    /**
+     * Handles WebSocket status changes.
+     */
+    private _onWebSocketStatus(status: string): void {
+        switch (status) {
+            case 'connected':
+                this._isConnected = true;
+                this._reconnectAttempts = 0;
+                this._setState(SyncState.SYNCHRONIZED);
+                this._connectionChanged.emit(true);
+                break;
+            case 'connecting':
+                this._setState(SyncState.RECONNECTING);
+                break;
+            case 'disconnected':
+                this._isConnected = false;
+                this._setState(SyncState.DISCONNECTED);
+                this._connectionChanged.emit(false);
+                break;
+        }
+
+        this._logDebug(`WebSocket status: ${status}`);
+    }
+
+    /**
+     * Handles WebSocket disconnection.
+     */
+    private _onWebSocketDisconnect(): void {
+        this._isConnected = false;
+        this._setState(SyncState.DISCONNECTED);
+        this._connectionChanged.emit(false);
+
+        // Attempt reconnection if enabled
+        if (this._config.websocketConfig?.enableAutoReconnect && 
+            this._reconnectAttempts < (this._config.websocketConfig?.maxReconnectAttempts || 10)) {
+            
+            this._scheduleReconnection();
+        }
+
+        this._logInfo('WebSocket disconnected');
+    }
+
+    /**
+     * Handles WebSocket errors.
+     */
+    private _onWebSocketError(error: Error): void {
+        this._logError('WebSocket error:', error);
+        this._emitError(error);
+    }
+
+    /**
+     * Handles WebSocket synchronization events.
+     */
+    private _onWebSocketSync(synced: boolean): void {
+        if (synced) {
+            this._setState(SyncState.SYNCHRONIZED);
+            this._emitSyncCompleted();
+        } else {
+            this._setState(SyncState.SYNCING);
+        }
+
+        this._logDebug(`WebSocket sync: ${synced}`);
+    }
+
+    /**
+     * Schedules reconnection attempt with exponential backoff.
+     */
+    private _scheduleReconnection(): void {
+        this._reconnectAttempts++;
+        const delay = Math.min(
+            this._config.websocketConfig?.reconnectDelay || 1000 * Math.pow(2, this._reconnectAttempts - 1),
+            30000 // Max 30 seconds
+        );
+
+        this._reconnectTimer = setTimeout(() => {
+            if (!this._isDisposed && this._websocketProvider) {
+                this._logInfo(`Attempting reconnection (${this._reconnectAttempts}/${this._config.websocketConfig?.maxReconnectAttempts})`);
+                this._websocketProvider.connect();
+            }
+        }, delay);
+    }
+
+    // Event emission methods
+
+    /**
+     * Emits a document change event.
+     */
+    private _emitDocumentChanged(type: string, data: JSONValue): void {
+        const event: ISyncEvent = {
+            type: 'operation',
+            state: this._currentState,
+            operation: {
+                type: type as CellOperationType,
+                data
+            },
             timestamp: Date.now()
         };
+        this._documentChanged.emit(event);
     }
 
     /**
-     * Acquire lock for cell operations.
+     * Emits a sync completed event.
      */
-    private async _acquireCellOperationLock(cellId: string): Promise<void> {
-        if (!this._lockManager) {
-            return;
-        }
-
-        const request: ILockRequest = {
-            cellId,
-            userId: this._config.userInfo.userId,
-            userName: this._config.userInfo.displayName,
-            sessionId: this._sessionId,
-            priority: LockPriority.Normal,
-            timeoutMs: 30000 // 30 seconds
+    private _emitSyncCompleted(): void {
+        const event: ISyncEvent = {
+            type: 'sync_complete',
+            state: this._currentState,
+            timestamp: Date.now()
         };
-
-        await this._lockManager.acquireLock(request);
+        this._syncCompleted.emit(event);
     }
 
     /**
-     * Acquire lock for cell editing.
-     */
-    private async _acquireCellEditLock(cellId: string): Promise<void> {
-        if (!this._lockManager) {
-            return;
-        }
-
-        const request: ILockRequest = {
-            cellId,
-            userId: this._config.userInfo.userId,
-            userName: this._config.userInfo.displayName,
-            sessionId: this._sessionId,
-            priority: LockPriority.Normal,
-            timeoutMs: 120000 // 2 minutes for editing
-        };
-
-        await this._lockManager.acquireLock(request);
-    }
-
-    /**
-     * Release lock for cell operations.
-     */
-    private async _releaseCellOperationLock(cellId: string): Promise<void> {
-        if (!this._lockManager) {
-            return;
-        }
-
-        const lockId = `jupyter:collab:locks:${this._sessionId}:${cellId}:${this._config.userInfo.userId}`;
-        
-        await this._lockManager.releaseLock({
-            lockId,
-            userId: this._config.userInfo.userId,
-            sessionId: this._sessionId,
-            reason: 'operation_complete'
-        });
-    }
-
-    /**
-     * Release lock for cell editing.
-     */
-    private async _releaseCellEditLock(cellId: string): Promise<void> {
-        // Same implementation as operation lock for now
-        await this._releaseCellOperationLock(cellId);
-    }
-
-    /**
-     * Track synchronization latency for performance monitoring.
-     */
-    private _trackSyncLatency(latency: number): void {
-        if (this._config.enableDebugLogging) {
-            console.log(`[YjsProvider] Sync latency: ${latency.toFixed(2)}ms`);
-        }
-
-        // Track performance metrics
-        if (latency > 100) {
-            console.warn(`[YjsProvider] High sync latency detected: ${latency.toFixed(2)}ms`);
-        }
-    }
-
-    /**
-     * Emit content changed event.
-     */
-    private _emitContentChanged(type: string, data: JSONValue): void {
-        if (this._isDisposed) {
-            return;
-        }
-
-        const event: IProviderEvent = {
-            type,
-            data,
-            timestamp: Date.now(),
-            userId: this._config.userInfo.userId
-        };
-
-        this._contentChanged.emit(event);
-    }
-
-    /**
-     * Emit synchronized event.
-     */
-    private _emitSynchronized(type: string, data: JSONValue): void {
-        if (this._isDisposed) {
-            return;
-        }
-
-        const event: IProviderEvent = {
-            type,
-            data,
-            timestamp: Date.now(),
-            userId: this._config.userInfo.userId
-        };
-
-        this._synchronized.emit(event);
-    }
-
-    /**
-     * Emit error event.
+     * Emits an error event.
      */
     private _emitError(error: Error): void {
-        if (this._isDisposed) {
-            return;
-        }
+        this._syncError.emit(error);
+    }
 
-        console.error('[YjsProvider] Error:', error);
-        this._errorOccurred.emit(error);
+    // Logging methods
+
+    /**
+     * Logs debug message if debug logging is enabled.
+     */
+    private _logDebug(message: string, ...args: any[]): void {
+        if (this._config.debugConfig?.enableDebugLogging && 
+            ['debug'].includes(this._config.debugConfig?.logLevel || 'info')) {
+            console.debug(`[YjsNotebookProvider:${this._sessionId}] ${message}`, ...args);
+        }
     }
 
     /**
-     * Enable debug logging for troubleshooting.
+     * Logs info message.
      */
-    private _enableDebugLogging(): void {
-        console.log('[YjsProvider] Debug logging enabled');
-        
-        // Log Yjs document events
-        this._yjsDocument.on('update', (update: Uint8Array, origin: any) => {
-            console.log('[YjsProvider] Document update:', {
-                size: update.length,
-                origin: origin?.userId || 'unknown',
-                timestamp: Date.now()
-            });
-        });
+    private _logInfo(message: string, ...args: any[]): void {
+        if (['info', 'debug'].includes(this._config.debugConfig?.logLevel || 'info')) {
+            console.log(`[YjsNotebookProvider:${this._sessionId}] ${message}`, ...args);
+        }
     }
 
     /**
-     * Ensure provider is initialized before operations.
+     * Logs warning message.
      */
-    private _ensureInitialized(): void {
-        if (!this._isInitialized) {
-            throw new Error('Provider not initialized. Call initialize() first.');
+    private _logWarn(message: string, ...args: any[]): void {
+        if (['warn', 'info', 'debug'].includes(this._config.debugConfig?.logLevel || 'info')) {
+            console.warn(`[YjsNotebookProvider:${this._sessionId}] ${message}`, ...args);
         }
-        if (this._isDisposed) {
-            throw new Error('Provider has been disposed');
-        }
+    }
+
+    /**
+     * Logs error message.
+     */
+    private _logError(message: string, ...args: any[]): void {
+        console.error(`[YjsNotebookProvider:${this._sessionId}] ${message}`, ...args);
     }
 }
 
 /**
- * Factory function to create a YjsNotebookProvider with sensible defaults.
+ * Factory function to create a YjsNotebookProvider instance with sensible defaults.
  * 
  * @param config - Provider configuration
+ * @param sessionId - Optional session identifier
  * @returns New YjsNotebookProvider instance
  */
-export function createCollaborationProvider(config: ICollaborationProviderConfig): ICollaborationProvider {
-    return new YjsNotebookProvider(config);
+export function createNotebookProvider(
+    config: IYjsNotebookConfig,
+    sessionId?: string
+): YjsNotebookProvider {
+    return new YjsNotebookProvider(config, sessionId);
 }
 
 /**
- * Utility functions for provider management.
+ * Utility functions for notebook provider management.
  */
-export namespace ProviderUtils {
+export namespace NotebookProviderUtils {
     /**
-     * Validate provider configuration.
+     * Validates notebook document structure.
      */
-    export function validateConfig(config: Partial<ICollaborationProviderConfig>): string[] {
-        const errors: string[] = [];
-
-        if (!config.documentId) {
-            errors.push('documentId is required');
-        }
-        if (!config.sessionId) {
-            errors.push('sessionId is required');
-        }
-        if (!config.websocketUrl) {
-            errors.push('websocketUrl is required');
-        }
-        if (!config.userInfo?.userId) {
-            errors.push('userInfo.userId is required');
-        }
-        if (!config.userInfo?.displayName) {
-            errors.push('userInfo.displayName is required');
-        }
-
-        return errors;
+    export function validateDocument(document: INotebookDocument): boolean {
+        return document &&
+               typeof document.nbformat === 'number' &&
+               typeof document.nbformat_minor === 'number' &&
+               typeof document.metadata === 'object' &&
+               Array.isArray(document.cells);
     }
 
     /**
-     * Generate a unique session ID.
+     * Creates a minimal valid notebook document.
      */
-    export function generateSessionId(documentId: string): string {
-        const timestamp = Date.now();
-        const random = Math.random().toString(36).substring(2);
-        return `${documentId}_${timestamp}_${random}`;
+    export function createEmptyDocument(): INotebookDocument {
+        return {
+            nbformat: 4,
+            nbformat_minor: 5,
+            metadata: {},
+            cells: []
+        };
     }
 
     /**
-     * Create WebSocket URL from base URL and document path.
+     * Generates a unique cell ID.
      */
-    export function createWebSocketUrl(baseUrl: string, documentPath: string): string {
-        const wsUrl = baseUrl.replace(/^http/, 'ws');
-        return `${wsUrl}/collaboration/${encodeURIComponent(documentPath)}`;
+    export function generateCellId(): string {
+        return `cell_${Date.now()}_${Math.random().toString(36).substring(2)}`;
     }
 
     /**
-     * Format synchronization latency for display.
+     * Creates a new code cell.
      */
-    export function formatLatency(latencyMs: number): string {
-        if (latencyMs < 1) {
-            return '<1ms';
-        } else if (latencyMs < 100) {
-            return `${latencyMs.toFixed(1)}ms`;
-        } else {
-            return `${Math.round(latencyMs)}ms`;
-        }
+    export function createCodeCell(source: string = '', metadata: JSONObject = {}): INotebookCell {
+        return {
+            id: generateCellId(),
+            cell_type: 'code',
+            source,
+            metadata,
+            outputs: [],
+            execution_count: null
+        };
     }
 
     /**
-     * Check if latency meets performance requirements.
+     * Creates a new markdown cell.
      */
-    export function isLatencyAcceptable(latencyMs: number, targetMs: number = 100): boolean {
-        return latencyMs <= targetMs;
+    export function createMarkdownCell(source: string = '', metadata: JSONObject = {}): INotebookCell {
+        return {
+            id: generateCellId(),
+            cell_type: 'markdown',
+            source,
+            metadata
+        };
+    }
+
+    /**
+     * Estimates document size in bytes.
+     */
+    export function estimateDocumentSize(document: INotebookDocument): number {
+        return JSON.stringify(document).length * 2; // UTF-16 encoding
+    }
+
+    /**
+     * Compares two notebook documents for differences.
+     */
+    export function compareDocuments(doc1: INotebookDocument, doc2: INotebookDocument): {
+        cellsAdded: number;
+        cellsRemoved: number;
+        cellsModified: number;
+        metadataChanged: boolean;
+    } {
+        const result = {
+            cellsAdded: 0,
+            cellsRemoved: 0,
+            cellsModified: 0,
+            metadataChanged: false
+        };
+
+        // Compare metadata
+        result.metadataChanged = JSON.stringify(doc1.metadata) !== JSON.stringify(doc2.metadata);
+
+        // Compare cells
+        const doc1CellIds = new Set(doc1.cells.map(cell => cell.id));
+        const doc2CellIds = new Set(doc2.cells.map(cell => cell.id));
+
+        // Count added cells
+        result.cellsAdded = doc2.cells.filter(cell => !doc1CellIds.has(cell.id)).length;
+
+        // Count removed cells
+        result.cellsRemoved = doc1.cells.filter(cell => !doc2CellIds.has(cell.id)).length;
+
+        // Count modified cells
+        const commonCells = doc1.cells.filter(cell => doc2CellIds.has(cell.id));
+        result.cellsModified = commonCells.filter(cell1 => {
+            const cell2 = doc2.cells.find(c => c.id === cell1.id);
+            return cell2 && JSON.stringify(cell1) !== JSON.stringify(cell2);
+        }).length;
+
+        return result;
     }
 }
 
@@ -1637,8 +2029,10 @@ export namespace ProviderUtils {
  * Export all types and interfaces for external use.
  */
 export type {
+    IYjsNotebookConfig,
     INotebookCell,
-    INotebookContent,
-    ICollaborationProviderConfig,
-    IProviderEvent
+    INotebookMetadata,
+    INotebookDocument,
+    ISyncEvent,
+    ISyncMetrics
 };
