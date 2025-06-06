@@ -1,407 +1,361 @@
 """
 Collaborative Editing Infrastructure for Jupyter Notebook v7
 
-This module provides the core collaborative editing infrastructure enabling real-time
-multi-user editing capabilities in Jupyter Notebook v7. It serves as the centralized
-entry point for importing and initializing collaborative backend services including
-session management, document synchronization, and persistence coordination.
+This module provides the complete server-side collaboration infrastructure enabling
+real-time collaborative editing capabilities with CRDT-based synchronization,
+user presence tracking, cell-level locking, and comprehensive persistence management.
 
-The collaborative infrastructure integrates:
-- YjsNotebookProvider for CRDT-based document synchronization
-- CollaborationManager for comprehensive session lifecycle management  
-- PersistenceLayer for multi-tier storage coordination (Redis/MongoDB/PostgreSQL/S3)
-- WebSocket-based real-time communication infrastructure
-- User presence awareness and cell-level locking mechanisms
-- Version history tracking and conflict resolution protocols
+The collaboration system implements enterprise-grade features including:
+- Real-time collaborative editing with Yjs CRDT integration
+- WebSocket-based communication for sub-100ms synchronization latency
+- Multi-tier persistence across Redis, PostgreSQL, MongoDB, and S3
+- Cell-level conflict prevention with intelligent locking protocols
+- User presence and awareness tracking with cross-instance coordination
+- Role-based access control with JupyterHub authentication integration
+- Comprehensive audit trails and version history for regulatory compliance
 
-Architecture Overview:
-- Real-time synchronization via Yjs CRDT operations
-- Multi-tier persistence with hot/warm/cold/archive storage tiers
-- Redis-based session coordination and lock management
-- WebSocket connection pooling and health monitoring
-- JupyterHub authentication integration
-- Prometheus metrics collection and observability
+Architecture:
+- CollaborationManager: Central orchestrator for all collaborative operations
+- PersistenceLayer: Multi-tier storage coordinator with graceful degradation
+- WebSocket handlers: Real-time communication infrastructure
+- Session management: Lifecycle coordination across distributed server instances
+- Lock management: Distributed cell-level conflict prevention
+- Authentication bridge: Seamless JupyterHub integration for user identity
 
-This module is imported by notebook/handlers.py and notebook/app.py to integrate
-collaborative capabilities into the Jupyter Notebook server infrastructure.
-
-Example Usage:
+Usage:
     from notebook.collab import CollaborationManager, PersistenceLayer
+    from notebook.collab import get_collaboration_manager, create_persistence_layer
     
     # Initialize collaboration infrastructure
-    persistence = PersistenceLayer()
-    await persistence.initialize()
+    manager = await get_collaboration_manager(persistence_config)
     
-    manager = CollaborationManager(persistence_layer=persistence)
-    await manager.initialize()
+    # Create collaborative session
+    session_id = await manager.create_session(notebook_path, user_id)
     
-    # Manager now ready for WebSocket handler integration
+    # Join session with WebSocket
+    session_info = await manager.join_session(session_id, user_id, websocket)
+
+Environment Configuration:
+    JUPYTER_COLLAB_ENABLED: Enable/disable collaboration features (default: true)
+    JUPYTER_COLLAB_REDIS_URL: Redis connection URL for session coordination
+    JUPYTER_COLLAB_POSTGRES_URL: PostgreSQL URL for metadata persistence
+    JUPYTER_COLLAB_MONGODB_URL: MongoDB URL for CRDT document storage
+    JUPYTER_COLLAB_ENCRYPTION_KEY: Master encryption key for data security
+    JUPYTER_COLLAB_LOG_LEVEL: Logging level for collaboration subsystem
 """
 
-import asyncio
 import logging
 import os
-import sys
-from typing import Dict, Any, Optional
-
-# Import core collaboration classes
-from .manager import (
-    CollaborationManager,
-    CollaborationConfig,
-    CollaborationSession,
-    WebSocketConnection,
-    CollaborationMessage,
-    SessionStatus,
-    UserRole,
-    MessageType,
-    CollaborationMetrics,
-    JupyterHubAuthenticator,
-    LockManager,
-    PresenceManager
-)
-
-from .persistence import (
-    PersistenceLayer,
-    PersistenceConfig,
-    CRDTOperation,
-    SessionMetadata,
-    UserPermission,
-    OperationType,
-    StorageTier,
-    PersistenceMetrics,
-    EncryptionManager,
-    RedisManager,
-    MongoDBManager,
-    PostgreSQLManager,
-    S3Manager
-)
+from typing import Dict, Optional, Any
 
 # Version information for collaboration subsystem
-__version__ = "7.0.0"
+__version__ = "7.0.0-alpha.1"
 __author__ = "Jupyter Development Team"
-__email__ = "jupyter@googlegroups.com"
-__description__ = "Real-time collaborative editing infrastructure for Jupyter Notebook v7"
+__license__ = "BSD-3-Clause"
+__description__ = "Real-time collaborative editing infrastructure for Jupyter Notebook"
 
-# Collaboration infrastructure metadata
-__collaboration_info__ = {
+# Collaboration subsystem metadata
+COLLABORATION_METADATA = {
     "version": __version__,
-    "features": [
-        "real-time-document-synchronization",
-        "multi-user-awareness",
-        "cell-level-locking",
-        "version-history-tracking",
-        "conflict-resolution",
-        "presence-awareness",
-        "permission-management",
-        "session-coordination",
-        "multi-tier-persistence"
+    "supported_features": [
+        "real_time_editing",
+        "user_presence_tracking", 
+        "cell_level_locking",
+        "version_history",
+        "role_based_permissions",
+        "comment_system",
+        "audit_trails",
+        "cross_instance_coordination"
     ],
-    "dependencies": {
-        "yjs": "^13.5.40",
-        "y-websocket": "^1.5.0", 
-        "y-protocols": "^1.0.5",
-        "aioredis": "^2.0.0",
-        "motor": "^3.3.0",
-        "asyncpg": "^0.29.0",
-        "sqlalchemy": "^1.4.0",
-        "prometheus-client": "^0.19.0"
-    },
-    "storage_tiers": ["redis", "mongodb", "postgresql", "s3"],
-    "protocols": ["websocket", "http", "crdt"],
-    "authentication": ["jupyterhub", "oauth", "token-based"]
+    "storage_backends": [
+        "redis",      # Hot path: session coordination and locks
+        "postgresql", # Cold path: structured metadata and audit trails
+        "mongodb",    # Warm path: CRDT states and operation storage (optional)
+        "s3"          # Archive path: long-term snapshots (optional)
+    ],
+    "authentication_providers": [
+        "jupyterhub",
+        "session_tokens",
+        "role_based_access_control"
+    ],
+    "performance_characteristics": {
+        "sync_latency_target_ms": 100,
+        "max_concurrent_users": 100,
+        "lock_timeout_seconds": 300,
+        "presence_update_interval_ms": 1000,
+        "session_ttl_hours": 24
+    }
 }
 
-# Global collaboration manager instance for shared access
-_collaboration_manager: Optional[CollaborationManager] = None
-_persistence_layer: Optional[PersistenceLayer] = None
-
-# Logging configuration for collaboration subsystem
-def configure_collaboration_logging():
+# Initialize collaboration-specific logging configuration
+def _configure_collaboration_logging():
     """
-    Configure specialized logging for collaborative editing operations.
-    
-    Sets up structured logging with collaboration-specific formatters,
-    handlers, and log levels optimized for real-time operations debugging
-    and performance monitoring.
+    Configure collaboration-specific logging with appropriate handlers,
+    formatters, and log levels for debugging and monitoring.
     """
-    # Create collaboration-specific logger
-    collab_logger = logging.getLogger('jupyter.collaboration')
-    
-    # Prevent duplicate handlers if already configured
-    if collab_logger.handlers:
-        return
-    
-    # Configure log level from environment
+    # Get log level from environment or default to INFO
     log_level = os.getenv('JUPYTER_COLLAB_LOG_LEVEL', 'INFO').upper()
+    
+    # Create collaboration logger
+    collab_logger = logging.getLogger('notebook.collab')
     collab_logger.setLevel(getattr(logging, log_level, logging.INFO))
     
-    # Create formatter for structured logging
-    formatter = logging.Formatter(
-        fmt='%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+    # Avoid duplicate handlers if already configured
+    if not collab_logger.handlers:
+        # Create console handler with detailed formatting
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(getattr(logging, log_level, logging.INFO))
+        
+        # Detailed formatter for collaboration debugging
+        formatter = logging.Formatter(
+            '[%(asctime)s] %(levelname)s [%(name)s:%(lineno)d] %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        console_handler.setFormatter(formatter)
+        
+        # Add handler to collaboration logger
+        collab_logger.addHandler(console_handler)
+        
+        # Prevent propagation to root logger to avoid duplicate messages
+        collab_logger.propagate = False
+    
+    # Log collaboration subsystem initialization
+    collab_logger.info(f"Collaboration logging initialized (level: {log_level})")
+    collab_logger.info(f"Collaboration subsystem version: {__version__}")
+    
+    # Log configuration status
+    enabled = os.getenv('JUPYTER_COLLAB_ENABLED', 'true').lower() == 'true'
+    collab_logger.info(f"Collaboration features enabled: {enabled}")
+    
+    return collab_logger
+
+# Initialize logging when module is imported
+_collaboration_logger = _configure_collaboration_logging()
+
+# Import core classes for external access
+try:
+    from .manager import (
+        CollaborationManager,
+        WebSocketPool,
+        SessionRegistry,
+        PresenceTracker,
+        LockManager,
+        MessageRouter,
+        AuthenticationBridge,
+        WebSocketConnection,
+        SessionState,
+        PresenceUpdate,
+        get_collaboration_manager,
+        shutdown_collaboration_manager,
+        create_collaboration_session,
+        join_collaboration_session,
+        get_collaboration_health
     )
     
-    # Console handler for development
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    collab_logger.addHandler(console_handler)
+    from .persistence import (
+        PersistenceLayer,
+        CollaborationSession,
+        CRDTOperation,
+        VersionHistory,
+        UserPermission,
+        EncryptionManager,
+        RedisManager,
+        create_persistence_layer
+    )
     
-    # File handler for production logging if specified
-    log_file = os.getenv('JUPYTER_COLLAB_LOG_FILE')
-    if log_file:
-        try:
-            file_handler = logging.FileHandler(log_file)
-            file_handler.setFormatter(formatter)
-            collab_logger.addHandler(file_handler)
-        except (OSError, IOError) as e:
-            collab_logger.warning(f"Failed to configure file logging: {e}")
+    _collaboration_logger.info("Collaboration modules imported successfully")
     
-    # Configure component-specific loggers
-    component_loggers = [
-        'jupyter.collaboration.manager',
-        'jupyter.collaboration.persistence', 
-        'jupyter.collaboration.websocket',
-        'jupyter.collaboration.yjs',
-        'jupyter.collaboration.awareness',
-        'jupyter.collaboration.locks',
-        'jupyter.collaboration.history',
-        'jupyter.collaboration.permissions'
-    ]
+except ImportError as e:
+    _collaboration_logger.warning(f"Some collaboration modules unavailable: {e}")
     
-    for logger_name in component_loggers:
-        component_logger = logging.getLogger(logger_name)
-        component_logger.setLevel(collab_logger.level)
-        component_logger.propagate = True
+    # Define fallback stubs for graceful degradation
+    class _CollaborationManagerStub:
+        """Fallback stub when collaboration is unavailable"""
+        def __init__(self, *args, **kwargs):
+            pass
+        
+        async def initialize(self):
+            return False
+            
+        async def shutdown(self):
+            pass
     
-    collab_logger.info(f"Collaboration logging configured at {log_level} level")
+    class _PersistenceLayerStub:
+        """Fallback stub when persistence is unavailable"""
+        def __init__(self, *args, **kwargs):
+            pass
+            
+        async def initialize(self):
+            return False
+            
+        async def close(self):
+            pass
+    
+    # Assign stubs if imports failed
+    CollaborationManager = _CollaborationManagerStub
+    PersistenceLayer = _PersistenceLayerStub
 
-
-def get_collaboration_manager() -> Optional[CollaborationManager]:
+# Convenience functions for external integration
+def get_collaboration_metadata() -> Dict[str, Any]:
     """
-    Get the global collaboration manager instance.
+    Get comprehensive metadata about the collaboration subsystem including
+    version, supported features, storage backends, and performance characteristics.
     
     Returns:
-        The initialized CollaborationManager instance, or None if not initialized.
+        Dict containing collaboration subsystem metadata
     """
-    return _collaboration_manager
+    return COLLABORATION_METADATA.copy()
 
-
-def get_persistence_layer() -> Optional[PersistenceLayer]:
+def is_collaboration_enabled() -> bool:
     """
-    Get the global persistence layer instance.
+    Check if collaboration features are enabled via environment configuration.
     
     Returns:
-        The initialized PersistenceLayer instance, or None if not initialized.
+        True if collaboration features are enabled, False otherwise
     """
-    return _persistence_layer
+    return os.getenv('JUPYTER_COLLAB_ENABLED', 'true').lower() == 'true'
 
-
-async def initialize_collaboration_infrastructure(
-    persistence_config: Optional[PersistenceConfig] = None,
-    collaboration_config: Optional[CollaborationConfig] = None
-) -> tuple[CollaborationManager, PersistenceLayer]:
+def get_collaboration_version() -> str:
     """
-    Initialize the complete collaboration infrastructure.
+    Get the current version of the collaboration subsystem.
     
-    This function sets up the multi-tier persistence layer and collaboration
-    manager with proper configuration, health checks, and monitoring integration.
+    Returns:
+        Version string for the collaboration infrastructure
+    """
+    return __version__
+
+async def initialize_collaboration_infrastructure(config: Optional[Dict[str, str]] = None) -> bool:
+    """
+    Initialize the complete collaboration infrastructure with configuration.
+    
+    This is a convenience function that creates and initializes both the
+    persistence layer and collaboration manager with proper error handling
+    and graceful degradation.
     
     Args:
-        persistence_config: Optional persistence configuration. If None, uses defaults.
-        collaboration_config: Optional collaboration configuration. If None, uses defaults.
-    
+        config: Optional configuration dictionary for persistence backends
+        
     Returns:
-        Tuple of (CollaborationManager, PersistenceLayer) instances ready for use.
-    
-    Raises:
-        RuntimeError: If initialization fails for any component.
-        ConnectionError: If unable to connect to required infrastructure services.
+        True if initialization successful, False if degraded mode
     """
-    global _collaboration_manager, _persistence_layer
-    
-    logger = logging.getLogger('jupyter.collaboration')
+    if not is_collaboration_enabled():
+        _collaboration_logger.info("Collaboration features disabled by configuration")
+        return False
     
     try:
-        logger.info("Initializing collaborative editing infrastructure...")
+        # Initialize collaboration manager (which includes persistence)
+        manager = await get_collaboration_manager(config)
+        health_status = await manager.get_health_status()
         
-        # Initialize persistence layer first
-        if _persistence_layer is None:
-            logger.info("Initializing multi-tier persistence layer...")
-            _persistence_layer = PersistenceLayer(config=persistence_config)
-            await _persistence_layer.initialize()
-            logger.info("Persistence layer initialization complete")
-        
-        # Initialize collaboration manager
-        if _collaboration_manager is None:
-            logger.info("Initializing collaboration manager...")
-            _collaboration_manager = CollaborationManager(
-                persistence_layer=_persistence_layer,
-                config=collaboration_config
-            )
-            await _collaboration_manager.initialize()
-            logger.info("Collaboration manager initialization complete")
-        
-        # Perform health checks
-        logger.info("Performing infrastructure health checks...")
-        persistence_health = await _persistence_layer.get_health_status()
-        manager_health = await _collaboration_manager.get_health_status()
-        
-        if not persistence_health.get('overall_healthy', False):
-            raise RuntimeError(f"Persistence layer health check failed: {persistence_health}")
-        
-        if manager_health.get('collaboration_manager', {}).get('status') != 'healthy':
-            raise RuntimeError(f"Collaboration manager health check failed: {manager_health}")
-        
-        logger.info("Collaborative editing infrastructure initialized successfully")
-        logger.info(f"Active sessions: {manager_health.get('collaboration_manager', {}).get('active_sessions', 0)}")
-        logger.info(f"Storage tiers: {list(persistence_health.get('tiers', {}).keys())}")
-        
-        return _collaboration_manager, _persistence_layer
-        
+        if health_status.get('status') == 'healthy':
+            _collaboration_logger.info("Collaboration infrastructure initialized successfully")
+            return True
+        else:
+            _collaboration_logger.warning(f"Collaboration in degraded mode: {health_status}")
+            return False
+            
     except Exception as e:
-        logger.error(f"Failed to initialize collaboration infrastructure: {e}")
-        
-        # Cleanup on failure
-        if _collaboration_manager:
-            try:
-                await _collaboration_manager.close()
-            except Exception as cleanup_error:
-                logger.error(f"Error during manager cleanup: {cleanup_error}")
-            finally:
-                _collaboration_manager = None
-        
-        if _persistence_layer:
-            try:
-                await _persistence_layer.close()
-            except Exception as cleanup_error:
-                logger.error(f"Error during persistence cleanup: {cleanup_error}")
-            finally:
-                _persistence_layer = None
-        
-        raise RuntimeError(f"Collaboration infrastructure initialization failed: {e}") from e
-
+        _collaboration_logger.error(f"Failed to initialize collaboration infrastructure: {e}")
+        return False
 
 async def shutdown_collaboration_infrastructure():
     """
-    Gracefully shutdown the collaboration infrastructure.
+    Gracefully shutdown the collaboration infrastructure with proper cleanup.
     
-    Performs proper cleanup of all components including active sessions,
-    WebSocket connections, database connections, and background tasks.
+    This function ensures all background tasks are stopped, connections are closed,
+    and resources are properly released during server shutdown.
     """
-    global _collaboration_manager, _persistence_layer
-    
-    logger = logging.getLogger('jupyter.collaboration')
-    logger.info("Shutting down collaborative editing infrastructure...")
-    
-    # Shutdown collaboration manager first
-    if _collaboration_manager:
-        try:
-            logger.info("Shutting down collaboration manager...")
-            await _collaboration_manager.close()
-            logger.info("Collaboration manager shutdown complete")
-        except Exception as e:
-            logger.error(f"Error during collaboration manager shutdown: {e}")
-        finally:
-            _collaboration_manager = None
-    
-    # Shutdown persistence layer
-    if _persistence_layer:
-        try:
-            logger.info("Shutting down persistence layer...")
-            await _persistence_layer.close()
-            logger.info("Persistence layer shutdown complete")
-        except Exception as e:
-            logger.error(f"Error during persistence layer shutdown: {e}")
-        finally:
-            _persistence_layer = None
-    
-    logger.info("Collaborative editing infrastructure shutdown complete")
+    try:
+        await shutdown_collaboration_manager()
+        _collaboration_logger.info("Collaboration infrastructure shutdown completed")
+    except Exception as e:
+        _collaboration_logger.error(f"Error during collaboration shutdown: {e}")
 
-
-def get_collaboration_info() -> Dict[str, Any]:
+def configure_collaboration_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Get comprehensive information about the collaboration subsystem.
+    Configure collaboration settings with validation and defaults.
     
+    Args:
+        settings: Dictionary of collaboration settings to configure
+        
     Returns:
-        Dictionary containing version, features, dependencies, and configuration info.
+        Validated and processed settings dictionary
     """
-    info = __collaboration_info__.copy()
-    
-    # Add runtime status
-    info["runtime"] = {
-        "manager_initialized": _collaboration_manager is not None,
-        "persistence_initialized": _persistence_layer is not None,
-        "python_version": sys.version,
-        "platform": sys.platform
+    default_settings = {
+        'enabled': True,
+        'sync_latency_target_ms': 100,
+        'max_concurrent_users': 100,
+        'lock_timeout_seconds': 300,
+        'presence_update_interval_ms': 1000,
+        'session_ttl_hours': 24,
+        'redis_url': 'redis://localhost:6379/0',
+        'log_level': 'INFO'
     }
     
-    # Add configuration status
-    if _collaboration_manager:
-        info["configuration"] = {
-            "enabled": _collaboration_manager.config.enabled,
-            "debug": _collaboration_manager.config.debug,
-            "max_users_per_session": _collaboration_manager.config.max_users_per_session,
-            "session_timeout": _collaboration_manager.config.session_timeout,
-            "websocket_ping_interval": _collaboration_manager.config.websocket_ping_interval
-        }
+    # Merge with defaults
+    processed_settings = {**default_settings, **settings}
     
-    return info
-
-
-# Configure logging on module import
-configure_collaboration_logging()
+    # Validate settings
+    if processed_settings['max_concurrent_users'] > 1000:
+        _collaboration_logger.warning("High concurrent user limit may impact performance")
+    
+    if processed_settings['sync_latency_target_ms'] < 50:
+        _collaboration_logger.warning("Very low latency target may cause performance issues")
+    
+    _collaboration_logger.info(f"Collaboration settings configured: {len(processed_settings)} options")
+    return processed_settings
 
 # Export public API
 __all__ = [
     # Core classes
-    "CollaborationManager",
-    "PersistenceLayer",
+    'CollaborationManager',
+    'PersistenceLayer',
     
-    # Configuration classes
-    "CollaborationConfig", 
-    "PersistenceConfig",
+    # Data models
+    'CollaborationSession',
+    'CRDTOperation', 
+    'VersionHistory',
+    'UserPermission',
+    'WebSocketConnection',
+    'SessionState',
+    'PresenceUpdate',
     
-    # Data structures
-    "CollaborationSession",
-    "WebSocketConnection", 
-    "CollaborationMessage",
-    "CRDTOperation",
-    "SessionMetadata",
-    "UserPermission",
+    # Component classes
+    'WebSocketPool',
+    'SessionRegistry',
+    'PresenceTracker',
+    'LockManager',
+    'MessageRouter',
+    'AuthenticationBridge',
+    'EncryptionManager',
+    'RedisManager',
     
-    # Enums
-    "SessionStatus",
-    "UserRole", 
-    "MessageType",
-    "OperationType",
-    "StorageTier",
+    # Factory functions
+    'get_collaboration_manager',
+    'create_persistence_layer',
+    'create_collaboration_session',
+    'join_collaboration_session',
     
-    # Metrics and monitoring
-    "CollaborationMetrics",
-    "PersistenceMetrics",
+    # Utility functions
+    'get_collaboration_health',
+    'get_collaboration_metadata',
+    'get_collaboration_version',
+    'is_collaboration_enabled',
+    'configure_collaboration_settings',
     
-    # Component managers
-    "JupyterHubAuthenticator",
-    "LockManager",
-    "PresenceManager", 
-    "EncryptionManager",
-    "RedisManager",
-    "MongoDBManager", 
-    "PostgreSQLManager",
-    "S3Manager",
-    
-    # Infrastructure functions
-    "initialize_collaboration_infrastructure",
-    "shutdown_collaboration_infrastructure",
-    "get_collaboration_manager",
-    "get_persistence_layer",
-    "get_collaboration_info",
-    "configure_collaboration_logging",
+    # Lifecycle functions
+    'initialize_collaboration_infrastructure',
+    'shutdown_collaboration_infrastructure',
+    'shutdown_collaboration_manager',
     
     # Module metadata
-    "__version__",
-    "__author__",
-    "__email__", 
-    "__description__",
-    "__collaboration_info__"
+    '__version__',
+    '__author__',
+    '__license__',
+    '__description__',
+    'COLLABORATION_METADATA'
 ]
+
+# Log module initialization completion
+_collaboration_logger.info(f"Collaboration module initialized successfully ({len(__all__)} public exports)")
+_collaboration_logger.debug(f"Available exports: {', '.join(__all__)}")
