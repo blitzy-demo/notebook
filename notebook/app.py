@@ -282,6 +282,26 @@ class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[
         "Load custom CSS in template html files. Default is True",
     )
 
+    flags["collaboration"] = (
+        {"JupyterNotebookApp": {"collaboration_enabled": True}},
+        "Enable real-time collaborative editing capabilities.",
+    )
+
+    @default("collaboration_config")
+    def _default_collaboration_config(self) -> dict[str, t.Any]:
+        """Generate collaboration configuration from individual settings."""
+        return {
+            'enabled': self.collaboration_enabled,
+            'server_url': self.collaboration_server_url,
+            'redis_url': self.collaboration_redis_url,
+            'storage_backend': self.collaboration_storage_backend,
+            'max_users_per_session': self.collaboration_max_users_per_session,
+            'session_timeout': self.collaboration_session_timeout,
+            'hub_api_url': os.getenv('JUPYTERHUB_API_URL', ''),
+            'hub_api_token': os.getenv('JUPYTERHUB_API_TOKEN', ''),
+            'debug': os.getenv('JUPYTER_COLLAB_DEBUG', 'false').lower() == 'true'
+        }
+
     @default("static_dir")
     def _default_static_dir(self) -> str:
         return str(HERE / "static")
