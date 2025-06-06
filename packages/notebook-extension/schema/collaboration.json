@@ -1,0 +1,796 @@
+{
+  "title": "Collaborative Editing",
+  "description": "Real-time collaborative editing settings for multi-user notebook sessions with comprehensive CRDT synchronization, user presence awareness, and enterprise-grade access control.",
+  "jupyter.lab.menus": {
+    "main": [
+      {
+        "id": "jp-mainmenu-collaborate",
+        "label": "Collaborate",
+        "rank": 75,
+        "items": [
+          {
+            "command": "notebook:start-collaboration",
+            "rank": 10
+          },
+          {
+            "type": "separator",
+            "rank": 15
+          },
+          {
+            "command": "notebook:share-session",
+            "rank": 20
+          },
+          {
+            "command": "notebook:invite-collaborators",
+            "rank": 25
+          },
+          {
+            "type": "separator",
+            "rank": 30
+          },
+          {
+            "command": "notebook:lock-cell",
+            "rank": 35
+          },
+          {
+            "command": "notebook:unlock-cell",
+            "rank": 40
+          },
+          {
+            "type": "separator",
+            "rank": 45
+          },
+          {
+            "command": "notebook:add-comment",
+            "rank": 50
+          },
+          {
+            "command": "notebook:view-comments",
+            "rank": 55
+          },
+          {
+            "type": "separator",
+            "rank": 60
+          },
+          {
+            "command": "notebook:view-version-history",
+            "rank": 65
+          },
+          {
+            "command": "notebook:show-presence",
+            "rank": 70
+          },
+          {
+            "type": "separator",
+            "rank": 75
+          },
+          {
+            "command": "notebook:manage-collab-permissions",
+            "rank": 80
+          },
+          {
+            "command": "notebook:collaboration-settings",
+            "rank": 85
+          },
+          {
+            "type": "separator",
+            "rank": 90
+          },
+          {
+            "command": "notebook:leave-collaboration",
+            "rank": 95
+          }
+        ]
+      }
+    ],
+    "context": [
+      {
+        "command": "notebook:lock-cell",
+        "selector": ".jp-Notebook .jp-Cell",
+        "rank": 10
+      },
+      {
+        "command": "notebook:unlock-cell",
+        "selector": ".jp-Notebook .jp-Cell.jp-collab-locked",
+        "rank": 15
+      },
+      {
+        "command": "notebook:add-comment",
+        "selector": ".jp-Notebook .jp-Cell",
+        "rank": 20
+      },
+      {
+        "command": "notebook:share-session",
+        "selector": ".jp-Notebook",
+        "rank": 25
+      }
+    ]
+  },
+  "jupyter.lab.toolbars": {
+    "notebook": [
+      {
+        "name": "collaboration-status",
+        "command": "notebook:show-collaboration-status",
+        "rank": 15
+      },
+      {
+        "name": "share",
+        "command": "notebook:share-session",
+        "rank": 20
+      },
+      {
+        "name": "presence",
+        "command": "notebook:show-presence",
+        "rank": 25
+      }
+    ]
+  },
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Enable Collaborative Editing",
+      "description": "Activate real-time collaborative editing capabilities for shared notebook sessions with CRDT-based conflict-free synchronization",
+      "default": false
+    },
+    "serverUrl": {
+      "type": "string",
+      "title": "Collaboration Server URL",
+      "description": "WebSocket endpoint for Yjs collaboration server coordination (e.g., wss://collab.example.com/api/collab/ws)",
+      "default": "ws://localhost:1234/api/collab/ws",
+      "format": "uri",
+      "pattern": "^wss?://[\\w\\-.]+(?::\\d+)?(?:/[\\w\\-./]*)?$"
+    },
+    "storageBackend": {
+      "type": "string",
+      "title": "Document Storage Backend",
+      "description": "Backend storage system for collaborative document persistence, version history, and CRDT state management",
+      "enum": ["memory", "redis", "postgresql", "mongodb", "hybrid", "distributed"],
+      "enumLabels": [
+        "In-Memory (Development)",
+        "Redis Cache",
+        "PostgreSQL Database", 
+        "MongoDB Document Store",
+        "Hybrid Redis + PostgreSQL",
+        "Distributed Multi-Service"
+      ],
+      "default": "hybrid"
+    },
+    "synchronization": {
+      "type": "object",
+      "title": "Real-time Synchronization Configuration",
+      "description": "Parameters controlling CRDT synchronization performance and conflict resolution behavior",
+      "properties": {
+        "conflictResolutionStrategy": {
+          "type": "string",
+          "title": "Conflict Resolution Strategy",
+          "description": "Primary strategy for resolving concurrent editing conflicts in collaborative sessions",
+          "enum": ["last-writer-wins", "operational-transform", "crdt-merge", "manual-resolution"],
+          "enumLabels": [
+            "Last Writer Wins",
+            "Operational Transform",
+            "CRDT Automatic Merge",
+            "Manual Resolution"
+          ],
+          "default": "crdt-merge"
+        },
+        "syncLatencyTarget": {
+          "type": "number",
+          "title": "Target Synchronization Latency (ms)",
+          "description": "Target latency for real-time edit propagation across collaborative clients",
+          "default": 100,
+          "minimum": 10,
+          "maximum": 2000
+        },
+        "batchingEnabled": {
+          "type": "boolean",
+          "title": "Enable Operation Batching",
+          "description": "Batch multiple rapid edits to reduce network overhead while maintaining responsiveness",
+          "default": true
+        },
+        "batchingWindow": {
+          "type": "number",
+          "title": "Batching Window (ms)",
+          "description": "Time window for batching multiple operations before transmission",
+          "default": 50,
+          "minimum": 10,
+          "maximum": 500
+        },
+        "heartbeatInterval": {
+          "type": "number",
+          "title": "WebSocket Heartbeat Interval (ms)",
+          "description": "Interval for WebSocket ping/pong heartbeat to maintain connection health",
+          "default": 30000,
+          "minimum": 5000,
+          "maximum": 120000
+        }
+      },
+      "additionalProperties": false
+    },
+    "sessionManagement": {
+      "type": "object",
+      "title": "Collaborative Session Management",
+      "description": "Settings for managing multi-user collaborative editing sessions and participant coordination",
+      "properties": {
+        "maxUsersPerSession": {
+          "type": "integer",
+          "title": "Maximum Users Per Session",
+          "description": "Maximum number of concurrent users allowed in a single collaborative session",
+          "default": 10,
+          "minimum": 2,
+          "maximum": 100
+        },
+        "sessionTimeout": {
+          "type": "number",
+          "title": "Session Timeout (seconds)",
+          "description": "Automatic session termination timeout for inactive collaborative sessions",
+          "default": 3600,
+          "minimum": 300,
+          "maximum": 86400
+        },
+        "userInactivityTimeout": {
+          "type": "number",
+          "title": "User Inactivity Timeout (seconds)",
+          "description": "Timeout for removing inactive users from collaborative session participant list",
+          "default": 1800,
+          "minimum": 60,
+          "maximum": 7200
+        },
+        "autoSaveInterval": {
+          "type": "number",
+          "title": "Auto-save Interval (seconds)",
+          "description": "Frequency of automatic document snapshots during collaborative editing sessions",
+          "default": 60,
+          "minimum": 10,
+          "maximum": 600
+        },
+        "sessionRecoveryEnabled": {
+          "type": "boolean",
+          "title": "Enable Session Recovery",
+          "description": "Allow automatic recovery of collaborative sessions after network interruptions",
+          "default": true
+        },
+        "sessionRecoveryTimeout": {
+          "type": "number",
+          "title": "Session Recovery Timeout (seconds)",
+          "description": "Maximum time to attempt session recovery before creating new session",
+          "default": 300,
+          "minimum": 30,
+          "maximum": 1800
+        }
+      },
+      "additionalProperties": false
+    },
+    "awareness": {
+      "type": "object",
+      "title": "User Presence and Awareness Configuration",
+      "description": "Settings for real-time user presence tracking, cursor synchronization, and activity indicators",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable User Presence Tracking",
+          "description": "Track and display real-time user cursors, selections, and activity status",
+          "default": true
+        },
+        "cursorSyncEnabled": {
+          "type": "boolean",
+          "title": "Enable Cursor Synchronization",
+          "description": "Synchronize cursor positions and text selections across all participants",
+          "default": true
+        },
+        "presenceUpdateInterval": {
+          "type": "number",
+          "title": "Presence Update Interval (ms)",
+          "description": "Frequency of user presence information broadcasts",
+          "default": 500,
+          "minimum": 100,
+          "maximum": 5000
+        },
+        "showUserNames": {
+          "type": "boolean",
+          "title": "Show User Names",
+          "description": "Display user names alongside presence indicators and cursors",
+          "default": true
+        },
+        "showUserAvatars": {
+          "type": "boolean",
+          "title": "Show User Avatars",
+          "description": "Display user avatar images in presence indicators and collaboration bar",
+          "default": true
+        },
+        "userColors": {
+          "type": "array",
+          "title": "User Color Palette",
+          "description": "Color palette for user-specific cursor and selection highlighting",
+          "items": {
+            "type": "string",
+            "pattern": "^#[0-9A-Fa-f]{6}$"
+          },
+          "default": [
+            "#4285f4",
+            "#34a853", 
+            "#fbbc05",
+            "#ea4335",
+            "#9c27b0",
+            "#ff5722",
+            "#795548",
+            "#607d8b"
+          ],
+          "minItems": 4,
+          "maxItems": 16
+        },
+        "activityTracking": {
+          "type": "object",
+          "title": "Activity Tracking Settings",
+          "description": "Configuration for user activity monitoring and status indicators",
+          "properties": {
+            "trackTyping": {
+              "type": "boolean",
+              "title": "Track Typing Activity",
+              "description": "Show typing indicators when users are actively editing",
+              "default": true
+            },
+            "trackCellSelection": {
+              "type": "boolean",
+              "title": "Track Cell Selection",
+              "description": "Show which cells each user has selected or is focusing on",
+              "default": true
+            },
+            "trackScrollPosition": {
+              "type": "boolean",
+              "title": "Track Scroll Position",
+              "description": "Synchronize scroll positions across participants (optional)",
+              "default": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "locking": {
+      "type": "object", 
+      "title": "Cell-Level Locking Configuration",
+      "description": "Settings for managing cell-level editing locks to prevent conflicting modifications",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable Cell Locking",
+          "description": "Allow users to acquire exclusive editing locks on individual cells",
+          "default": true
+        },
+        "lockTimeout": {
+          "type": "number",
+          "title": "Lock Timeout (milliseconds)",
+          "description": "Maximum duration for cell-level editing locks before automatic release",
+          "default": 300000,
+          "minimum": 10000,
+          "maximum": 1800000
+        },
+        "autoLockOnEdit": {
+          "type": "boolean",
+          "title": "Auto-lock Cells During Edit",
+          "description": "Automatically acquire cell locks when users begin editing cell content",
+          "default": true
+        },
+        "showLockIndicators": {
+          "type": "boolean",
+          "title": "Show Lock Indicators",
+          "description": "Display visual indicators for locked cells including lock owner information",
+          "default": true
+        },
+        "lockConflictResolution": {
+          "type": "string",
+          "title": "Lock Conflict Resolution",
+          "description": "Strategy for handling lock conflicts when multiple users attempt to edit the same cell",
+          "enum": ["queue", "notify", "override", "block"],
+          "enumLabels": [
+            "Queue Requests",
+            "Notify and Block",
+            "Admin Override",
+            "Block Secondary Requests"
+          ],
+          "default": "notify"
+        }
+      },
+      "additionalProperties": false
+    },
+    "comments": {
+      "type": "object",
+      "title": "Collaborative Comments and Annotations",
+      "description": "Configuration for in-notebook comment system and collaborative review workflows",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable Collaborative Comments",
+          "description": "Allow users to create threaded comments and annotations within shared notebooks",
+          "default": true
+        },
+        "allowAnonymousComments": {
+          "type": "boolean",
+          "title": "Allow Anonymous Comments",
+          "description": "Permit comments from users without explicit authentication (viewer role)",
+          "default": false
+        },
+        "enableMentions": {
+          "type": "boolean",
+          "title": "Enable @Mentions",
+          "description": "Allow users to mention other participants using @username syntax",
+          "default": true
+        },
+        "enableCommentNotifications": {
+          "type": "boolean",
+          "title": "Enable Comment Notifications",
+          "description": "Send notifications when new comments are added or users are mentioned",
+          "default": true
+        },
+        "maxCommentLength": {
+          "type": "number",
+          "title": "Maximum Comment Length",
+          "description": "Maximum character limit for individual comment content",
+          "default": 2000,
+          "minimum": 100,
+          "maximum": 10000
+        },
+        "enableRichTextComments": {
+          "type": "boolean",
+          "title": "Enable Rich Text Comments",
+          "description": "Allow formatting, links, and embedded content in comments",
+          "default": true
+        },
+        "commentResolution": {
+          "type": "object",
+          "title": "Comment Resolution Settings",
+          "description": "Configuration for comment resolution workflow and tracking",
+          "properties": {
+            "enableResolution": {
+              "type": "boolean",
+              "title": "Enable Comment Resolution",
+              "description": "Allow comments to be marked as resolved",
+              "default": true
+            },
+            "autoHideResolved": {
+              "type": "boolean",
+              "title": "Auto-hide Resolved Comments",
+              "description": "Automatically hide resolved comments from normal view",
+              "default": false
+            },
+            "whoCanResolve": {
+              "type": "string",
+              "title": "Who Can Resolve Comments",
+              "description": "User roles allowed to mark comments as resolved",
+              "enum": ["author", "editor", "admin", "anyone"],
+              "enumLabels": [
+                "Comment Author Only",
+                "Editors and Above",
+                "Admins Only", 
+                "Anyone"
+              ],
+              "default": "editor"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "history": {
+      "type": "object",
+      "title": "Version History and Change Tracking",
+      "description": "Configuration for collaborative version history, change tracking, and rollback capabilities",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable Version History Tracking",
+          "description": "Maintain detailed version history with rollback capabilities for collaborative sessions",
+          "default": true
+        },
+        "snapshotInterval": {
+          "type": "number",
+          "title": "Snapshot Interval (minutes)",
+          "description": "Frequency of automatic version snapshots during collaborative editing",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 60
+        },
+        "maxHistoryVersions": {
+          "type": "number",
+          "title": "Maximum History Versions",
+          "description": "Maximum number of version history entries to retain per document",
+          "default": 100,
+          "minimum": 10,
+          "maximum": 1000
+        },
+        "trackCellChanges": {
+          "type": "boolean",
+          "title": "Track Individual Cell Changes",
+          "description": "Maintain granular change history at the individual cell level",
+          "default": true
+        },
+        "enableDiffVisualization": {
+          "type": "boolean",
+          "title": "Enable Diff Visualization",
+          "description": "Show visual diffs when browsing version history and changes",
+          "default": true
+        },
+        "enableSelectiveRollback": {
+          "type": "boolean",
+          "title": "Enable Selective Rollback",
+          "description": "Allow rolling back specific changes without affecting subsequent modifications",
+          "default": true
+        },
+        "historyRetentionDays": {
+          "type": "number",
+          "title": "History Retention (days)",
+          "description": "Number of days to retain version history before automatic cleanup",
+          "default": 30,
+          "minimum": 1,
+          "maximum": 365
+        }
+      },
+      "additionalProperties": false
+    },
+    "permissions": {
+      "type": "object",
+      "title": "Role-based Access Control and Permissions",
+      "description": "Configuration for user roles, permissions, and collaborative access control policies",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable Permission Management",
+          "description": "Activate role-based access control for collaborative sessions",
+          "default": true
+        },
+        "defaultRole": {
+          "type": "string",
+          "title": "Default User Role",
+          "description": "Default role assigned to new participants joining collaborative sessions",
+          "enum": ["viewer", "commenter", "editor", "collaborator"],
+          "enumLabels": [
+            "Viewer (Read-only)",
+            "Commenter (Read + Comment)",
+            "Editor (Read + Write + Comment)",
+            "Collaborator (Full Access)"
+          ],
+          "default": "editor"
+        },
+        "allowPublicViewing": {
+          "type": "boolean",
+          "title": "Allow Public Viewing",
+          "description": "Permit read-only access to collaborative sessions without authentication",
+          "default": false
+        },
+        "requireApprovalForEditors": {
+          "type": "boolean",
+          "title": "Require Approval for New Editors",
+          "description": "Require session owner approval before granting edit permissions to new users",
+          "default": false
+        },
+        "enableGuestAccess": {
+          "type": "boolean",
+          "title": "Enable Guest Access",
+          "description": "Allow temporary guest access with limited permissions",
+          "default": false
+        },
+        "sessionOwnerPermissions": {
+          "type": "object",
+          "title": "Session Owner Permissions",
+          "description": "Permissions that only session owners can exercise",
+          "properties": {
+            "canChangePermissions": {
+              "type": "boolean",
+              "title": "Can Change User Permissions",
+              "description": "Allow session owner to modify user roles and permissions",
+              "default": true
+            },
+            "canRemoveUsers": {
+              "type": "boolean",
+              "title": "Can Remove Users",
+              "description": "Allow session owner to remove users from collaborative session",
+              "default": true
+            },
+            "canTerminateSession": {
+              "type": "boolean",
+              "title": "Can Terminate Session",
+              "description": "Allow session owner to terminate collaborative session for all users",
+              "default": true
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "performance": {
+      "type": "object",
+      "title": "Performance and Resource Management",
+      "description": "Configuration for optimizing collaborative editing performance and resource usage",
+      "properties": {
+        "enablePerformanceMonitoring": {
+          "type": "boolean",
+          "title": "Enable Performance Monitoring",
+          "description": "Track and report performance metrics for collaborative editing operations",
+          "default": true
+        },
+        "maxConcurrentOperations": {
+          "type": "number",
+          "title": "Maximum Concurrent Operations",
+          "description": "Maximum number of simultaneous CRDT operations to process",
+          "default": 100,
+          "minimum": 10,
+          "maximum": 1000
+        },
+        "operationQueueSize": {
+          "type": "number",
+          "title": "Operation Queue Size",
+          "description": "Maximum size of operation queue for handling bursts of activity",
+          "default": 500,
+          "minimum": 50,
+          "maximum": 5000
+        },
+        "memoryUsageLimit": {
+          "type": "number",
+          "title": "Memory Usage Limit (MB)",
+          "description": "Maximum memory allocation for collaborative editing features",
+          "default": 256,
+          "minimum": 64,
+          "maximum": 2048
+        },
+        "enableGarbageCollection": {
+          "type": "boolean",
+          "title": "Enable Automatic Garbage Collection",
+          "description": "Automatically clean up unused collaborative state and history",
+          "default": true
+        },
+        "gcInterval": {
+          "type": "number",
+          "title": "Garbage Collection Interval (minutes)",
+          "description": "Frequency of automatic garbage collection for collaborative state",
+          "default": 15,
+          "minimum": 5,
+          "maximum": 120
+        }
+      },
+      "additionalProperties": false
+    },
+    "ui": {
+      "type": "object",
+      "title": "User Interface and Experience Configuration",
+      "description": "Settings for collaborative editing UI components, notifications, and user experience",
+      "properties": {
+        "showCollaborationBar": {
+          "type": "boolean",
+          "title": "Show Collaboration Status Bar",
+          "description": "Display the main collaboration control panel and status indicators",
+          "default": true
+        },
+        "collaborationBarPosition": {
+          "type": "string",
+          "title": "Collaboration Bar Position",
+          "description": "Position of the collaboration status bar within the interface",
+          "enum": ["top", "bottom", "floating"],
+          "enumLabels": [
+            "Top of Interface",
+            "Bottom of Interface",
+            "Floating Panel"
+          ],
+          "default": "top"
+        },
+        "showPresenceIndicators": {
+          "type": "boolean",
+          "title": "Show Presence Indicators",
+          "description": "Display real-time presence indicators and user cursors",
+          "default": true
+        },
+        "showActivityFeed": {
+          "type": "boolean",
+          "title": "Show Activity Feed",
+          "description": "Display live activity feed of collaborative actions and events",
+          "default": false
+        },
+        "enableNotifications": {
+          "type": "boolean",
+          "title": "Enable Notifications",
+          "description": "Show browser notifications for collaborative events and mentions",
+          "default": true
+        },
+        "notificationTypes": {
+          "type": "array",
+          "title": "Notification Types",
+          "description": "Types of collaborative events that trigger notifications",
+          "items": {
+            "type": "string",
+            "enum": [
+              "user-joined",
+              "user-left", 
+              "mention",
+              "comment-added",
+              "permission-changed",
+              "session-ended"
+            ]
+          },
+          "default": ["mention", "comment-added", "permission-changed"],
+          "uniqueItems": true
+        },
+        "themes": {
+          "type": "object",
+          "title": "Collaboration Theme Settings",
+          "description": "Visual theme configuration for collaborative editing elements",
+          "properties": {
+            "useSystemTheme": {
+              "type": "boolean",
+              "title": "Use System Theme",
+              "description": "Automatically adapt collaboration UI to system light/dark theme",
+              "default": true
+            },
+            "cursorOpacity": {
+              "type": "number",
+              "title": "Cursor Opacity",
+              "description": "Opacity level for remote user cursors (0.0 to 1.0)",
+              "default": 0.8,
+              "minimum": 0.1,
+              "maximum": 1.0
+            },
+            "selectionOpacity": {
+              "type": "number",
+              "title": "Selection Opacity", 
+              "description": "Opacity level for remote user text selections (0.0 to 1.0)",
+              "default": 0.3,
+              "minimum": 0.1,
+              "maximum": 1.0
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "debugging": {
+      "type": "object",
+      "title": "Debugging and Development Configuration",
+      "description": "Settings for debugging collaborative editing features and troubleshooting issues",
+      "properties": {
+        "enableDebugLogging": {
+          "type": "boolean",
+          "title": "Enable Debug Logging",
+          "description": "Enable detailed console logging for collaborative editing operations",
+          "default": false
+        },
+        "logLevel": {
+          "type": "string",
+          "title": "Log Level",
+          "description": "Verbosity level for collaborative editing logs",
+          "enum": ["error", "warn", "info", "debug", "trace"],
+          "enumLabels": [
+            "Errors Only",
+            "Warnings and Errors",
+            "Informational Messages",
+            "Debug Information",
+            "Detailed Trace"
+          ],
+          "default": "info"
+        },
+        "enableNetworkLogging": {
+          "type": "boolean",
+          "title": "Enable Network Logging",
+          "description": "Log WebSocket messages and network operations for debugging",
+          "default": false
+        },
+        "enablePerformanceProfiler": {
+          "type": "boolean",
+          "title": "Enable Performance Profiler",
+          "description": "Profile and log performance metrics for collaborative operations",
+          "default": false
+        },
+        "enableErrorReporting": {
+          "type": "boolean",
+          "title": "Enable Error Reporting",
+          "description": "Automatically report collaboration errors for debugging",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "type": "object"
+}
