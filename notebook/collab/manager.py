@@ -1,1761 +1,1745 @@
 """
-Comprehensive Collaboration Manager for Jupyter Notebook v7
+Central CollaborationManager class providing comprehensive session lifecycle management,
+user coordination, cross-instance session state synchronization, and real-time message
+routing for collaborative editing.
 
-This module implements the central CollaborationManager class providing comprehensive 
-session lifecycle management, user coordination, cross-instance session state 
-synchronization, and real-time message routing for collaborative editing.
-
-The CollaborationManager serves as the core orchestration layer for:
-- WebSocket connection pool management with automatic reconnection
-- User presence tracking and awareness broadcasting via Redis pub/sub
-- Distributed cell-level locking system preventing editing conflicts
-- Cross-instance session coordination for horizontal scaling
-- JupyterHub authentication integration for secure multi-user access
-- Real-time message routing between YjsNotebookProvider instances
-- Session cleanup and resource management with graceful degradation
+This module serves as the central orchestrator for all collaborative editing operations,
+coordinating between WebSocket connections, the persistence layer, and external services
+like JupyterHub for authentication. It implements sophisticated session management with
+automatic cleanup, user presence tracking with Redis pub/sub, distributed cell-level
+locking, and cross-instance coordination for horizontal scaling.
 
 Architecture:
-- Centralized session state management with Redis coordination
-- WebSocket connection pooling with automatic failover and recovery
-- Integration with multi-tier persistence layer for data durability
-- Event-driven architecture for real-time collaboration synchronization
-- Comprehensive error handling with fallback to single-user mode
+- CollaborationManager: Main coordination class managing all collaborative sessions
+- WebSocketPool: High-availability connection pool with automatic recovery
+- SessionRegistry: Distributed session state coordination across server instances  
+- PresenceTracker: Real-time user presence and awareness broadcasting
+- LockManager: Intelligent cell-level conflict prevention with TTL management
+- MessageRouter: CRDT operation routing and synchronization coordination
+- AuthenticationBridge: JupyterHub integration for user identity and permissions
 """
 
 import asyncio
 import json
 import logging
-import os
 import time
 import uuid
 import weakref
+import os
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Set, Callable, Union, Tuple
+from typing import Dict, List, Optional, Any, Set, Callable, Tuple, Union
 from dataclasses import dataclass, asdict
-from enum import Enum
 from contextlib import asynccontextmanager
-from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+import hashlib
 
-# Third-party imports
-import aiohttp
-import aioredis
+# WebSocket and HTTP handling
+import tornado.web
 import tornado.websocket
-import tornado.ioloop
-from tornado.locks import Lock as TornadoLock
-from prometheus_client import Counter, Histogram, Gauge, Summary
+import tornado.escape
+from tornado.concurrent import run_on_executor
 
-# Local imports
+# Jupyter integration
+from jupyter_server.base.handlers import JupyterHandler
+from jupyter_server.utils import url_path_join
+from traitlets import TraitError
+from jupyter_core.utils import ensure_async
+
+# Import persistence layer
 from .persistence import (
-    PersistenceLayer, 
-    PersistenceConfig, 
-    CRDTOperation, 
-    SessionMetadata, 
-    UserPermission,
-    OperationType
+    PersistenceLayer, CollaborationSession, CRDTOperation, 
+    VersionHistory, UserPermission, create_persistence_layer
 )
 
-# Logging configuration
+# Logger setup
 logger = logging.getLogger(__name__)
-
-
-class SessionStatus(Enum):
-    """Collaborative session status enumeration"""
-    INITIALIZING = "initializing"
-    ACTIVE = "active"
-    PAUSED = "paused"
-    TERMINATING = "terminating"
-    TERMINATED = "terminated"
-    ERROR = "error"
-
-
-class UserRole(Enum):
-    """User role enumeration for collaborative sessions"""
-    ADMIN = "admin"
-    EDITOR = "editor"
-    VIEWER = "viewer"
-    GUEST = "guest"
-
-
-class MessageType(Enum):
-    """WebSocket message type enumeration"""
-    CRDT_OPERATION = "crdt_operation"
-    AWARENESS_UPDATE = "awareness_update"
-    LOCK_REQUEST = "lock_request"
-    LOCK_RELEASE = "lock_release"
-    LOCK_STATUS = "lock_status"
-    PRESENCE_UPDATE = "presence_update"
-    PERMISSION_CHANGE = "permission_change"
-    SESSION_JOIN = "session_join"
-    SESSION_LEAVE = "session_leave"
-    SESSION_TERMINATE = "session_terminate"
-    SYNC_REQUEST = "sync_request"
-    SYNC_RESPONSE = "sync_response"
-    ERROR = "error"
-    HEARTBEAT = "heartbeat"
-
-
-@dataclass
-class CollaborationSession:
-    """Collaborative session data structure"""
-    session_id: str
-    notebook_path: str
-    created_by: str
-    created_at: datetime
-    participants: Set[str]
-    status: SessionStatus
-    permissions: Dict[str, UserRole]
-    metadata: Dict[str, Any]
-    last_activity: datetime
-    websocket_connections: Set[str]  # WebSocket connection IDs
-    lock_state: Dict[str, str]  # cell_id -> user_id mapping
-    presence_data: Dict[str, Dict[str, Any]]  # user_id -> presence info
 
 
 @dataclass
 class WebSocketConnection:
-    """WebSocket connection tracking"""
+    """WebSocket connection metadata for tracking and management"""
     connection_id: str
     user_id: str
     session_id: str
-    handler: tornado.websocket.WebSocketHandler
+    websocket: tornado.websocket.WebSocketHandler
     connected_at: datetime
     last_heartbeat: datetime
-    permissions: UserRole
+    user_agent: Optional[str] = None
+    ip_address: Optional[str] = None
+    client_id: Optional[int] = None
+    capabilities: Dict[str, Any] = None
+
+    def __post_init__(self):
+        if self.capabilities is None:
+            self.capabilities = {}
 
 
 @dataclass
-class CollaborationMessage:
-    """Standardized collaboration message format"""
-    message_type: MessageType
+class SessionState:
+    """Collaborative session state for coordination across instances"""
     session_id: str
+    notebook_path: str
+    created_by: str
+    created_at: datetime
+    last_activity: datetime
+    participant_count: int
+    active_connections: Set[str]
+    document_version: int
+    locked_cells: Dict[str, str]  # cell_id -> user_id
+    status: str = "active"
+    metadata: Dict[str, Any] = None
+
+    def __post_init__(self):
+        if self.metadata is None:
+            self.metadata = {}
+        if isinstance(self.active_connections, list):
+            self.active_connections = set(self.active_connections)
+
+
+@dataclass
+class PresenceUpdate:
+    """User presence update for real-time awareness"""
     user_id: str
-    timestamp: datetime
-    payload: Dict[str, Any]
-    operation_id: Optional[str] = None
+    session_id: str
+    cursor_position: Optional[Dict[str, Any]] = None
+    selection: Optional[Dict[str, Any]] = None
+    active_cell: Optional[str] = None
+    status: str = "active"
+    timestamp: Optional[float] = None
+    custom_data: Dict[str, Any] = None
+
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = time.time()
+        if self.custom_data is None:
+            self.custom_data = {}
 
 
-class CollaborationMetrics:
-    """Prometheus metrics for collaboration manager monitoring"""
+class WebSocketPool:
+    """High-availability WebSocket connection pool with automatic recovery and state management"""
     
-    def __init__(self):
-        # Session metrics
-        self.sessions_total = Counter(
-            'jupyter_collab_sessions_total',
-            'Total collaborative sessions',
-            ['status', 'notebook_type']
-        )
+    def __init__(self, collaboration_manager: 'CollaborationManager'):
+        self.collaboration_manager = collaboration_manager
+        self.connections: Dict[str, WebSocketConnection] = {}
+        self.connections_by_user: Dict[str, Set[str]] = {}
+        self.connections_by_session: Dict[str, Set[str]] = {}
         
-        self.sessions_active = Gauge(
-            'jupyter_collab_sessions_active',
-            'Currently active collaborative sessions'
-        )
+        # Configuration
+        self.heartbeat_interval = int(os.getenv('JUPYTER_COLLAB_HEARTBEAT_INTERVAL', '30'))  # 30 seconds
+        self.connection_timeout = int(os.getenv('JUPYTER_COLLAB_CONNECTION_TIMEOUT', '300'))  # 5 minutes
+        self.max_connections_per_user = int(os.getenv('JUPYTER_COLLAB_MAX_CONNECTIONS_PER_USER', '10'))
         
-        self.session_duration = Histogram(
-            'jupyter_collab_session_duration_seconds',
-            'Session duration in seconds',
-            ['status'],
-            buckets=[60, 300, 900, 1800, 3600, 7200, 14400]
-        )
+        # Background tasks
+        self._heartbeat_task: Optional[asyncio.Task] = None
+        self._cleanup_task: Optional[asyncio.Task] = None
         
-        # User metrics
-        self.users_connected = Gauge(
-            'jupyter_collab_users_connected',
-            'Currently connected collaborative users'
-        )
-        
-        self.users_per_session = Histogram(
-            'jupyter_collab_users_per_session',
-            'Number of users per collaborative session',
-            buckets=[1, 2, 3, 5, 10, 15, 20, 30]
-        )
-        
-        # WebSocket metrics
-        self.websocket_connections = Gauge(
-            'jupyter_collab_websocket_connections',
-            'Active WebSocket connections'
-        )
-        
-        self.websocket_messages = Counter(
-            'jupyter_collab_websocket_messages_total',
-            'WebSocket messages processed',
-            ['message_type', 'status']
-        )
-        
-        self.message_processing_duration = Histogram(
-            'jupyter_collab_message_processing_duration_seconds',
-            'Message processing duration',
-            ['message_type'],
-            buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5]
-        )
-        
-        # Lock metrics
-        self.lock_operations = Counter(
-            'jupyter_collab_lock_operations_total',
-            'Cell lock operations',
-            ['operation', 'status']
-        )
-        
-        self.lock_duration = Histogram(
-            'jupyter_collab_lock_duration_seconds',
-            'Cell lock duration',
-            buckets=[1, 5, 15, 30, 60, 300, 600, 1800]
-        )
-        
-        # Error metrics
-        self.errors_total = Counter(
-            'jupyter_collab_errors_total',
-            'Collaboration errors',
-            ['error_type', 'component']
-        )
-
-
-class CollaborationConfig:
-    """Configuration management for collaboration manager"""
+        logger.info("WebSocketPool initialized")
     
-    def __init__(self):
-        # Core configuration
-        self.enabled = os.getenv('JUPYTER_COLLAB_ENABLED', 'false').lower() == 'true'
-        self.debug = os.getenv('JUPYTER_COLLAB_DEBUG', 'false').lower() == 'true'
-        self.server_url = os.getenv('JUPYTER_COLLAB_SERVER_URL', 'ws://localhost:1234')
+    async def start(self):
+        """Start background maintenance tasks"""
+        if not self._heartbeat_task:
+            self._heartbeat_task = asyncio.create_task(self._heartbeat_monitor())
+        if not self._cleanup_task:
+            self._cleanup_task = asyncio.create_task(self._connection_cleanup())
         
-        # Session configuration
-        self.max_users_per_session = int(os.getenv('JUPYTER_COLLAB_MAX_USERS_PER_SESSION', '10'))
-        self.session_timeout = int(os.getenv('JUPYTER_COLLAB_SESSION_TIMEOUT', '3600'))
-        self.session_cleanup_interval = int(os.getenv('JUPYTER_COLLAB_CLEANUP_INTERVAL', '300'))
-        
-        # WebSocket configuration
-        self.websocket_ping_interval = int(os.getenv('JUPYTER_COLLAB_WEBSOCKET_PING_INTERVAL', '30'))
-        self.websocket_timeout = int(os.getenv('JUPYTER_COLLAB_WEBSOCKET_TIMEOUT', '60'))
-        self.max_websocket_connections = int(os.getenv('JUPYTER_COLLAB_MAX_WEBSOCKET_CONNECTIONS', '1000'))
-        
-        # Lock configuration
-        self.lock_timeout = int(os.getenv('JUPYTER_COLLAB_LOCK_TIMEOUT', '300'))
-        self.lock_acquire_timeout = int(os.getenv('JUPYTER_COLLAB_LOCK_ACQUIRE_TIMEOUT', '5'))
-        
-        # JupyterHub integration
-        self.hub_api_url = os.getenv('JUPYTER_COLLAB_HUB_API_URL', 'http://localhost:8081/hub/api')
-        self.hub_api_token = os.getenv('JUPYTER_COLLAB_HUB_API_TOKEN')
-        self.enable_jupyterhub_auth = os.getenv('JUPYTER_COLLAB_JUPYTERHUB_AUTH', 'true').lower() == 'true'
-        
-        # Performance tuning
-        self.message_batch_size = int(os.getenv('JUPYTER_COLLAB_MESSAGE_BATCH_SIZE', '100'))
-        self.presence_update_interval = int(os.getenv('JUPYTER_COLLAB_PRESENCE_UPDATE_INTERVAL', '5'))
-        self.state_sync_interval = int(os.getenv('JUPYTER_COLLAB_STATE_SYNC_INTERVAL', '60'))
-
-
-class JupyterHubAuthenticator:
-    """JupyterHub authentication integration"""
+        logger.info("WebSocketPool background tasks started")
     
-    def __init__(self, config: CollaborationConfig):
-        self.config = config
-        self.session = None
-        self._user_cache = {}
-        self._cache_ttl = 300  # 5 minutes
+    async def stop(self):
+        """Stop background tasks and cleanup connections"""
+        if self._heartbeat_task:
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
         
-    async def initialize(self):
-        """Initialize HTTP session for JupyterHub API calls"""
-        if self.config.enable_jupyterhub_auth and self.config.hub_api_token:
-            self.session = aiohttp.ClientSession(
-                headers={'Authorization': f'token {self.config.hub_api_token}'},
-                timeout=aiohttp.ClientTimeout(total=10)
-            )
-            logger.info("JupyterHub authenticator initialized")
-    
-    async def close(self):
-        """Close HTTP session"""
-        if self.session:
-            await self.session.close()
-    
-    async def authenticate_user(self, token: str) -> Optional[Dict[str, Any]]:
-        """Authenticate user via JupyterHub API"""
-        if not self.config.enable_jupyterhub_auth or not self.session:
-            # Fallback authentication for development
-            return {'name': 'dev-user', 'groups': ['notebook-editors']}
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
         
+        # Close all active connections gracefully
+        for connection in list(self.connections.values()):
+            await self.remove_connection(connection.connection_id, reason="server_shutdown")
+        
+        logger.info("WebSocketPool stopped")
+    
+    async def add_connection(self, websocket: tornado.websocket.WebSocketHandler, 
+                           user_id: str, session_id: str, 
+                           user_agent: Optional[str] = None,
+                           client_id: Optional[int] = None) -> str:
+        """Add new WebSocket connection with validation and limits"""
         try:
-            # Check cache first
-            cache_key = f"auth:{token}"
-            if cache_key in self._user_cache:
-                cached_result, cached_time = self._user_cache[cache_key]
-                if time.time() - cached_time < self._cache_ttl:
-                    return cached_result
+            # Check connection limits per user
+            user_connections = self.connections_by_user.get(user_id, set())
+            if len(user_connections) >= self.max_connections_per_user:
+                oldest_connection_id = min(
+                    user_connections,
+                    key=lambda cid: self.connections[cid].connected_at
+                )
+                await self.remove_connection(
+                    oldest_connection_id, 
+                    reason="connection_limit_exceeded"
+                )
             
-            # Authenticate with JupyterHub
-            url = f"{self.config.hub_api_url}/authorizations/token/{token}"
-            async with self.session.get(url) as response:
-                if response.status == 200:
-                    user_info = await response.json()
-                    
-                    # Get user groups
-                    user_url = f"{self.config.hub_api_url}/users/{user_info['name']}"
-                    async with self.session.get(user_url) as user_response:
-                        if user_response.status == 200:
-                            user_data = await user_response.json()
-                            user_info['groups'] = user_data.get('groups', [])
-                    
-                    # Cache result
-                    self._user_cache[cache_key] = (user_info, time.time())
-                    return user_info
-                
-                logger.warning(f"JupyterHub authentication failed: {response.status}")
-                return None
-                
-        except Exception as e:
-            logger.error(f"JupyterHub authentication error: {e}")
-            return None
-    
-    async def get_user_permissions(self, user_id: str, notebook_path: str) -> UserRole:
-        """Get user permissions for notebook access"""
-        if not self.config.enable_jupyterhub_auth:
-            return UserRole.EDITOR  # Default for development
-        
-        try:
-            # Get user groups from cache or API
-            cache_key = f"user:{user_id}"
-            user_info = None
-            
-            if cache_key in self._user_cache:
-                cached_result, cached_time = self._user_cache[cache_key]
-                if time.time() - cached_time < self._cache_ttl:
-                    user_info = cached_result
-            
-            if not user_info:
-                url = f"{self.config.hub_api_url}/users/{user_id}"
-                async with self.session.get(url) as response:
-                    if response.status == 200:
-                        user_info = await response.json()
-                        self._user_cache[cache_key] = (user_info, time.time())
-            
-            if user_info:
-                groups = user_info.get('groups', [])
-                
-                # Determine role based on groups
-                if 'notebook-admins' in groups:
-                    return UserRole.ADMIN
-                elif 'notebook-editors' in groups:
-                    return UserRole.EDITOR
-                elif 'notebook-viewers' in groups:
-                    return UserRole.VIEWER
-                else:
-                    return UserRole.GUEST
-            
-            return UserRole.GUEST
-            
-        except Exception as e:
-            logger.error(f"Error getting user permissions: {e}")
-            return UserRole.GUEST
-
-
-class LockManager:
-    """Distributed cell-level locking manager"""
-    
-    def __init__(self, redis_client: aioredis.Redis, config: CollaborationConfig):
-        self.redis = redis_client
-        self.config = config
-        self.metrics = CollaborationMetrics()
-        self._local_locks = {}  # Local lock cache
-        
-    async def acquire_lock(self, session_id: str, cell_id: str, user_id: str) -> bool:
-        """Acquire exclusive lock for cell editing"""
-        lock_key = f"lock:{session_id}:{cell_id}"
-        
-        start_time = time.time()
-        try:
-            # Attempt distributed lock acquisition with TTL
-            lock_value = json.dumps({
-                'user_id': user_id,
-                'acquired_at': time.time(),
-                'session_id': session_id,
-                'lock_id': str(uuid.uuid4())
-            })
-            
-            # Use Redis SET with NX (not exists) and EX (expire) for atomic operation
-            acquired = await self.redis.set(
-                lock_key, 
-                lock_value, 
-                nx=True, 
-                ex=self.config.lock_timeout
+            # Create connection metadata
+            connection_id = str(uuid.uuid4())
+            connection = WebSocketConnection(
+                connection_id=connection_id,
+                user_id=user_id,
+                session_id=session_id,
+                websocket=websocket,
+                connected_at=datetime.utcnow(),
+                last_heartbeat=datetime.utcnow(),
+                user_agent=user_agent,
+                ip_address=websocket.request.remote_ip,
+                client_id=client_id or int(time.time() * 1000) % 2**31  # Generate client ID
             )
             
-            if acquired:
-                # Cache locally for fast lookup
-                self._local_locks[f"{session_id}:{cell_id}"] = {
-                    'user_id': user_id,
-                    'acquired_at': time.time()
-                }
-                
-                self.metrics.lock_operations.labels(
-                    operation='acquire',
-                    status='success'
-                ).inc()
-                
-                logger.debug(f"Lock acquired: {cell_id} by {user_id} in session {session_id}")
-                return True
-            else:
-                self.metrics.lock_operations.labels(
-                    operation='acquire',
-                    status='failed'
-                ).inc()
-                return False
-                
-        except Exception as e:
-            self.metrics.lock_operations.labels(
-                operation='acquire',
-                status='error'
-            ).inc()
-            logger.error(f"Lock acquisition error: {e}")
-            return False
-        finally:
-            duration = time.time() - start_time
-            self.metrics.message_processing_duration.labels(
-                message_type='lock_acquire'
-            ).observe(duration)
-    
-    async def release_lock(self, session_id: str, cell_id: str, user_id: str) -> bool:
-        """Release cell lock if owned by user"""
-        lock_key = f"lock:{session_id}:{cell_id}"
-        
-        try:
-            # Lua script for atomic lock release (only if owned by user)
-            lua_script = """
-            local lock_key = KEYS[1]
-            local user_id = ARGV[1]
-            local current_lock = redis.call('GET', lock_key)
+            # Register connection in all tracking structures
+            self.connections[connection_id] = connection
             
-            if current_lock then
-                local lock_data = cjson.decode(current_lock)
-                if lock_data.user_id == user_id then
-                    redis.call('DEL', lock_key)
-                    return 1
-                end
-            end
-            return 0
-            """
+            if user_id not in self.connections_by_user:
+                self.connections_by_user[user_id] = set()
+            self.connections_by_user[user_id].add(connection_id)
             
-            result = await self.redis.eval(lua_script, 1, lock_key, user_id)
+            if session_id not in self.connections_by_session:
+                self.connections_by_session[session_id] = set()
+            self.connections_by_session[session_id].add(connection_id)
             
-            if result == 1:
-                # Remove from local cache
-                local_key = f"{session_id}:{cell_id}"
-                self._local_locks.pop(local_key, None)
-                
-                self.metrics.lock_operations.labels(
-                    operation='release',
-                    status='success'
-                ).inc()
-                
-                logger.debug(f"Lock released: {cell_id} by {user_id} in session {session_id}")
-                return True
-            else:
-                self.metrics.lock_operations.labels(
-                    operation='release',
-                    status='failed'
-                ).inc()
-                return False
-                
-        except Exception as e:
-            self.metrics.lock_operations.labels(
-                operation='release',
-                status='error'
-            ).inc()
-            logger.error(f"Lock release error: {e}")
-            return False
-    
-    async def get_lock_owner(self, session_id: str, cell_id: str) -> Optional[str]:
-        """Get current lock owner for cell"""
-        lock_key = f"lock:{session_id}:{cell_id}"
-        
-        try:
-            lock_data = await self.redis.get(lock_key)
-            if lock_data:
-                lock_info = json.loads(lock_data)
-                return lock_info.get('user_id')
-            return None
+            logger.info(f"WebSocket connection added: {connection_id} for user {user_id} in session {session_id}")
+            return connection_id
             
         except Exception as e:
-            logger.error(f"Error getting lock owner: {e}")
-            return None
-    
-    async def get_session_locks(self, session_id: str) -> Dict[str, str]:
-        """Get all locks for a session"""
-        try:
-            pattern = f"lock:{session_id}:*"
-            lock_keys = await self.redis.keys(pattern)
-            
-            locks = {}
-            if lock_keys:
-                # Get all lock data in batch
-                lock_values = await self.redis.mget(lock_keys)
-                
-                for key, value in zip(lock_keys, lock_values):
-                    if value:
-                        cell_id = key.split(':', 2)[2]  # Extract cell_id from key
-                        lock_info = json.loads(value)
-                        locks[cell_id] = lock_info['user_id']
-            
-            return locks
-            
-        except Exception as e:
-            logger.error(f"Error getting session locks: {e}")
-            return {}
-    
-    async def force_release_user_locks(self, session_id: str, user_id: str) -> int:
-        """Force release all locks held by user in session"""
-        try:
-            pattern = f"lock:{session_id}:*"
-            lock_keys = await self.redis.keys(pattern)
-            
-            released_count = 0
-            for lock_key in lock_keys:
-                lock_data = await self.redis.get(lock_key)
-                if lock_data:
-                    lock_info = json.loads(lock_data)
-                    if lock_info.get('user_id') == user_id:
-                        await self.redis.delete(lock_key)
-                        released_count += 1
-                        
-                        # Remove from local cache
-                        cell_id = lock_key.split(':', 2)[2]
-                        local_key = f"{session_id}:{cell_id}"
-                        self._local_locks.pop(local_key, None)
-            
-            if released_count > 0:
-                logger.info(f"Force released {released_count} locks for user {user_id} in session {session_id}")
-            
-            return released_count
-            
-        except Exception as e:
-            logger.error(f"Error force releasing locks: {e}")
-            return 0
-
-
-class PresenceManager:
-    """User presence and awareness manager"""
-    
-    def __init__(self, redis_client: aioredis.Redis, config: CollaborationConfig):
-        self.redis = redis_client
-        self.config = config
-        self.metrics = CollaborationMetrics()
-        self._presence_subscriptions = defaultdict(set)  # session_id -> set of connections
-        
-    async def update_presence(self, session_id: str, user_id: str, presence_data: Dict[str, Any]) -> bool:
-        """Update user presence data"""
-        try:
-            presence_key = f"presence:{session_id}"
-            user_key = f"user:{user_id}"
-            
-            # Add timestamp to presence data
-            enriched_presence = {
-                **presence_data,
-                'user_id': user_id,
-                'timestamp': time.time(),
-                'session_id': session_id
-            }
-            
-            # Store presence data with TTL
-            pipeline = self.redis.pipeline()
-            pipeline.hset(presence_key, user_key, json.dumps(enriched_presence))
-            pipeline.expire(presence_key, 120)  # 2-minute TTL
-            await pipeline.execute()
-            
-            # Publish presence update for real-time broadcasting
-            await self.redis.publish(
-                f"presence:updates:{session_id}",
-                json.dumps({
-                    'type': 'presence_update',
-                    'user_id': user_id,
-                    'presence': enriched_presence,
-                    'timestamp': time.time()
-                })
-            )
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error updating presence: {e}")
-            return False
-    
-    async def get_session_presence(self, session_id: str) -> Dict[str, Dict[str, Any]]:
-        """Get presence data for all users in session"""
-        try:
-            presence_key = f"presence:{session_id}"
-            presence_data = await self.redis.hgetall(presence_key)
-            
-            result = {}
-            for user_key, data in presence_data.items():
-                if user_key.startswith('user:'):
-                    user_id = user_key[5:]  # Remove 'user:' prefix
-                    result[user_id] = json.loads(data)
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error getting session presence: {e}")
-            return {}
-    
-    async def remove_user_presence(self, session_id: str, user_id: str) -> bool:
-        """Remove user from session presence"""
-        try:
-            presence_key = f"presence:{session_id}"
-            user_key = f"user:{user_id}"
-            
-            # Remove user from presence hash
-            await self.redis.hdel(presence_key, user_key)
-            
-            # Publish user left event
-            await self.redis.publish(
-                f"presence:updates:{session_id}",
-                json.dumps({
-                    'type': 'user_left',
-                    'user_id': user_id,
-                    'timestamp': time.time()
-                })
-            )
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error removing user presence: {e}")
-            return False
-    
-    async def subscribe_to_presence(self, session_id: str, callback: Callable[[Dict[str, Any]], None]):
-        """Subscribe to presence updates for a session"""
-        try:
-            # Create Redis pubsub client
-            pubsub = self.redis.pubsub()
-            await pubsub.subscribe(f"presence:updates:{session_id}")
-            
-            # Process messages
-            async for message in pubsub.listen():
-                if message['type'] == 'message':
-                    try:
-                        data = json.loads(message['data'])
-                        await callback(data)
-                    except Exception as e:
-                        logger.error(f"Error processing presence message: {e}")
-                        
-        except Exception as e:
-            logger.error(f"Error subscribing to presence: {e}")
-
-
-class CollaborationManager:
-    """
-    Central CollaborationManager class providing comprehensive session lifecycle 
-    management, user coordination, cross-instance session state synchronization, 
-    and real-time message routing for collaborative editing.
-    """
-    
-    def __init__(self, persistence_layer: PersistenceLayer = None, config: CollaborationConfig = None):
-        self.config = config or CollaborationConfig()
-        self.persistence = persistence_layer or PersistenceLayer()
-        self.metrics = CollaborationMetrics()
-        
-        # Core components
-        self.authenticator = JupyterHubAuthenticator(self.config)
-        self.lock_manager = None  # Initialized after Redis connection
-        self.presence_manager = None  # Initialized after Redis connection
-        
-        # Session management
-        self.sessions: Dict[str, CollaborationSession] = {}
-        self.websocket_connections: Dict[str, WebSocketConnection] = {}
-        self.session_locks = defaultdict(TornadoLock)  # Per-session locks for thread safety
-        
-        # Redis client for coordination
-        self.redis_client: Optional[aioredis.Redis] = None
-        
-        # Cleanup and maintenance
-        self.cleanup_task = None
-        self.heartbeat_task = None
-        
-        # State
-        self._initialized = False
-        self._shutting_down = False
-        
-        logger.info("CollaborationManager initialized with configuration")
-    
-    async def initialize(self):
-        """Initialize collaboration manager and dependencies"""
-        if self._initialized:
-            return
-        
-        try:
-            logger.info("Initializing CollaborationManager...")
-            
-            # Initialize persistence layer
-            await self.persistence.initialize()
-            
-            # Initialize Redis client from persistence layer
-            self.redis_client = self.persistence.redis.redis
-            
-            # Initialize component managers
-            self.lock_manager = LockManager(self.redis_client, self.config)
-            self.presence_manager = PresenceManager(self.redis_client, self.config)
-            
-            # Initialize JupyterHub authenticator
-            await self.authenticator.initialize()
-            
-            # Start background tasks
-            await self._start_background_tasks()
-            
-            self._initialized = True
-            logger.info("CollaborationManager initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize CollaborationManager: {e}")
+            logger.error(f"Error adding WebSocket connection: {e}")
             raise
     
-    async def close(self):
-        """Close collaboration manager and cleanup resources"""
-        if not self._initialized or self._shutting_down:
-            return
-        
-        self._shutting_down = True
-        logger.info("Shutting down CollaborationManager...")
-        
+    async def remove_connection(self, connection_id: str, reason: str = "client_disconnect") -> bool:
+        """Remove WebSocket connection and cleanup references"""
         try:
-            # Cancel background tasks
-            if self.cleanup_task:
-                self.cleanup_task.cancel()
-            if self.heartbeat_task:
-                self.heartbeat_task.cancel()
+            connection = self.connections.get(connection_id)
+            if not connection:
+                return False
             
-            # Close all WebSocket connections
-            for connection in list(self.websocket_connections.values()):
-                try:
-                    await self._disconnect_websocket(connection.connection_id, reason="server_shutdown")
-                except Exception as e:
-                    logger.error(f"Error closing WebSocket connection: {e}")
+            # Remove from tracking structures
+            user_connections = self.connections_by_user.get(connection.user_id, set())
+            user_connections.discard(connection_id)
+            if not user_connections:
+                del self.connections_by_user[connection.user_id]
             
-            # Terminate active sessions
-            for session in list(self.sessions.values()):
-                try:
-                    await self.terminate_session(session.session_id, reason="server_shutdown")
-                except Exception as e:
-                    logger.error(f"Error terminating session: {e}")
+            session_connections = self.connections_by_session.get(connection.session_id, set())
+            session_connections.discard(connection_id)
+            if not session_connections:
+                del self.connections_by_session[connection.session_id]
             
-            # Close components
-            await self.authenticator.close()
-            await self.persistence.close()
+            del self.connections[connection_id]
             
-            self._initialized = False
-            logger.info("CollaborationManager shutdown complete")
+            # Close WebSocket if still open
+            try:
+                if not connection.websocket.ws_connection.is_closing():
+                    connection.websocket.close(code=1000, reason=reason)
+            except Exception as e:
+                logger.warning(f"Error closing WebSocket: {e}")
+            
+            # Notify collaboration manager of disconnection
+            await self.collaboration_manager.handle_user_disconnect(
+                connection.user_id, connection.session_id, connection_id
+            )
+            
+            logger.info(f"WebSocket connection removed: {connection_id} (reason: {reason})")
+            return True
             
         except Exception as e:
-            logger.error(f"Error during CollaborationManager shutdown: {e}")
+            logger.error(f"Error removing WebSocket connection: {e}")
+            return False
     
-    async def _start_background_tasks(self):
-        """Start background maintenance tasks"""
-        # Session cleanup task
-        self.cleanup_task = asyncio.create_task(self._session_cleanup_loop())
-        
-        # WebSocket heartbeat task  
-        self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
-        
-        logger.info("Background tasks started")
+    async def update_heartbeat(self, connection_id: str) -> bool:
+        """Update connection heartbeat timestamp"""
+        connection = self.connections.get(connection_id)
+        if connection:
+            connection.last_heartbeat = datetime.utcnow()
+            return True
+        return False
     
-    async def _session_cleanup_loop(self):
-        """Background task for session cleanup and maintenance"""
-        while not self._shutting_down:
-            try:
-                await asyncio.sleep(self.config.session_cleanup_interval)
-                await self._cleanup_inactive_sessions()
-                await self._cleanup_expired_locks()
-                await self._sync_session_state()
+    async def broadcast_to_session(self, session_id: str, message: Dict[str, Any], 
+                                  exclude_connection_id: Optional[str] = None,
+                                  exclude_user_id: Optional[str] = None) -> int:
+        """Broadcast message to all connections in a session"""
+        sent_count = 0
+        session_connections = self.connections_by_session.get(session_id, set())
+        
+        for connection_id in list(session_connections):  # Copy to avoid iteration issues
+            if connection_id == exclude_connection_id:
+                continue
                 
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Error in session cleanup loop: {e}")
-                self.metrics.errors_total.labels(
-                    error_type='cleanup',
-                    component='session_manager'
-                ).inc()
-    
-    async def _heartbeat_loop(self):
-        """Background task for WebSocket connection health monitoring"""
-        while not self._shutting_down:
-            try:
-                await asyncio.sleep(self.config.websocket_ping_interval)
-                await self._check_websocket_health()
+            connection = self.connections.get(connection_id)
+            if not connection:
+                continue
                 
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Error in heartbeat loop: {e}")
-                self.metrics.errors_total.labels(
-                    error_type='heartbeat',
-                    component='websocket_manager'
-                ).inc()
-    
-    async def create_session(self, notebook_path: str, created_by: str, 
-                           permissions: Dict[str, UserRole] = None) -> str:
-        """Create new collaborative session"""
-        session_id = str(uuid.uuid4())
-        
-        try:
-            # Validate user permissions
-            user_role = await self.authenticator.get_user_permissions(created_by, notebook_path)
-            if user_role not in [UserRole.ADMIN, UserRole.EDITOR]:
-                raise PermissionError(f"User {created_by} lacks permission to create collaborative session")
+            if exclude_user_id and connection.user_id == exclude_user_id:
+                continue
             
-            # Create session object
+            try:
+                if not connection.websocket.ws_connection.is_closing():
+                    await connection.websocket.write_message(json.dumps(message))
+                    sent_count += 1
+                else:
+                    # Schedule connection removal
+                    asyncio.create_task(self.remove_connection(
+                        connection_id, reason="connection_closed"
+                    ))
+            except Exception as e:
+                logger.warning(f"Error sending message to connection {connection_id}: {e}")
+                asyncio.create_task(self.remove_connection(
+                    connection_id, reason="send_error"
+                ))
+        
+        return sent_count
+    
+    async def send_to_user(self, user_id: str, message: Dict[str, Any]) -> int:
+        """Send message to all connections for a specific user"""
+        sent_count = 0
+        user_connections = self.connections_by_user.get(user_id, set())
+        
+        for connection_id in list(user_connections):
+            connection = self.connections.get(connection_id)
+            if not connection:
+                continue
+            
+            try:
+                if not connection.websocket.ws_connection.is_closing():
+                    await connection.websocket.write_message(json.dumps(message))
+                    sent_count += 1
+                else:
+                    asyncio.create_task(self.remove_connection(
+                        connection_id, reason="connection_closed"
+                    ))
+            except Exception as e:
+                logger.warning(f"Error sending message to user {user_id}: {e}")
+                asyncio.create_task(self.remove_connection(
+                    connection_id, reason="send_error"
+                ))
+        
+        return sent_count
+    
+    def get_connection(self, connection_id: str) -> Optional[WebSocketConnection]:
+        """Get connection by ID"""
+        return self.connections.get(connection_id)
+    
+    def get_session_connections(self, session_id: str) -> List[WebSocketConnection]:
+        """Get all connections for a session"""
+        connection_ids = self.connections_by_session.get(session_id, set())
+        return [self.connections[cid] for cid in connection_ids if cid in self.connections]
+    
+    def get_user_connections(self, user_id: str) -> List[WebSocketConnection]:
+        """Get all connections for a user"""
+        connection_ids = self.connections_by_user.get(user_id, set())
+        return [self.connections[cid] for cid in connection_ids if cid in self.connections]
+    
+    async def get_connection_stats(self) -> Dict[str, Any]:
+        """Get comprehensive connection statistics"""
+        return {
+            'total_connections': len(self.connections),
+            'active_users': len(self.connections_by_user),
+            'active_sessions': len(self.connections_by_session),
+            'connections_by_session': {
+                session_id: len(connections) 
+                for session_id, connections in self.connections_by_session.items()
+            },
+            'connections_by_user': {
+                user_id: len(connections)
+                for user_id, connections in self.connections_by_user.items()
+            }
+        }
+    
+    async def _heartbeat_monitor(self):
+        """Background task to monitor connection health via heartbeats"""
+        while True:
+            try:
+                await asyncio.sleep(self.heartbeat_interval)
+                
+                current_time = datetime.utcnow()
+                stale_connections = []
+                
+                for connection_id, connection in self.connections.items():
+                    time_since_heartbeat = (current_time - connection.last_heartbeat).total_seconds()
+                    
+                    if time_since_heartbeat > self.connection_timeout:
+                        stale_connections.append(connection_id)
+                
+                # Remove stale connections
+                for connection_id in stale_connections:
+                    await self.remove_connection(connection_id, reason="heartbeat_timeout")
+                
+                if stale_connections:
+                    logger.info(f"Removed {len(stale_connections)} stale connections")
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in heartbeat monitor: {e}")
+    
+    async def _connection_cleanup(self):
+        """Background task for connection pool maintenance"""
+        while True:
+            try:
+                await asyncio.sleep(300)  # Run every 5 minutes
+                
+                # Clean up orphaned connections
+                orphaned_connections = []
+                for connection_id, connection in self.connections.items():
+                    try:
+                        if connection.websocket.ws_connection.is_closing():
+                            orphaned_connections.append(connection_id)
+                    except Exception:
+                        orphaned_connections.append(connection_id)
+                
+                for connection_id in orphaned_connections:
+                    await self.remove_connection(connection_id, reason="orphaned_connection")
+                
+                if orphaned_connections:
+                    logger.info(f"Cleaned up {len(orphaned_connections)} orphaned connections")
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in connection cleanup: {e}")
+
+
+class SessionRegistry:
+    """Distributed session state coordination across server instances"""
+    
+    def __init__(self, collaboration_manager: 'CollaborationManager'):
+        self.collaboration_manager = collaboration_manager
+        self.local_sessions: Dict[str, SessionState] = {}
+        
+        # Configuration
+        self.session_ttl = int(os.getenv('JUPYTER_COLLAB_SESSION_TTL', '86400'))  # 24 hours
+        self.cleanup_interval = int(os.getenv('JUPYTER_COLLAB_CLEANUP_INTERVAL', '300'))  # 5 minutes
+        
+        # Background cleanup task
+        self._cleanup_task: Optional[asyncio.Task] = None
+        
+        logger.info("SessionRegistry initialized")
+    
+    async def start(self):
+        """Start background maintenance tasks"""
+        if not self._cleanup_task:
+            self._cleanup_task = asyncio.create_task(self._session_cleanup())
+        logger.info("SessionRegistry background tasks started")
+    
+    async def stop(self):
+        """Stop background tasks"""
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+        logger.info("SessionRegistry stopped")
+    
+    async def create_session(self, notebook_path: str, created_by: str,
+                           permissions: Optional[Dict[str, Any]] = None) -> str:
+        """Create new collaborative session"""
+        try:
+            session_id = str(uuid.uuid4())
+            current_time = datetime.utcnow()
+            
+            # Create session metadata
             session = CollaborationSession(
                 session_id=session_id,
                 notebook_path=notebook_path,
                 created_by=created_by,
-                created_at=datetime.utcnow(),
-                participants={created_by},
-                status=SessionStatus.INITIALIZING,
-                permissions=permissions or {created_by: UserRole.ADMIN},
-                metadata={
-                    'created_by': created_by,
-                    'notebook_path': notebook_path,
-                    'server_instance': os.getenv('HOSTNAME', 'unknown')
-                },
-                last_activity=datetime.utcnow(),
-                websocket_connections=set(),
-                lock_state={},
-                presence_data={}
+                created_at=current_time,
+                expires_at=current_time + timedelta(seconds=self.session_ttl),
+                permissions=permissions or {'default': 'editor'},
+                participants=[created_by],
+                status='active'
             )
             
-            # Store session
-            async with self.session_locks[session_id]:
-                self.sessions[session_id] = session
-                
-                # Persist session metadata
-                session_metadata = SessionMetadata(
-                    session_id=session_id,
-                    notebook_path=notebook_path,
-                    created_by=created_by,
-                    created_at=session.created_at,
-                    participants=list(session.participants),
-                    permissions={user: role.value for user, role in session.permissions.items()},
-                    status=session.status.value
-                )
-                
-                await self.persistence.mongodb.store_collaboration_metadata(session_metadata)
-                
-                # Store session state in Redis
-                session_state = {
-                    'session_id': session_id,
-                    'notebook_path': notebook_path,
-                    'participants': list(session.participants),
-                    'status': session.status.value,
-                    'created_at': session.created_at.isoformat(),
-                    'last_activity': session.last_activity.isoformat()
-                }
-                await self.persistence.redis.store_session_state(session_id, session_state)
+            # Create local session state
+            session_state = SessionState(
+                session_id=session_id,
+                notebook_path=notebook_path,
+                created_by=created_by,
+                created_at=current_time,
+                last_activity=current_time,
+                participant_count=1,
+                active_connections=set(),
+                document_version=0,
+                locked_cells={}
+            )
             
-            # Update session status
-            session.status = SessionStatus.ACTIVE
+            # Store in persistence layer
+            await self.collaboration_manager.persistence.create_collaboration_session(session)
             
-            # Update metrics
-            self.metrics.sessions_total.labels(
-                status='created',
-                notebook_type='jupyter'
-            ).inc()
-            self.metrics.sessions_active.inc()
+            # Register locally
+            self.local_sessions[session_id] = session_state
             
-            logger.info(f"Created collaborative session {session_id} for {notebook_path} by {created_by}")
+            logger.info(f"Collaboration session created: {session_id} for {notebook_path}")
             return session_id
             
         except Exception as e:
-            logger.error(f"Error creating session: {e}")
-            self.metrics.errors_total.labels(
-                error_type='session_creation',
-                component='session_manager'
-            ).inc()
+            logger.error(f"Error creating collaboration session: {e}")
             raise
     
-    async def join_session(self, session_id: str, user_id: str, connection_id: str,
-                          websocket_handler: tornado.websocket.WebSocketHandler) -> bool:
-        """Join user to collaborative session"""
+    async def join_session(self, session_id: str, user_id: str, 
+                          connection_id: str) -> Optional[SessionState]:
+        """Join existing collaboration session"""
         try:
-            # Validate session exists
-            if session_id not in self.sessions:
-                # Try to load from persistence
-                session_state = await self.persistence.get_session_state(session_id)
-                if not session_state:
-                    logger.warning(f"Session {session_id} not found")
-                    return False
+            # Get session from persistence if not cached locally
+            if session_id not in self.local_sessions:
+                session = await self.collaboration_manager.persistence.get_collaboration_session(session_id)
+                if not session:
+                    logger.warning(f"Session not found: {session_id}")
+                    return None
                 
-                # Reconstruct session from state
-                await self._reconstruct_session(session_id, session_state)
-            
-            session = self.sessions[session_id]
-            
-            # Validate user permissions
-            if user_id not in session.permissions:
-                # Get default permissions from authenticator
-                user_role = await self.authenticator.get_user_permissions(user_id, session.notebook_path)
-                if user_role == UserRole.GUEST:
-                    logger.warning(f"User {user_id} denied access to session {session_id}")
-                    return False
-                session.permissions[user_id] = user_role
-            
-            # Check session capacity
-            if len(session.participants) >= self.config.max_users_per_session:
-                logger.warning(f"Session {session_id} at capacity")
-                return False
-            
-            async with self.session_locks[session_id]:
-                # Add user to session
-                session.participants.add(user_id)
-                session.last_activity = datetime.utcnow()
+                if session.status != 'active':
+                    logger.warning(f"Session not active: {session_id} (status: {session.status})")
+                    return None
                 
-                # Create WebSocket connection tracking
-                connection = WebSocketConnection(
-                    connection_id=connection_id,
-                    user_id=user_id,
+                if session.expires_at < datetime.utcnow():
+                    logger.warning(f"Session expired: {session_id}")
+                    return None
+                
+                # Create local session state
+                session_state = SessionState(
                     session_id=session_id,
-                    handler=websocket_handler,
-                    connected_at=datetime.utcnow(),
-                    last_heartbeat=datetime.utcnow(),
-                    permissions=session.permissions[user_id]
+                    notebook_path=session.notebook_path,
+                    created_by=session.created_by,
+                    created_at=session.created_at,
+                    last_activity=datetime.utcnow(),
+                    participant_count=len(session.participants),
+                    active_connections=set(),
+                    document_version=0,
+                    locked_cells={}
                 )
                 
-                self.websocket_connections[connection_id] = connection
-                session.websocket_connections.add(connection_id)
-                
-                # Update presence
-                await self.presence_manager.update_presence(
-                    session_id,
-                    user_id,
-                    {
-                        'status': 'active',
-                        'connection_id': connection_id,
-                        'joined_at': time.time()
-                    }
-                )
-                
-                # Persist updated session state
-                await self._persist_session_state(session)
+                self.local_sessions[session_id] = session_state
             
-            # Update metrics
-            self.metrics.websocket_connections.inc()
-            self.metrics.users_connected.inc()
-            self.metrics.users_per_session.observe(len(session.participants))
+            session_state = self.local_sessions[session_id]
             
-            # Send session state to new user
-            await self._send_session_sync(connection)
+            # Add connection to session
+            session_state.active_connections.add(connection_id)
+            session_state.last_activity = datetime.utcnow()
             
-            # Broadcast user joined event
-            await self._broadcast_to_session(
-                session_id,
-                CollaborationMessage(
-                    message_type=MessageType.SESSION_JOIN,
-                    session_id=session_id,
-                    user_id=user_id,
-                    timestamp=datetime.utcnow(),
-                    payload={
-                        'user_id': user_id,
-                        'permissions': session.permissions[user_id].value,
-                        'participants': list(session.participants)
-                    }
-                ),
-                exclude_connections={connection_id}
-            )
+            # Update participant count if new user
+            if user_id not in [conn.user_id for conn in 
+                              self.collaboration_manager.websocket_pool.get_session_connections(session_id)]:
+                session_state.participant_count += 1
             
             logger.info(f"User {user_id} joined session {session_id}")
+            return session_state
+            
+        except Exception as e:
+            logger.error(f"Error joining session {session_id}: {e}")
+            return None
+    
+    async def leave_session(self, session_id: str, user_id: str, connection_id: str):
+        """Leave collaboration session"""
+        try:
+            session_state = self.local_sessions.get(session_id)
+            if not session_state:
+                return
+            
+            # Remove connection from session
+            session_state.active_connections.discard(connection_id)
+            session_state.last_activity = datetime.utcnow()
+            
+            # Update participant count if user has no more connections
+            user_connections = [
+                conn for conn in self.collaboration_manager.websocket_pool.get_session_connections(session_id)
+                if conn.user_id == user_id and conn.connection_id != connection_id
+            ]
+            
+            if not user_connections:
+                session_state.participant_count = max(0, session_state.participant_count - 1)
+            
+            # Remove session if no active connections
+            if not session_state.active_connections:
+                await self.terminate_session(session_id, reason="no_active_participants")
+            
+            logger.info(f"User {user_id} left session {session_id}")
+            
+        except Exception as e:
+            logger.error(f"Error leaving session {session_id}: {e}")
+    
+    async def terminate_session(self, session_id: str, reason: str = "manual_termination"):
+        """Terminate collaboration session and cleanup resources"""
+        try:
+            session_state = self.local_sessions.get(session_id)
+            if not session_state:
+                return
+            
+            # Close all connections in session
+            session_connections = self.collaboration_manager.websocket_pool.get_session_connections(session_id)
+            for connection in session_connections:
+                await self.collaboration_manager.websocket_pool.remove_connection(
+                    connection.connection_id, reason=f"session_terminated_{reason}"
+                )
+            
+            # Release all cell locks
+            for cell_id in list(session_state.locked_cells.keys()):
+                await self.collaboration_manager.lock_manager.release_cell_lock(
+                    session_state.notebook_path, cell_id, session_state.locked_cells[cell_id]
+                )
+            
+            # Update session status in persistence
+            try:
+                session = await self.collaboration_manager.persistence.get_collaboration_session(session_id)
+                if session:
+                    session.status = 'terminated'
+                    # Note: persistence layer doesn't have update method, but we can log for audit
+                    await self.collaboration_manager.persistence.postgres.log_audit_event(
+                        session_id, session_state.created_by, 'session_terminated', 
+                        'collaboration_session', session_id, metadata={'reason': reason}
+                    )
+            except Exception as e:
+                logger.warning(f"Error updating session status in persistence: {e}")
+            
+            # Remove from local registry
+            del self.local_sessions[session_id]
+            
+            logger.info(f"Session terminated: {session_id} (reason: {reason})")
+            
+        except Exception as e:
+            logger.error(f"Error terminating session {session_id}: {e}")
+    
+    def get_session(self, session_id: str) -> Optional[SessionState]:
+        """Get local session state"""
+        return self.local_sessions.get(session_id)
+    
+    async def get_session_stats(self) -> Dict[str, Any]:
+        """Get session statistics"""
+        total_participants = sum(state.participant_count for state in self.local_sessions.values())
+        total_connections = sum(len(state.active_connections) for state in self.local_sessions.values())
+        
+        return {
+            'total_sessions': len(self.local_sessions),
+            'active_sessions': len([s for s in self.local_sessions.values() if s.status == 'active']),
+            'total_participants': total_participants,
+            'total_connections': total_connections,
+            'sessions': {
+                session_id: {
+                    'notebook_path': state.notebook_path,
+                    'participant_count': state.participant_count,
+                    'connection_count': len(state.active_connections),
+                    'last_activity': state.last_activity.isoformat(),
+                    'locked_cells': len(state.locked_cells)
+                }
+                for session_id, state in self.local_sessions.items()
+            }
+        }
+    
+    async def _session_cleanup(self):
+        """Background task for session maintenance and cleanup"""
+        while True:
+            try:
+                await asyncio.sleep(self.cleanup_interval)
+                
+                current_time = datetime.utcnow()
+                expired_sessions = []
+                
+                for session_id, session_state in self.local_sessions.items():
+                    # Check for expired sessions
+                    if (current_time - session_state.last_activity).total_seconds() > self.session_ttl:
+                        expired_sessions.append(session_id)
+                    
+                    # Check for orphaned sessions (no active connections)
+                    elif not session_state.active_connections:
+                        # Grace period of 5 minutes for reconnection
+                        if (current_time - session_state.last_activity).total_seconds() > 300:
+                            expired_sessions.append(session_id)
+                
+                # Clean up expired sessions
+                for session_id in expired_sessions:
+                    await self.terminate_session(session_id, reason="cleanup_expired")
+                
+                if expired_sessions:
+                    logger.info(f"Cleaned up {len(expired_sessions)} expired sessions")
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in session cleanup: {e}")
+
+
+class PresenceTracker:
+    """Real-time user presence and awareness broadcasting"""
+    
+    def __init__(self, collaboration_manager: 'CollaborationManager'):
+        self.collaboration_manager = collaboration_manager
+        self.user_presence: Dict[str, Dict[str, PresenceUpdate]] = {}  # session_id -> user_id -> presence
+        
+        # Configuration
+        self.presence_broadcast_interval = float(os.getenv('JUPYTER_COLLAB_PRESENCE_INTERVAL', '1.0'))  # 1 second
+        self.presence_timeout = int(os.getenv('JUPYTER_COLLAB_PRESENCE_TIMEOUT', '30'))  # 30 seconds
+        
+        # Background tasks
+        self._broadcast_task: Optional[asyncio.Task] = None
+        self._cleanup_task: Optional[asyncio.Task] = None
+        
+        logger.info("PresenceTracker initialized")
+    
+    async def start(self):
+        """Start background presence broadcasting"""
+        if not self._broadcast_task:
+            self._broadcast_task = asyncio.create_task(self._presence_broadcaster())
+        if not self._cleanup_task:
+            self._cleanup_task = asyncio.create_task(self._presence_cleanup())
+        logger.info("PresenceTracker background tasks started")
+    
+    async def stop(self):
+        """Stop background tasks"""
+        if self._broadcast_task:
+            self._broadcast_task.cancel()
+            try:
+                await self._broadcast_task
+            except asyncio.CancelledError:
+                pass
+        
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+        
+        logger.info("PresenceTracker stopped")
+    
+    async def update_presence(self, session_id: str, user_id: str, 
+                            presence_data: Dict[str, Any]) -> bool:
+        """Update user presence information"""
+        try:
+            presence_update = PresenceUpdate(
+                user_id=user_id,
+                session_id=session_id,
+                cursor_position=presence_data.get('cursor_position'),
+                selection=presence_data.get('selection'),
+                active_cell=presence_data.get('active_cell'),
+                status=presence_data.get('status', 'active'),
+                custom_data=presence_data.get('custom_data', {})
+            )
+            
+            # Store locally
+            if session_id not in self.user_presence:
+                self.user_presence[session_id] = {}
+            self.user_presence[session_id][user_id] = presence_update
+            
+            # Store in Redis for cross-instance coordination
+            await self.collaboration_manager.persistence.update_user_presence(
+                session_id, user_id, asdict(presence_update)
+            )
+            
+            logger.debug(f"Presence updated for user {user_id} in session {session_id}")
             return True
+            
+        except Exception as e:
+            logger.error(f"Error updating presence for user {user_id}: {e}")
+            return False
+    
+    async def remove_presence(self, session_id: str, user_id: str):
+        """Remove user presence when disconnecting"""
+        try:
+            # Remove from local cache
+            if session_id in self.user_presence:
+                self.user_presence[session_id].pop(user_id, None)
+                if not self.user_presence[session_id]:
+                    del self.user_presence[session_id]
+            
+            # Update persistence layer (set status to offline)
+            await self.collaboration_manager.persistence.update_user_presence(
+                session_id, user_id, {
+                    'user_id': user_id,
+                    'session_id': session_id,
+                    'status': 'offline',
+                    'timestamp': time.time()
+                }
+            )
+            
+            logger.debug(f"Presence removed for user {user_id} in session {session_id}")
+            
+        except Exception as e:
+            logger.error(f"Error removing presence for user {user_id}: {e}")
+    
+    async def get_session_presence(self, session_id: str) -> List[Dict[str, Any]]:
+        """Get all active presence for a session"""
+        try:
+            # Get from Redis (authoritative for cross-instance coordination)
+            participants = await self.collaboration_manager.persistence.get_session_participants(session_id)
+            
+            # Filter out stale presence (older than timeout)
+            current_time = time.time()
+            active_presence = []
+            
+            for participant in participants:
+                last_seen = participant.get('last_seen', 0)
+                if current_time - last_seen < self.presence_timeout:
+                    active_presence.append(participant)
+            
+            return active_presence
+            
+        except Exception as e:
+            logger.error(f"Error getting session presence: {e}")
+            return []
+    
+    async def _presence_broadcaster(self):
+        """Background task to broadcast presence updates to all clients"""
+        while True:
+            try:
+                await asyncio.sleep(self.presence_broadcast_interval)
+                
+                # Broadcast presence for each active session
+                for session_id in list(self.user_presence.keys()):
+                    try:
+                        presence_data = await self.get_session_presence(session_id)
+                        
+                        if presence_data:
+                            # Prepare presence update message
+                            message = {
+                                'type': 'presence_update',
+                                'session_id': session_id,
+                                'participants': presence_data,
+                                'timestamp': time.time()
+                            }
+                            
+                            # Broadcast to all connections in session
+                            await self.collaboration_manager.websocket_pool.broadcast_to_session(
+                                session_id, message
+                            )
+                    
+                    except Exception as e:
+                        logger.warning(f"Error broadcasting presence for session {session_id}: {e}")
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in presence broadcaster: {e}")
+    
+    async def _presence_cleanup(self):
+        """Background task to clean up stale presence data"""
+        while True:
+            try:
+                await asyncio.sleep(60)  # Clean up every minute
+                
+                current_time = time.time()
+                
+                # Clean up local presence cache
+                for session_id in list(self.user_presence.keys()):
+                    session_presence = self.user_presence[session_id]
+                    
+                    stale_users = []
+                    for user_id, presence in session_presence.items():
+                        if current_time - presence.timestamp > self.presence_timeout:
+                            stale_users.append(user_id)
+                    
+                    for user_id in stale_users:
+                        await self.remove_presence(session_id, user_id)
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in presence cleanup: {e}")
+
+
+class LockManager:
+    """Intelligent cell-level conflict prevention with TTL management"""
+    
+    def __init__(self, collaboration_manager: 'CollaborationManager'):
+        self.collaboration_manager = collaboration_manager
+        
+        # Configuration
+        self.lock_timeout = int(os.getenv('JUPYTER_COLLAB_LOCK_TIMEOUT', '300'))  # 5 minutes
+        self.lock_extend_threshold = int(os.getenv('JUPYTER_COLLAB_LOCK_EXTEND_THRESHOLD', '60'))  # 1 minute
+        
+        logger.info("LockManager initialized")
+    
+    async def acquire_cell_lock(self, notebook_path: str, cell_id: str, 
+                              user_id: str, session_id: str) -> Dict[str, Any]:
+        """Acquire cell-level lock with intelligent conflict detection"""
+        try:
+            # Attempt to acquire lock via persistence layer
+            lock_acquired = await self.collaboration_manager.persistence.acquire_cell_lock(
+                notebook_path, cell_id, user_id
+            )
+            
+            result = {
+                'success': lock_acquired,
+                'cell_id': cell_id,
+                'user_id': user_id,
+                'timestamp': time.time()
+            }
+            
+            if lock_acquired:
+                # Update local session state
+                session_state = self.collaboration_manager.session_registry.get_session(session_id)
+                if session_state:
+                    session_state.locked_cells[cell_id] = user_id
+                
+                # Broadcast lock acquisition to other users
+                lock_message = {
+                    'type': 'cell_lock_acquired',
+                    'cell_id': cell_id,
+                    'user_id': user_id,
+                    'timestamp': result['timestamp']
+                }
+                
+                await self.collaboration_manager.websocket_pool.broadcast_to_session(
+                    session_id, lock_message, exclude_user_id=user_id
+                )
+                
+                result['expires_at'] = time.time() + self.lock_timeout
+                logger.debug(f"Cell lock acquired: {cell_id} by {user_id}")
+                
+            else:
+                # Check who currently holds the lock
+                try:
+                    # Query Redis for current lock holder
+                    lock_key = f"lock:{hashlib.sha256(notebook_path.encode()).hexdigest()}:{cell_id}"
+                    if self.collaboration_manager.persistence.redis:
+                        existing_lock = await self.collaboration_manager.persistence.redis.redis_client.get(lock_key)
+                        if existing_lock:
+                            lock_data = self.collaboration_manager.persistence.redis.encryption.decrypt_data(existing_lock).decode('utf-8')
+                            lock_holder = lock_data.split(':')[0]
+                            result['current_holder'] = lock_holder
+                            
+                except Exception as e:
+                    logger.warning(f"Error checking lock holder: {e}")
+                
+                logger.debug(f"Cell lock denied: {cell_id} for {user_id}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error acquiring cell lock: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'cell_id': cell_id,
+                'user_id': user_id,
+                'timestamp': time.time()
+            }
+    
+    async def release_cell_lock(self, notebook_path: str, cell_id: str, 
+                              user_id: str, session_id: str) -> Dict[str, Any]:
+        """Release cell-level lock with validation"""
+        try:
+            # Release lock via persistence layer
+            lock_released = await self.collaboration_manager.persistence.release_cell_lock(
+                notebook_path, cell_id, user_id
+            )
+            
+            result = {
+                'success': lock_released,
+                'cell_id': cell_id,
+                'user_id': user_id,
+                'timestamp': time.time()
+            }
+            
+            if lock_released:
+                # Update local session state
+                session_state = self.collaboration_manager.session_registry.get_session(session_id)
+                if session_state:
+                    session_state.locked_cells.pop(cell_id, None)
+                
+                # Broadcast lock release to other users
+                release_message = {
+                    'type': 'cell_lock_released',
+                    'cell_id': cell_id,
+                    'user_id': user_id,
+                    'timestamp': result['timestamp']
+                }
+                
+                await self.collaboration_manager.websocket_pool.broadcast_to_session(
+                    session_id, release_message, exclude_user_id=user_id
+                )
+                
+                logger.debug(f"Cell lock released: {cell_id} by {user_id}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error releasing cell lock: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'cell_id': cell_id,
+                'user_id': user_id,
+                'timestamp': time.time()
+            }
+    
+    async def extend_cell_lock(self, notebook_path: str, cell_id: str, 
+                             user_id: str, session_id: str) -> Dict[str, Any]:
+        """Extend cell lock TTL for continued editing"""
+        try:
+            # Re-acquire lock to extend TTL
+            result = await self.acquire_cell_lock(notebook_path, cell_id, user_id, session_id)
+            
+            if result['success']:
+                result['extended'] = True
+                logger.debug(f"Cell lock extended: {cell_id} by {user_id}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error extending cell lock: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'cell_id': cell_id,
+                'user_id': user_id,
+                'timestamp': time.time()
+            }
+    
+    async def get_session_locks(self, session_id: str) -> Dict[str, str]:
+        """Get all active cell locks for a session"""
+        session_state = self.collaboration_manager.session_registry.get_session(session_id)
+        if session_state:
+            return dict(session_state.locked_cells)
+        return {}
+    
+    async def release_user_locks(self, user_id: str, session_id: str):
+        """Release all locks held by a user (on disconnect)"""
+        try:
+            session_state = self.collaboration_manager.session_registry.get_session(session_id)
+            if not session_state:
+                return
+            
+            user_locks = [
+                cell_id for cell_id, lock_holder in session_state.locked_cells.items()
+                if lock_holder == user_id
+            ]
+            
+            for cell_id in user_locks:
+                await self.release_cell_lock(
+                    session_state.notebook_path, cell_id, user_id, session_id
+                )
+            
+            if user_locks:
+                logger.info(f"Released {len(user_locks)} locks for user {user_id} on disconnect")
+            
+        except Exception as e:
+            logger.error(f"Error releasing user locks: {e}")
+
+
+class MessageRouter:
+    """CRDT operation routing and synchronization coordination"""
+    
+    def __init__(self, collaboration_manager: 'CollaborationManager'):
+        self.collaboration_manager = collaboration_manager
+        
+        # Message queues for handling high-volume operations
+        self.message_queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
+        self.dead_letter_queue: List[Dict[str, Any]] = []
+        
+        # Configuration
+        self.max_message_size = int(os.getenv('JUPYTER_COLLAB_MAX_MESSAGE_SIZE', '1048576'))  # 1MB
+        self.queue_timeout = float(os.getenv('JUPYTER_COLLAB_QUEUE_TIMEOUT', '5.0'))  # 5 seconds
+        
+        # Background task
+        self._processor_task: Optional[asyncio.Task] = None
+        
+        logger.info("MessageRouter initialized")
+    
+    async def start(self):
+        """Start message processing"""
+        if not self._processor_task:
+            self._processor_task = asyncio.create_task(self._message_processor())
+        logger.info("MessageRouter background task started")
+    
+    async def stop(self):
+        """Stop message processing"""
+        if self._processor_task:
+            self._processor_task.cancel()
+            try:
+                await self._processor_task
+            except asyncio.CancelledError:
+                pass
+        logger.info("MessageRouter stopped")
+    
+    async def route_crdt_operation(self, session_id: str, user_id: str, 
+                                  operation_data: Dict[str, Any], 
+                                  connection_id: str) -> bool:
+        """Route CRDT operation to all session participants"""
+        try:
+            # Validate message size
+            message_size = len(json.dumps(operation_data))
+            if message_size > self.max_message_size:
+                logger.warning(f"Message too large: {message_size} bytes from {user_id}")
+                return False
+            
+            # Create CRDT operation
+            operation = CRDTOperation(
+                operation_id=str(uuid.uuid4()),
+                document_id=f"notebook:{session_id}",
+                client_id=operation_data.get('client_id', int(time.time() * 1000) % 2**31),
+                user_id=user_id,
+                timestamp=datetime.utcnow(),
+                operation_type=operation_data.get('type', 'update'),
+                operation_data=json.dumps(operation_data).encode('utf-8'),
+                cell_id=operation_data.get('cell_id')
+            )
+            
+            # Store operation in persistence layer
+            await self.collaboration_manager.persistence.store_crdt_operation(operation)
+            
+            # Prepare broadcast message
+            broadcast_message = {
+                'type': 'crdt_operation',
+                'operation_id': operation.operation_id,
+                'client_id': operation.client_id,
+                'user_id': user_id,
+                'timestamp': operation.timestamp.isoformat(),
+                'operation_type': operation.operation_type,
+                'operation_data': operation_data,
+                'cell_id': operation.cell_id
+            }
+            
+            # Queue for processing
+            try:
+                await asyncio.wait_for(
+                    self.message_queue.put({
+                        'session_id': session_id,
+                        'message': broadcast_message,
+                        'exclude_connection_id': connection_id,
+                        'timestamp': time.time()
+                    }),
+                    timeout=self.queue_timeout
+                )
+                
+                return True
+                
+            except asyncio.TimeoutError:
+                logger.warning(f"Message queue timeout for session {session_id}")
+                self.dead_letter_queue.append({
+                    'session_id': session_id,
+                    'message': broadcast_message,
+                    'timestamp': time.time(),
+                    'error': 'queue_timeout'
+                })
+                return False
+            
+        except Exception as e:
+            logger.error(f"Error routing CRDT operation: {e}")
+            return False
+    
+    async def route_awareness_update(self, session_id: str, user_id: str,
+                                   awareness_data: Dict[str, Any],
+                                   connection_id: str) -> bool:
+        """Route awareness/presence update to session participants"""
+        try:
+            # Update presence tracker
+            await self.collaboration_manager.presence_tracker.update_presence(
+                session_id, user_id, awareness_data
+            )
+            
+            # Prepare awareness message
+            awareness_message = {
+                'type': 'awareness_update',
+                'user_id': user_id,
+                'awareness_data': awareness_data,
+                'timestamp': time.time()
+            }
+            
+            # Broadcast immediately (don't queue - awareness needs low latency)
+            await self.collaboration_manager.websocket_pool.broadcast_to_session(
+                session_id, awareness_message, exclude_connection_id=connection_id
+            )
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error routing awareness update: {e}")
+            return False
+    
+    async def route_lock_operation(self, session_id: str, user_id: str,
+                                 lock_data: Dict[str, Any],
+                                 connection_id: str) -> Dict[str, Any]:
+        """Route cell lock operation"""
+        try:
+            operation = lock_data.get('operation')
+            cell_id = lock_data.get('cell_id')
+            
+            if not operation or not cell_id:
+                return {'success': False, 'error': 'Invalid lock operation data'}
+            
+            # Get session state for notebook path
+            session_state = self.collaboration_manager.session_registry.get_session(session_id)
+            if not session_state:
+                return {'success': False, 'error': 'Session not found'}
+            
+            # Route to appropriate lock operation
+            if operation == 'acquire':
+                result = await self.collaboration_manager.lock_manager.acquire_cell_lock(
+                    session_state.notebook_path, cell_id, user_id, session_id
+                )
+            elif operation == 'release':
+                result = await self.collaboration_manager.lock_manager.release_cell_lock(
+                    session_state.notebook_path, cell_id, user_id, session_id
+                )
+            elif operation == 'extend':
+                result = await self.collaboration_manager.lock_manager.extend_cell_lock(
+                    session_state.notebook_path, cell_id, user_id, session_id
+                )
+            else:
+                return {'success': False, 'error': f'Unknown lock operation: {operation}'}
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error routing lock operation: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    async def _message_processor(self):
+        """Background task to process message queue"""
+        while True:
+            try:
+                # Get message from queue
+                message_item = await self.message_queue.get()
+                
+                try:
+                    # Process the message
+                    await self.collaboration_manager.websocket_pool.broadcast_to_session(
+                        message_item['session_id'],
+                        message_item['message'],
+                        exclude_connection_id=message_item.get('exclude_connection_id')
+                    )
+                    
+                    # Mark as processed
+                    self.message_queue.task_done()
+                    
+                except Exception as e:
+                    logger.error(f"Error processing message: {e}")
+                    # Move to dead letter queue
+                    self.dead_letter_queue.append({
+                        **message_item,
+                        'error': str(e),
+                        'processing_timestamp': time.time()
+                    })
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in message processor: {e}")
+
+
+class AuthenticationBridge:
+    """JupyterHub integration for user identity and permissions"""
+    
+    def __init__(self, collaboration_manager: 'CollaborationManager'):
+        self.collaboration_manager = collaboration_manager
+        
+        # Configuration
+        self.auth_timeout = float(os.getenv('JUPYTER_COLLAB_AUTH_TIMEOUT', '30.0'))  # 30 seconds
+        self.session_token_ttl = int(os.getenv('JUPYTER_COLLAB_SESSION_TOKEN_TTL', '3600'))  # 1 hour
+        
+        # Token cache for performance
+        self.token_cache: Dict[str, Dict[str, Any]] = {}
+        
+        logger.info("AuthenticationBridge initialized")
+    
+    async def authenticate_user(self, request_handler: JupyterHandler) -> Optional[Dict[str, Any]]:
+        """Authenticate user from Jupyter request handler"""
+        try:
+            # Get user from current handler (already authenticated by Jupyter)
+            user = request_handler.current_user
+            if not user:
+                logger.warning("No authenticated user found")
+                return None
+            
+            user_info = {
+                'user_id': user['name'],
+                'display_name': user.get('display_name', user['name']),
+                'groups': user.get('groups', []),
+                'admin': user.get('admin', False),
+                'last_activity': user.get('last_activity'),
+                'pending': user.get('pending'),
+            }
+            
+            # Add session token for WebSocket authentication
+            session_token = self._generate_session_token(user_info['user_id'])
+            user_info['session_token'] = session_token
+            
+            # Cache token
+            self.token_cache[session_token] = {
+                'user_info': user_info,
+                'expires_at': time.time() + self.session_token_ttl,
+                'issued_at': time.time()
+            }
+            
+            logger.debug(f"User authenticated: {user_info['user_id']}")
+            return user_info
+            
+        except Exception as e:
+            logger.error(f"Error authenticating user: {e}")
+            return None
+    
+    async def validate_session_token(self, token: str) -> Optional[Dict[str, Any]]:
+        """Validate session token for WebSocket authentication"""
+        try:
+            # Check cache first
+            cached_token = self.token_cache.get(token)
+            if cached_token:
+                if cached_token['expires_at'] > time.time():
+                    return cached_token['user_info']
+                else:
+                    # Token expired, remove from cache
+                    del self.token_cache[token]
+            
+            logger.warning(f"Invalid or expired session token")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error validating session token: {e}")
+            return None
+    
+    async def validate_permission(self, user_id: str, session_id: str, 
+                                required_permission: str) -> bool:
+        """Validate user permission for specific action"""
+        try:
+            # Use persistence layer to validate permissions
+            return await self.collaboration_manager.persistence.validate_user_permission(
+                user_id, session_id, required_permission
+            )
+            
+        except Exception as e:
+            logger.error(f"Error validating permission: {e}")
+            return False
+    
+    async def grant_permission(self, granter_user_id: str, target_user_id: str,
+                             session_id: str, permission_level: str,
+                             expires_at: Optional[datetime] = None) -> bool:
+        """Grant permission to user for session"""
+        try:
+            # Validate that granter has admin permissions
+            can_grant = await self.validate_permission(granter_user_id, session_id, 'admin')
+            if not can_grant:
+                logger.warning(f"User {granter_user_id} cannot grant permissions")
+                return False
+            
+            # Create permission
+            permission = UserPermission(
+                user_id=target_user_id,
+                session_id=session_id,
+                permission_level=permission_level,
+                granted_by=granter_user_id,
+                granted_at=datetime.utcnow(),
+                expires_at=expires_at
+            )
+            
+            await self.collaboration_manager.persistence.manage_user_permissions(permission)
+            
+            logger.info(f"Permission granted: {target_user_id} -> {permission_level} in {session_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error granting permission: {e}")
+            return False
+    
+    def _generate_session_token(self, user_id: str) -> str:
+        """Generate secure session token for WebSocket authentication"""
+        import secrets
+        token_data = f"{user_id}:{time.time()}:{secrets.token_hex(16)}"
+        return hashlib.sha256(token_data.encode()).hexdigest()
+    
+    def cleanup_expired_tokens(self):
+        """Clean up expired tokens from cache"""
+        current_time = time.time()
+        expired_tokens = [
+            token for token, data in self.token_cache.items()
+            if data['expires_at'] < current_time
+        ]
+        
+        for token in expired_tokens:
+            del self.token_cache[token]
+        
+        if expired_tokens:
+            logger.debug(f"Cleaned up {len(expired_tokens)} expired tokens")
+
+
+class CollaborationManager:
+    """
+    Central CollaborationManager class providing comprehensive session lifecycle management,
+    user coordination, cross-instance session state synchronization, and real-time message
+    routing for collaborative editing.
+    
+    This is the main orchestrator that coordinates all collaborative editing operations,
+    managing WebSocket connections, persistence, authentication, and real-time synchronization.
+    """
+    
+    def __init__(self, persistence_config: Optional[Dict[str, str]] = None):
+        """Initialize CollaborationManager with configuration"""
+        self.persistence_config = persistence_config or {}
+        
+        # Core components (initialized during startup)
+        self.persistence: Optional[PersistenceLayer] = None
+        self.websocket_pool: Optional[WebSocketPool] = None
+        self.session_registry: Optional[SessionRegistry] = None
+        self.presence_tracker: Optional[PresenceTracker] = None
+        self.lock_manager: Optional[LockManager] = None
+        self.message_router: Optional[MessageRouter] = None
+        self.auth_bridge: Optional[AuthenticationBridge] = None
+        
+        # State tracking
+        self.is_running = False
+        self.startup_time: Optional[datetime] = None
+        
+        # Configuration
+        self.enabled = os.getenv('JUPYTER_COLLAB_ENABLED', 'true').lower() == 'true'
+        self.degraded_mode = False
+        
+        # Thread pool for blocking operations
+        self.executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix='collab-')
+        
+        logger.info(f"CollaborationManager initialized (enabled: {self.enabled})")
+    
+    async def initialize(self) -> bool:
+        """Initialize all collaboration components with error handling"""
+        if not self.enabled:
+            logger.info("Collaboration features disabled")
+            return True
+        
+        try:
+            logger.info("Initializing collaboration infrastructure...")
+            
+            # Initialize persistence layer first
+            self.persistence = await create_persistence_layer(self.persistence_config)
+            
+            # Initialize core components
+            self.websocket_pool = WebSocketPool(self)
+            self.session_registry = SessionRegistry(self)
+            self.presence_tracker = PresenceTracker(self)
+            self.lock_manager = LockManager(self)
+            self.message_router = MessageRouter(self)
+            self.auth_bridge = AuthenticationBridge(self)
+            
+            # Start background tasks
+            await self.websocket_pool.start()
+            await self.session_registry.start()
+            await self.presence_tracker.start()
+            await self.message_router.start()
+            
+            self.is_running = True
+            self.startup_time = datetime.utcnow()
+            
+            logger.info("Collaboration infrastructure initialized successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize collaboration infrastructure: {e}")
+            
+            # Enter degraded mode
+            self.degraded_mode = True
+            self.enabled = False
+            
+            # Try to cleanup any partial initialization
+            await self._cleanup_components()
+            
+            return False
+    
+    async def shutdown(self):
+        """Graceful shutdown of collaboration manager"""
+        if not self.is_running:
+            return
+        
+        logger.info("Shutting down collaboration infrastructure...")
+        
+        try:
+            # Stop background tasks first
+            if self.message_router:
+                await self.message_router.stop()
+            if self.presence_tracker:
+                await self.presence_tracker.stop()
+            if self.session_registry:
+                await self.session_registry.stop()
+            if self.websocket_pool:
+                await self.websocket_pool.stop()
+            
+            # Close persistence layer
+            if self.persistence:
+                await self.persistence.close()
+            
+            # Shutdown thread pool
+            self.executor.shutdown(wait=True)
+            
+            self.is_running = False
+            
+            logger.info("Collaboration infrastructure shutdown completed")
+            
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+    
+    async def create_session(self, notebook_path: str, user_id: str,
+                           permissions: Optional[Dict[str, Any]] = None) -> Optional[str]:
+        """Create new collaborative session"""
+        if not self.enabled:
+            return None
+        
+        try:
+            return await self.session_registry.create_session(
+                notebook_path, user_id, permissions
+            )
+        except Exception as e:
+            logger.error(f"Error creating session: {e}")
+            return None
+    
+    async def join_session(self, session_id: str, user_id: str,
+                         websocket: tornado.websocket.WebSocketHandler,
+                         user_agent: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Join existing collaborative session"""
+        if not self.enabled:
+            return None
+        
+        try:
+            # Add WebSocket connection
+            connection_id = await self.websocket_pool.add_connection(
+                websocket, user_id, session_id, user_agent
+            )
+            
+            # Join session registry
+            session_state = await self.session_registry.join_session(
+                session_id, user_id, connection_id
+            )
+            
+            if not session_state:
+                await self.websocket_pool.remove_connection(
+                    connection_id, reason="session_join_failed"
+                )
+                return None
+            
+            # Initialize user presence
+            await self.presence_tracker.update_presence(session_id, user_id, {
+                'status': 'active',
+                'joined_at': time.time()
+            })
+            
+            # Get current session state for client
+            current_locks = await self.lock_manager.get_session_locks(session_id)
+            current_presence = await self.presence_tracker.get_session_presence(session_id)
+            
+            return {
+                'connection_id': connection_id,
+                'session_state': {
+                    'session_id': session_id,
+                    'notebook_path': session_state.notebook_path,
+                    'participant_count': session_state.participant_count,
+                    'document_version': session_state.document_version,
+                    'locked_cells': current_locks,
+                    'participants': current_presence
+                }
+            }
             
         except Exception as e:
             logger.error(f"Error joining session: {e}")
-            self.metrics.errors_total.labels(
-                error_type='session_join',
-                component='session_manager'
-            ).inc()
-            return False
+            return None
     
-    async def leave_session(self, connection_id: str, reason: str = "user_left") -> bool:
-        """Remove user from collaborative session"""
-        try:
-            if connection_id not in self.websocket_connections:
-                return False
-            
-            connection = self.websocket_connections[connection_id]
-            session_id = connection.session_id
-            user_id = connection.user_id
-            
-            if session_id not in self.sessions:
-                return False
-            
-            session = self.sessions[session_id]
-            
-            async with self.session_locks[session_id]:
-                # Remove connection
-                self.websocket_connections.pop(connection_id, None)
-                session.websocket_connections.discard(connection_id)
-                
-                # Check if user has other connections
-                user_connections = [
-                    conn for conn in self.websocket_connections.values()
-                    if conn.user_id == user_id and conn.session_id == session_id
-                ]
-                
-                if not user_connections:
-                    # User completely left session
-                    session.participants.discard(user_id)
-                    
-                    # Force release user's locks
-                    released_locks = await self.lock_manager.force_release_user_locks(session_id, user_id)
-                    if released_locks > 0:
-                        logger.info(f"Released {released_locks} locks for departing user {user_id}")
-                    
-                    # Remove presence
-                    await self.presence_manager.remove_user_presence(session_id, user_id)
-                
-                session.last_activity = datetime.utcnow()
-                
-                # Persist updated session state
-                await self._persist_session_state(session)
-            
-            # Update metrics
-            self.metrics.websocket_connections.dec()
-            if not user_connections:
-                self.metrics.users_connected.dec()
-            
-            # Broadcast user left event
-            await self._broadcast_to_session(
-                session_id,
-                CollaborationMessage(
-                    message_type=MessageType.SESSION_LEAVE,
-                    session_id=session_id,
-                    user_id=user_id,
-                    timestamp=datetime.utcnow(),
-                    payload={
-                        'user_id': user_id,
-                        'reason': reason,
-                        'participants': list(session.participants)
-                    }
-                )
-            )
-            
-            # Check if session should be terminated
-            if len(session.participants) == 0:
-                await self.terminate_session(session_id, reason="no_participants")
-            
-            logger.info(f"User {user_id} left session {session_id} (reason: {reason})")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error leaving session: {e}")
-            self.metrics.errors_total.labels(
-                error_type='session_leave',
-                component='session_manager'
-            ).inc()
+    async def handle_websocket_message(self, connection_id: str, message: Dict[str, Any]) -> bool:
+        """Handle incoming WebSocket message"""
+        if not self.enabled:
             return False
-    
-    async def terminate_session(self, session_id: str, reason: str = "manual") -> bool:
-        """Terminate collaborative session"""
-        try:
-            if session_id not in self.sessions:
-                return False
-            
-            session = self.sessions[session_id]
-            
-            async with self.session_locks[session_id]:
-                # Update session status
-                session.status = SessionStatus.TERMINATING
-                session.last_activity = datetime.utcnow()
-                
-                # Disconnect all WebSocket connections
-                connections_to_close = list(session.websocket_connections)
-                for connection_id in connections_to_close:
-                    await self._disconnect_websocket(connection_id, reason=f"session_terminated:{reason}")
-                
-                # Clear session locks
-                session_locks = await self.lock_manager.get_session_locks(session_id)
-                for cell_id in session_locks:
-                    await self.redis_client.delete(f"lock:{session_id}:{cell_id}")
-                
-                # Clear session presence
-                await self.redis_client.delete(f"presence:{session_id}")
-                
-                # Update session status
-                session.status = SessionStatus.TERMINATED
-                
-                # Persist final session state
-                await self._persist_session_state(session)
-                
-                # Remove from active sessions
-                self.sessions.pop(session_id, None)
-            
-            # Update metrics
-            self.metrics.sessions_active.dec()
-            session_duration = (datetime.utcnow() - session.created_at).total_seconds()
-            self.metrics.session_duration.labels(status='terminated').observe(session_duration)
-            
-            logger.info(f"Terminated session {session_id} (reason: {reason})")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error terminating session: {e}")
-            self.metrics.errors_total.labels(
-                error_type='session_termination',
-                component='session_manager'
-            ).inc()
-            return False
-    
-    async def process_message(self, connection_id: str, message_data: Dict[str, Any]) -> bool:
-        """Process incoming WebSocket message"""
-        start_time = time.time()
         
         try:
-            if connection_id not in self.websocket_connections:
+            connection = self.websocket_pool.get_connection(connection_id)
+            if not connection:
                 logger.warning(f"Message from unknown connection: {connection_id}")
                 return False
             
-            connection = self.websocket_connections[connection_id]
+            message_type = message.get('type')
+            user_id = connection.user_id
+            session_id = connection.session_id
             
-            # Parse message
-            message = CollaborationMessage(
-                message_type=MessageType(message_data.get('type', 'unknown')),
-                session_id=connection.session_id,
-                user_id=connection.user_id,
-                timestamp=datetime.utcnow(),
-                payload=message_data.get('payload', {}),
-                operation_id=message_data.get('operation_id')
-            )
+            # Update heartbeat
+            await self.websocket_pool.update_heartbeat(connection_id)
             
-            # Update connection heartbeat
-            connection.last_heartbeat = datetime.utcnow()
+            # Route message based on type
+            if message_type == 'crdt_operation':
+                return await self.message_router.route_crdt_operation(
+                    session_id, user_id, message.get('data', {}), connection_id
+                )
             
-            # Process based on message type
-            success = await self._process_message_by_type(message, connection)
+            elif message_type == 'awareness_update':
+                return await self.message_router.route_awareness_update(
+                    session_id, user_id, message.get('data', {}), connection_id
+                )
             
-            # Update metrics
-            status = 'success' if success else 'failed'
-            self.metrics.websocket_messages.labels(
-                message_type=message.message_type.value,
-                status=status
-            ).inc()
+            elif message_type == 'lock_operation':
+                result = await self.message_router.route_lock_operation(
+                    session_id, user_id, message.get('data', {}), connection_id
+                )
+                
+                # Send response back to client
+                response = {
+                    'type': 'lock_operation_response',
+                    'data': result
+                }
+                await connection.websocket.write_message(json.dumps(response))
+                return result.get('success', False)
             
-            return success
-            
-        except Exception as e:
-            logger.error(f"Error processing message: {e}")
-            self.metrics.websocket_messages.labels(
-                message_type='unknown',
-                status='error'
-            ).inc()
-            return False
-        finally:
-            duration = time.time() - start_time
-            message_type = message_data.get('type', 'unknown') if 'message_data' in locals() else 'unknown'
-            self.metrics.message_processing_duration.labels(
-                message_type=message_type
-            ).observe(duration)
-    
-    async def _process_message_by_type(self, message: CollaborationMessage, 
-                                     connection: WebSocketConnection) -> bool:
-        """Process message based on type"""
-        try:
-            if message.message_type == MessageType.CRDT_OPERATION:
-                return await self._handle_crdt_operation(message, connection)
-            
-            elif message.message_type == MessageType.LOCK_REQUEST:
-                return await self._handle_lock_request(message, connection)
-            
-            elif message.message_type == MessageType.LOCK_RELEASE:
-                return await self._handle_lock_release(message, connection)
-            
-            elif message.message_type == MessageType.AWARENESS_UPDATE:
-                return await self._handle_awareness_update(message, connection)
-            
-            elif message.message_type == MessageType.PRESENCE_UPDATE:
-                return await self._handle_presence_update(message, connection)
-            
-            elif message.message_type == MessageType.HEARTBEAT:
-                return await self._handle_heartbeat(message, connection)
-            
-            elif message.message_type == MessageType.SYNC_REQUEST:
-                return await self._handle_sync_request(message, connection)
+            elif message_type == 'heartbeat':
+                # Send heartbeat response
+                response = {
+                    'type': 'heartbeat_response',
+                    'timestamp': time.time()
+                }
+                await connection.websocket.write_message(json.dumps(response))
+                return True
             
             else:
-                logger.warning(f"Unknown message type: {message.message_type}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error processing {message.message_type}: {e}")
-            return False
-    
-    async def _handle_crdt_operation(self, message: CollaborationMessage, 
-                                   connection: WebSocketConnection) -> bool:
-        """Handle CRDT operation message"""
-        try:
-            payload = message.payload
-            
-            # Create CRDT operation
-            crdt_operation = CRDTOperation(
-                operation_id=message.operation_id or str(uuid.uuid4()),
-                session_id=message.session_id,
-                user_id=message.user_id,
-                operation_type=OperationType(payload.get('operation_type', 'update')),
-                cell_id=payload.get('cell_id'),
-                content=payload.get('content'),
-                timestamp=message.timestamp,
-                vector_clock=payload.get('vector_clock', {}),
-                metadata=payload.get('metadata', {})
-            )
-            
-            # Validate permissions for operation
-            if not await self._validate_operation_permission(crdt_operation, connection):
-                logger.warning(f"Permission denied for CRDT operation by {message.user_id}")
+                logger.warning(f"Unknown message type: {message_type}")
                 return False
             
-            # Check cell lock if required
-            if crdt_operation.cell_id and crdt_operation.operation_type in [OperationType.UPDATE, OperationType.INSERT]:
-                lock_owner = await self.lock_manager.get_lock_owner(message.session_id, crdt_operation.cell_id)
-                if lock_owner and lock_owner != message.user_id:
-                    logger.warning(f"Cell {crdt_operation.cell_id} locked by {lock_owner}, rejecting operation from {message.user_id}")
-                    return False
-            
-            # Persist operation
-            await self.persistence.store_crdt_operation(crdt_operation)
-            
-            # Broadcast to other session participants
-            await self._broadcast_to_session(
-                message.session_id,
-                message,
-                exclude_connections={connection.connection_id}
-            )
-            
-            # Update session activity
-            if message.session_id in self.sessions:
-                self.sessions[message.session_id].last_activity = datetime.utcnow()
-            
-            return True
-            
         except Exception as e:
-            logger.error(f"Error handling CRDT operation: {e}")
+            logger.error(f"Error handling WebSocket message: {e}")
             return False
     
-    async def _handle_lock_request(self, message: CollaborationMessage, 
-                                 connection: WebSocketConnection) -> bool:
-        """Handle cell lock request"""
+    async def handle_user_disconnect(self, user_id: str, session_id: str, connection_id: str):
+        """Handle user disconnection and cleanup"""
         try:
-            cell_id = message.payload.get('cell_id')
-            if not cell_id:
-                return False
+            # Remove from session registry
+            await self.session_registry.leave_session(session_id, user_id, connection_id)
             
-            # Attempt lock acquisition
-            acquired = await self.lock_manager.acquire_lock(
-                message.session_id,
-                cell_id,
-                message.user_id
-            )
+            # Release all user locks
+            await self.lock_manager.release_user_locks(user_id, session_id)
             
-            # Send lock status response
-            response_message = CollaborationMessage(
-                message_type=MessageType.LOCK_STATUS,
-                session_id=message.session_id,
-                user_id=message.user_id,
-                timestamp=datetime.utcnow(),
-                payload={
-                    'cell_id': cell_id,
-                    'locked': acquired,
-                    'owner': message.user_id if acquired else await self.lock_manager.get_lock_owner(message.session_id, cell_id)
-                }
-            )
+            # Remove presence
+            await self.presence_tracker.remove_presence(session_id, user_id)
             
-            await self._send_message_to_connection(connection.connection_id, response_message)
-            
-            if acquired:
-                # Broadcast lock acquisition to other participants
-                await self._broadcast_to_session(
-                    message.session_id,
-                    response_message,
-                    exclude_connections={connection.connection_id}
-                )
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error handling lock request: {e}")
-            return False
-    
-    async def _handle_lock_release(self, message: CollaborationMessage, 
-                                 connection: WebSocketConnection) -> bool:
-        """Handle cell lock release"""
-        try:
-            cell_id = message.payload.get('cell_id')
-            if not cell_id:
-                return False
-            
-            # Release lock
-            released = await self.lock_manager.release_lock(
-                message.session_id,
-                cell_id,
-                message.user_id
-            )
-            
-            if released:
-                # Broadcast lock release
-                await self._broadcast_to_session(
-                    message.session_id,
-                    CollaborationMessage(
-                        message_type=MessageType.LOCK_STATUS,
-                        session_id=message.session_id,
-                        user_id=message.user_id,
-                        timestamp=datetime.utcnow(),
-                        payload={
-                            'cell_id': cell_id,
-                            'locked': False,
-                            'owner': None
-                        }
-                    )
-                )
-            
-            return released
-            
-        except Exception as e:
-            logger.error(f"Error handling lock release: {e}")
-            return False
-    
-    async def _handle_awareness_update(self, message: CollaborationMessage, 
-                                     connection: WebSocketConnection) -> bool:
-        """Handle awareness/cursor position update"""
-        try:
-            # Update presence with awareness data
-            awareness_data = message.payload.get('awareness', {})
-            await self.presence_manager.update_presence(
-                message.session_id,
-                message.user_id,
-                {
-                    'awareness': awareness_data,
-                    'cursor': message.payload.get('cursor'),
-                    'selection': message.payload.get('selection'),
-                    'status': 'active'
-                }
-            )
-            
-            # Broadcast to other participants
-            await self._broadcast_to_session(
-                message.session_id,
-                message,
-                exclude_connections={connection.connection_id}
-            )
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error handling awareness update: {e}")
-            return False
-    
-    async def _handle_presence_update(self, message: CollaborationMessage, 
-                                    connection: WebSocketConnection) -> bool:
-        """Handle user presence update"""
-        try:
-            presence_data = message.payload.get('presence', {})
-            
-            await self.presence_manager.update_presence(
-                message.session_id,
-                message.user_id,
-                presence_data
-            )
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error handling presence update: {e}")
-            return False
-    
-    async def _handle_heartbeat(self, message: CollaborationMessage, 
-                              connection: WebSocketConnection) -> bool:
-        """Handle heartbeat message"""
-        try:
-            # Update connection heartbeat timestamp
-            connection.last_heartbeat = datetime.utcnow()
-            
-            # Send heartbeat response
-            response = CollaborationMessage(
-                message_type=MessageType.HEARTBEAT,
-                session_id=message.session_id,
-                user_id=message.user_id,
-                timestamp=datetime.utcnow(),
-                payload={'pong': True}
-            )
-            
-            await self._send_message_to_connection(connection.connection_id, response)
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error handling heartbeat: {e}")
-            return False
-    
-    async def _handle_sync_request(self, message: CollaborationMessage, 
-                                 connection: WebSocketConnection) -> bool:
-        """Handle session synchronization request"""
-        try:
-            await self._send_session_sync(connection)
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error handling sync request: {e}")
-            return False
-    
-    async def _send_session_sync(self, connection: WebSocketConnection):
-        """Send complete session state to connection"""
-        try:
-            session = self.sessions.get(connection.session_id)
-            if not session:
-                return
-            
-            # Get session locks
-            locks = await self.lock_manager.get_session_locks(connection.session_id)
-            
-            # Get presence data
-            presence = await self.presence_manager.get_session_presence(connection.session_id)
-            
-            sync_message = CollaborationMessage(
-                message_type=MessageType.SYNC_RESPONSE,
-                session_id=connection.session_id,
-                user_id=connection.user_id,
-                timestamp=datetime.utcnow(),
-                payload={
-                    'session_id': session.session_id,
-                    'participants': list(session.participants),
-                    'permissions': {user: role.value for user, role in session.permissions.items()},
-                    'locks': locks,
-                    'presence': presence,
-                    'status': session.status.value
-                }
-            )
-            
-            await self._send_message_to_connection(connection.connection_id, sync_message)
-            
-        except Exception as e:
-            logger.error(f"Error sending session sync: {e}")
-    
-    async def _broadcast_to_session(self, session_id: str, message: CollaborationMessage, 
-                                  exclude_connections: Set[str] = None):
-        """Broadcast message to all connections in session"""
-        try:
-            if session_id not in self.sessions:
-                return
-            
-            session = self.sessions[session_id]
-            exclude_connections = exclude_connections or set()
-            
-            # Get all connections for session
-            target_connections = [
-                conn_id for conn_id in session.websocket_connections
-                if conn_id not in exclude_connections and conn_id in self.websocket_connections
-            ]
-            
-            # Send message to all target connections
-            for connection_id in target_connections:
-                try:
-                    await self._send_message_to_connection(connection_id, message)
-                except Exception as e:
-                    logger.error(f"Error sending message to connection {connection_id}: {e}")
-                    # Remove failed connection
-                    await self._disconnect_websocket(connection_id, reason="send_failed")
-            
-        except Exception as e:
-            logger.error(f"Error broadcasting to session: {e}")
-    
-    async def _send_message_to_connection(self, connection_id: str, message: CollaborationMessage):
-        """Send message to specific WebSocket connection"""
-        try:
-            if connection_id not in self.websocket_connections:
-                return
-            
-            connection = self.websocket_connections[connection_id]
-            
-            # Convert message to JSON
-            message_data = {
-                'type': message.message_type.value,
-                'session_id': message.session_id,
-                'user_id': message.user_id,
-                'timestamp': message.timestamp.isoformat(),
-                'payload': message.payload
+            # Broadcast disconnect to other users
+            disconnect_message = {
+                'type': 'user_disconnected',
+                'user_id': user_id,
+                'timestamp': time.time()
             }
             
-            if message.operation_id:
-                message_data['operation_id'] = message.operation_id
-            
-            # Send via WebSocket handler
-            connection.handler.write_message(json.dumps(message_data))
-            
-        except Exception as e:
-            logger.error(f"Error sending message to connection: {e}")
-            raise
-    
-    async def _disconnect_websocket(self, connection_id: str, reason: str = "unknown"):
-        """Disconnect WebSocket connection"""
-        try:
-            if connection_id in self.websocket_connections:
-                connection = self.websocket_connections[connection_id]
-                
-                # Close WebSocket connection
-                try:
-                    connection.handler.close(code=1000, reason=reason)
-                except Exception as e:
-                    logger.debug(f"Error closing WebSocket handler: {e}")
-                
-                # Remove from session
-                await self.leave_session(connection_id, reason=reason)
-            
-        except Exception as e:
-            logger.error(f"Error disconnecting WebSocket: {e}")
-    
-    async def _validate_operation_permission(self, operation: CRDTOperation, 
-                                           connection: WebSocketConnection) -> bool:
-        """Validate user permission for CRDT operation"""
-        try:
-            # Check if user has write permissions
-            if connection.permissions in [UserRole.VIEWER, UserRole.GUEST]:
-                return False
-            
-            # Admin can do anything
-            if connection.permissions == UserRole.ADMIN:
-                return True
-            
-            # Editor can perform most operations
-            if connection.permissions == UserRole.EDITOR:
-                # Block certain admin-only operations
-                admin_only_operations = [OperationType.DELETE]
-                if operation.operation_type in admin_only_operations:
-                    return False
-                return True
-            
-            return False
-            
-        except Exception as e:
-            logger.error(f"Error validating operation permission: {e}")
-            return False
-    
-    async def _cleanup_inactive_sessions(self):
-        """Clean up inactive and expired sessions"""
-        try:
-            current_time = datetime.utcnow()
-            timeout_threshold = timedelta(seconds=self.config.session_timeout)
-            
-            sessions_to_terminate = []
-            
-            for session_id, session in self.sessions.items():
-                # Check for session timeout
-                if current_time - session.last_activity > timeout_threshold:
-                    sessions_to_terminate.append((session_id, "timeout"))
-                
-                # Check for sessions with no participants
-                elif len(session.participants) == 0:
-                    sessions_to_terminate.append((session_id, "no_participants"))
-                
-                # Check for orphaned sessions (no WebSocket connections)
-                elif len(session.websocket_connections) == 0 and len(session.participants) > 0:
-                    # Grace period for reconnection
-                    grace_period = timedelta(minutes=5)
-                    if current_time - session.last_activity > grace_period:
-                        sessions_to_terminate.append((session_id, "no_connections"))
-            
-            # Terminate identified sessions
-            for session_id, reason in sessions_to_terminate:
-                await self.terminate_session(session_id, reason=reason)
-                logger.info(f"Cleaned up session {session_id} (reason: {reason})")
-            
-        except Exception as e:
-            logger.error(f"Error during session cleanup: {e}")
-    
-    async def _cleanup_expired_locks(self):
-        """Clean up expired locks (Redis TTL should handle this, but double check)"""
-        try:
-            # This is mostly handled by Redis TTL, but we can add additional cleanup logic
-            pattern = "lock:*"
-            lock_keys = await self.redis_client.keys(pattern)
-            
-            expired_locks = 0
-            for lock_key in lock_keys:
-                ttl = await self.redis_client.ttl(lock_key)
-                if ttl == -1:  # No expiration set
-                    await self.redis_client.delete(lock_key)
-                    expired_locks += 1
-            
-            if expired_locks > 0:
-                logger.info(f"Cleaned up {expired_locks} expired locks")
-                
-        except Exception as e:
-            logger.error(f"Error during lock cleanup: {e}")
-    
-    async def _sync_session_state(self):
-        """Synchronize session state across instances"""
-        try:
-            # Update Redis with current session states
-            for session_id, session in self.sessions.items():
-                await self._persist_session_state(session)
-            
-            # Check for sessions from other instances
-            # This would involve checking Redis for sessions not in local memory
-            # and potentially reconstructing them if needed
-            
-        except Exception as e:
-            logger.error(f"Error during state sync: {e}")
-    
-    async def _persist_session_state(self, session: CollaborationSession):
-        """Persist session state to Redis"""
-        try:
-            session_state = {
-                'session_id': session.session_id,
-                'notebook_path': session.notebook_path,
-                'participants': list(session.participants),
-                'status': session.status.value,
-                'created_at': session.created_at.isoformat(),
-                'last_activity': session.last_activity.isoformat(),
-                'permissions': {user: role.value for user, role in session.permissions.items()},
-                'server_instance': session.metadata.get('server_instance', 'unknown')
-            }
-            
-            await self.persistence.redis.store_session_state(session.session_id, session_state)
-            
-        except Exception as e:
-            logger.error(f"Error persisting session state: {e}")
-    
-    async def _reconstruct_session(self, session_id: str, session_state: Dict[str, Any]):
-        """Reconstruct session from persisted state"""
-        try:
-            session = CollaborationSession(
-                session_id=session_id,
-                notebook_path=session_state['notebook_path'],
-                created_by=session_state.get('created_by', 'unknown'),
-                created_at=datetime.fromisoformat(session_state['created_at']),
-                participants=set(session_state['participants']),
-                status=SessionStatus(session_state['status']),
-                permissions={
-                    user: UserRole(role) 
-                    for user, role in session_state.get('permissions', {}).items()
-                },
-                metadata=session_state.get('metadata', {}),
-                last_activity=datetime.fromisoformat(session_state['last_activity']),
-                websocket_connections=set(),
-                lock_state={},
-                presence_data={}
+            await self.websocket_pool.broadcast_to_session(
+                session_id, disconnect_message, exclude_user_id=user_id
             )
             
-            self.sessions[session_id] = session
-            logger.info(f"Reconstructed session {session_id} from persisted state")
+            logger.debug(f"User disconnected: {user_id} from session {session_id}")
             
         except Exception as e:
-            logger.error(f"Error reconstructing session: {e}")
-    
-    async def _check_websocket_health(self):
-        """Check health of WebSocket connections and remove stale ones"""
-        try:
-            current_time = datetime.utcnow()
-            timeout_threshold = timedelta(seconds=self.config.websocket_timeout)
-            
-            stale_connections = []
-            
-            for connection_id, connection in self.websocket_connections.items():
-                if current_time - connection.last_heartbeat > timeout_threshold:
-                    stale_connections.append(connection_id)
-            
-            # Remove stale connections
-            for connection_id in stale_connections:
-                await self._disconnect_websocket(connection_id, reason="heartbeat_timeout")
-                logger.info(f"Removed stale WebSocket connection {connection_id}")
-            
-        except Exception as e:
-            logger.error(f"Error checking WebSocket health: {e}")
-    
-    # Public API methods for external integration
-    
-    async def get_session_info(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """Get session information"""
-        try:
-            if session_id in self.sessions:
-                session = self.sessions[session_id]
-                return {
-                    'session_id': session.session_id,
-                    'notebook_path': session.notebook_path,
-                    'created_by': session.created_by,
-                    'created_at': session.created_at.isoformat(),
-                    'participants': list(session.participants),
-                    'status': session.status.value,
-                    'participant_count': len(session.participants),
-                    'connection_count': len(session.websocket_connections),
-                    'last_activity': session.last_activity.isoformat()
-                }
-            
-            # Try to get from persistence
-            session_state = await self.persistence.get_session_state(session_id)
-            if session_state:
-                return {
-                    'session_id': session_id,
-                    'notebook_path': session_state.get('notebook_path'),
-                    'participants': session_state.get('participants', []),
-                    'status': session_state.get('status'),
-                    'participant_count': len(session_state.get('participants', [])),
-                    'last_activity': session_state.get('last_activity'),
-                    'from_persistence': True
-                }
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error getting session info: {e}")
-            return None
-    
-    async def list_active_sessions(self) -> List[Dict[str, Any]]:
-        """List all active collaborative sessions"""
-        try:
-            sessions = []
-            for session in self.sessions.values():
-                sessions.append({
-                    'session_id': session.session_id,
-                    'notebook_path': session.notebook_path,
-                    'participant_count': len(session.participants),
-                    'status': session.status.value,
-                    'created_at': session.created_at.isoformat(),
-                    'last_activity': session.last_activity.isoformat()
-                })
-            
-            return sessions
-            
-        except Exception as e:
-            logger.error(f"Error listing sessions: {e}")
-            return []
+            logger.error(f"Error handling user disconnect: {e}")
     
     async def get_health_status(self) -> Dict[str, Any]:
-        """Get collaboration manager health status"""
+        """Get comprehensive health status of collaboration system"""
+        if not self.enabled:
+            return {
+                'enabled': False,
+                'status': 'disabled',
+                'message': 'Collaboration features are disabled'
+            }
+        
         try:
-            # Get persistence layer health
-            persistence_health = await self.persistence.get_health_status()
+            # Get persistence health
+            persistence_health = {}
+            if self.persistence:
+                persistence_health = await self.persistence.get_health_status()
+            
+            # Get component statistics
+            websocket_stats = {}
+            session_stats = {}
+            
+            if self.websocket_pool:
+                websocket_stats = await self.websocket_pool.get_connection_stats()
+            
+            if self.session_registry:
+                session_stats = await self.session_registry.get_session_stats()
+            
+            # Calculate overall health
+            overall_status = 'healthy'
+            if self.degraded_mode:
+                overall_status = 'degraded'
+            elif not persistence_health.get('collaboration_ready', False):
+                overall_status = 'degraded'
             
             return {
-                'collaboration_manager': {
-                    'status': 'healthy' if self._initialized and not self._shutting_down else 'unhealthy',
-                    'active_sessions': len(self.sessions),
-                    'websocket_connections': len(self.websocket_connections),
-                    'total_participants': sum(len(s.participants) for s in self.sessions.values()),
-                    'uptime_seconds': time.time() - (self.metrics.sessions_total._created if hasattr(self.metrics.sessions_total, '_created') else time.time())
-                },
+                'enabled': True,
+                'status': overall_status,
+                'startup_time': self.startup_time.isoformat() if self.startup_time else None,
+                'uptime_seconds': (datetime.utcnow() - self.startup_time).total_seconds() if self.startup_time else 0,
+                'degraded_mode': self.degraded_mode,
                 'persistence': persistence_health,
-                'components': {
-                    'lock_manager': 'healthy' if self.lock_manager else 'not_initialized',
-                    'presence_manager': 'healthy' if self.presence_manager else 'not_initialized',
-                    'authenticator': 'healthy' if self.authenticator else 'not_initialized'
-                },
-                'timestamp': datetime.utcnow().isoformat()
+                'websocket_pool': websocket_stats,
+                'sessions': session_stats,
+                'message_queue_size': self.message_router.message_queue.qsize() if self.message_router else 0,
+                'dead_letter_queue_size': len(self.message_router.dead_letter_queue) if self.message_router else 0
             }
             
         except Exception as e:
             logger.error(f"Error getting health status: {e}")
             return {
-                'collaboration_manager': {'status': 'error', 'error': str(e)},
-                'timestamp': datetime.utcnow().isoformat()
+                'enabled': True,
+                'status': 'error',
+                'error': str(e)
             }
+    
+    async def _cleanup_components(self):
+        """Cleanup partially initialized components"""
+        try:
+            if self.message_router:
+                await self.message_router.stop()
+            if self.presence_tracker:
+                await self.presence_tracker.stop()
+            if self.session_registry:
+                await self.session_registry.stop()
+            if self.websocket_pool:
+                await self.websocket_pool.stop()
+            if self.persistence:
+                await self.persistence.close()
+        except Exception as e:
+            logger.error(f"Error during component cleanup: {e}")
 
 
-# Export main classes
-__all__ = [
-    'CollaborationManager',
-    'CollaborationConfig',
-    'CollaborationSession',
-    'WebSocketConnection',
-    'CollaborationMessage',
-    'SessionStatus',
-    'UserRole',
-    'MessageType'
-]
+# Global collaboration manager instance
+_collaboration_manager: Optional[CollaborationManager] = None
+
+
+async def get_collaboration_manager(persistence_config: Optional[Dict[str, str]] = None) -> CollaborationManager:
+    """Get or create global collaboration manager instance"""
+    global _collaboration_manager
+    
+    if _collaboration_manager is None:
+        _collaboration_manager = CollaborationManager(persistence_config)
+        await _collaboration_manager.initialize()
+    
+    return _collaboration_manager
+
+
+async def shutdown_collaboration_manager():
+    """Shutdown global collaboration manager"""
+    global _collaboration_manager
+    
+    if _collaboration_manager:
+        await _collaboration_manager.shutdown()
+        _collaboration_manager = None
+
+
+# Convenience functions for external integration
+async def create_collaboration_session(notebook_path: str, user_id: str,
+                                     permissions: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Create new collaborative session (convenience function)"""
+    manager = await get_collaboration_manager()
+    return await manager.create_session(notebook_path, user_id, permissions)
+
+
+async def join_collaboration_session(session_id: str, user_id: str,
+                                   websocket: tornado.websocket.WebSocketHandler,
+                                   user_agent: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Join collaborative session (convenience function)"""
+    manager = await get_collaboration_manager()
+    return await manager.join_session(session_id, user_id, websocket, user_agent)
+
+
+async def get_collaboration_health() -> Dict[str, Any]:
+    """Get collaboration system health status (convenience function)"""
+    try:
+        manager = await get_collaboration_manager()
+        return await manager.get_health_status()
+    except Exception as e:
+        return {
+            'enabled': False,
+            'status': 'error',
+            'error': str(e)
+        }
