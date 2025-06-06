@@ -358,9 +358,190 @@ class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[
         self.handlers.append(("/custom/custom.css", CustomCssHandler))
         super().initialize_handlers()
 
+    def _register_collaboration_handlers(self) -> None:
+        """Register WebSocket handlers for collaborative editing features."""
+        if not self.collaboration_enabled or not COLLABORATION_HANDLERS_AVAILABLE:
+            self.log.debug("Skipping collaboration handler registration")
+            return
+
+        try:
+            # Register main collaboration WebSocket endpoint for CRDT synchronization
+            self.handlers.append((
+                r"/collaboration/?(.*)",
+                CollaborationWebSocketHandler,
+                {"collaboration_manager": self._collaboration_manager}
+            ))
+
+            # Register awareness WebSocket endpoint for presence and cursor tracking
+            self.handlers.append((
+                r"/collab/awareness/?(.*)",
+                AwarenessWebSocketHandler,
+                {"collaboration_manager": self._collaboration_manager}
+            ))
+
+            # Register health check endpoint for operational monitoring
+            self.handlers.append((
+                r"/api/collaboration/health",
+                CollabHealthCheckHandler,
+                {"get_health_status": self._get_collaboration_health_status}
+            ))
+
+            self.log.info("Collaboration WebSocket handlers registered successfully")
+            
+        except Exception as e:
+            self.log.error(f"Failed to register collaboration handlers: {e}")
+            self.log.info("Collaboration features may not work properly")
+
+    def _initialize_collaboration_config(self) -> None:
+        """Initialize collaboration configuration from environment variables."""
+        # Set collaboration config from environment variables per Section 0.2.5
+        if os.getenv("JUPYTER_COLLAB_ENABLED", "").lower() in ("true", "1", "yes"):
+            self.collaboration_enabled = True
+        
+        if collaboration_server_url := os.getenv("JUPYTER_COLLAB_SERVER_URL"):
+            self.collaboration_server_url = collaboration_server_url
+        
+        if redis_url := os.getenv("JUPYTER_COLLAB_REDIS_URL"):
+            self.collaboration_redis_url = redis_url
+        
+        if storage_backend := os.getenv("JUPYTER_COLLAB_STORAGE_BACKEND"):
+            self.collaboration_storage_backend = storage_backend
+
+        # Log collaboration configuration status
+        self.log.info(f"Collaboration enabled: {self.collaboration_enabled}")
+        if self.collaboration_enabled:
+            self.log.info(f"Collaboration server URL: {self.collaboration_server_url or 'same as notebook server'}")
+            self.log.info(f"Collaboration storage backend: {self.collaboration_storage_backend}")
+
+    async def _initialize_collaboration_manager(self) -> bool:
+        """
+        Initialize the collaboration manager with proper error handling.
+        
+        Returns:
+            bool: True if collaboration was successfully initialized, False otherwise.
+        """
+        if not self.collaboration_enabled:
+            self.log.debug("Collaboration disabled in configuration")
+            return False
+
+        if not COLLABORATION_MANAGER_AVAILABLE:
+            self.log.warning(
+                "Collaboration requested but CollaborationManager not available. "
+                "Falling back to single-user mode."
+            )
+            self.collaboration_enabled = False
+            return False
+
+        try:
+            # Initialize CollaborationManager with configuration
+            collaboration_config = {
+                "redis_url": self.collaboration_redis_url,
+                "storage_backend": self.collaboration_storage_backend,
+                "max_users": self.collaboration_max_users,
+                "lock_timeout": self.collaboration_lock_timeout,
+                "server_url": self.collaboration_server_url,
+            }
+
+            self._collaboration_manager = CollaborationManager(
+                config=collaboration_config,
+                log=self.log,
+            )
+
+            # Test connection to collaboration infrastructure
+            await self._collaboration_manager.initialize()
+            
+            self.log.info("Collaboration manager initialized successfully")
+            return True
+
+        except Exception as e:
+            self.log.error(f"Failed to initialize collaboration manager: {e}")
+            self.log.info("Falling back to single-user mode")
+            self.collaboration_enabled = False
+            self._collaboration_manager = None
+            return False
+
+    def _get_collaboration_health_status(self) -> dict[str, t.Any]:
+        """
+        Get collaboration service health status for monitoring.
+        
+        Returns:
+            dict: Health status information including service availability and metrics.
+        """
+        status = {
+            "collaboration_enabled": self.collaboration_enabled,
+            "collaboration_available": False,
+            "active_sessions": 0,
+            "total_users": 0,
+            "services": {
+                "collaboration_manager": "unavailable",
+                "redis": "unavailable",
+                "storage_backend": "unavailable",
+            },
+        }
+
+        if self._collaboration_manager:
+            try:
+                # Get health status from collaboration manager
+                manager_status = self._collaboration_manager.get_health_status()
+                status.update(manager_status)
+                status["collaboration_available"] = True
+                status["services"]["collaboration_manager"] = "available"
+                
+            except Exception as e:
+                self.log.warning(f"Failed to get collaboration health status: {e}")
+                status["services"]["collaboration_manager"] = f"error: {str(e)}"
+
+        return status
+
     def initialize(self, argv: list[str] | None = None) -> None:  # noqa: ARG002
-        """Subclass because the ExtensionApp.initialize() method does not take arguments"""
+        """
+        Initialize the application with collaboration support.
+        
+        Subclass because the ExtensionApp.initialize() method does not take arguments.
+        Enhanced to initialize collaborative editing infrastructure.
+        """
+        # Initialize collaboration configuration from environment variables
+        self._initialize_collaboration_config()
+        
+        # Call parent initialization
         super().initialize()
+
+    async def start(self) -> None:
+        """
+        Start the notebook server with collaboration support.
+        
+        Enhanced to initialize collaboration manager and provide graceful fallback.
+        """
+        # Initialize collaboration manager if enabled
+        if self.collaboration_enabled:
+            self.log.info("Initializing collaboration services...")
+            
+            collaboration_initialized = await self._initialize_collaboration_manager()
+            
+            if collaboration_initialized:
+                self.log.info("Collaboration services started successfully")
+            else:
+                self.log.warning("Collaboration services failed to start, continuing in single-user mode")
+
+        # Call parent start method
+        await super().start()
+
+    async def stop(self) -> None:
+        """
+        Stop the notebook server with proper collaboration cleanup.
+        
+        Enhanced to gracefully shutdown collaboration services.
+        """
+        if self._collaboration_manager:
+            try:
+                self.log.info("Shutting down collaboration services...")
+                await self._collaboration_manager.shutdown()
+                self.log.info("Collaboration services stopped successfully")
+            except Exception as e:
+                self.log.error(f"Error shutting down collaboration services: {e}")
+
+        # Call parent stop method
+        await super().stop()
 
 
 main = launch_new_instance = JupyterNotebookApp.launch_instance
