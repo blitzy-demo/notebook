@@ -1,18 +1,28 @@
 /**
- * @fileoverview CellLockIndicator - Visual lock indicators component for collaborative editing
+ * @fileoverview Visual lock indicators component for collaborative cell editing coordination
  * 
- * This component provides comprehensive cell-level editing coordination preventing conflicts
- * through sophisticated lock acquisition, visual ownership indicators, and intelligent
- * conflict resolution interfaces. It integrates with the Redis-coordinated Lock Manager
- * to provide real-time lock status updates and queue-based waiting mechanisms.
+ * This component provides comprehensive visual feedback about cell-level locking status,
+ * including lock ownership display, acquisition interfaces, and conflict resolution
+ * capabilities. It integrates seamlessly with the Redis-coordinated lock management
+ * system to prevent editing conflicts and enable smooth collaborative workflows.
  * 
  * Key Features:
- * - Real-time lock status display with user attribution
- * - Lock acquisition and release controls with timeout management
- * - Queue-based conflict resolution with position indicators
- * - Visual feedback for lock ownership and contention
- * - Accessibility support with ARIA live regions
- * - Integration with collaborative presence awareness
+ * - Real-time lock status visualization with user attribution
+ * - Interactive lock acquisition and release interfaces
+ * - Queue-based conflict resolution with waiting indicators
+ * - Timeout management with visual countdown displays
+ * - Administrative override capabilities with proper authorization
+ * - Accessibility support with ARIA attributes and keyboard navigation
+ * - Responsive design adapting to different screen sizes
+ * - Integration with awareness system for user presence coordination
+ * 
+ * Architecture:
+ * - React functional component with TypeScript for type safety
+ * - Real-time updates via Lumino signals from lock manager
+ * - Optimistic UI updates with server-side validation
+ * - Error handling with user-friendly notification system
+ * - Performance optimization with memo and callback hooks
+ * - Modular design supporting different lock visualization modes
  * 
  * @author Jupyter Notebook Collaboration Team
  * @version 7.5.0-alpha.0
@@ -20,901 +30,1267 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { classes } from 'typestyle';
+import { createPortal } from 'react-dom';
+import { IDisposable } from '@lumino/disposable';
+import { JSONObject } from '@lumino/coreutils';
 
-// Lumino framework imports for Jupyter integration
-import { Widget } from '@lumino/widgets';
-import { ISignal, Signal } from '@lumino/signaling';
-
-// Collaboration system imports
+// Import collaboration dependencies
 import { 
-  LockManager, 
-  ILockMetadata, 
-  ILockRequest, 
-  ILockReleaseRequest,
-  LockStatus, 
-  LockPriority,
-  ILockEvent,
-  ILockQueueEntry
+    LockManager,
+    ILockMetadata,
+    ILockRequest,
+    ILockEvent,
+    LockStatus,
+    LockPriority,
+    LockOperationType,
+    LockUtils
 } from '../../../notebook/src/collab/locks';
 import { 
-  CollaborativeAwareness,
-  IUserPresence,
-  ActivityStatus 
+    CollaborativeAwareness,
+    IUserPresence,
+    UserActivityStatus,
+    AwarenessEventType,
+    ICursorPosition
 } from '../../../notebook/src/collab/awareness';
 import { 
-  YjsNotebookProvider,
-  ICollaborationProvider,
-  ConnectionState 
+    YjsNotebookProvider,
+    SyncState,
+    ProviderMode
 } from '../../../notebook/src/collab/YjsNotebookProvider';
 
 /**
- * Props interface for the CellLockIndicator component
+ * Lock indicator display modes for different visual presentations
+ */
+export enum LockIndicatorMode {
+    /** Compact icon-only display */
+    COMPACT = 'compact',
+    /** Full display with user info and controls */
+    DETAILED = 'detailed',
+    /** Inline display within cell toolbar */
+    INLINE = 'inline',
+    /** Overlay display positioned over cell content */
+    OVERLAY = 'overlay'
+}
+
+/**
+ * Lock indicator visual themes for different UI contexts
+ */
+export enum LockIndicatorTheme {
+    /** Default theme matching notebook UI */
+    DEFAULT = 'default',
+    /** High contrast theme for accessibility */
+    HIGH_CONTRAST = 'high_contrast',
+    /** Minimal theme for reduced visual impact */
+    MINIMAL = 'minimal',
+    /** Dark theme for dark mode compatibility */
+    DARK = 'dark'
+}
+
+/**
+ * Queue entry information for contention display
+ */
+interface IQueueInfo {
+    /** Position in queue (0-based) */
+    position: number;
+    /** Estimated wait time in milliseconds */
+    estimatedWaitMs: number;
+    /** Queue entry timestamp */
+    queuedAt: number;
+    /** User details */
+    user: {
+        userId: string;
+        displayName: string;
+        avatar?: string;
+    };
+}
+
+/**
+ * Properties for the CellLockIndicator component
  */
 export interface ICellLockIndicatorProps {
-  /** Unique identifier of the cell this indicator controls */
-  cellId: string;
-  
-  /** Collaboration provider instance for lock coordination */
-  collaborationProvider: ICollaborationProvider;
-  
-  /** Lock manager instance for cell-level coordination */
-  lockManager: LockManager | null;
-  
-  /** Awareness system for presence integration */
-  awareness: CollaborativeAwareness | null;
-  
-  /** Current user information */
-  currentUser: {
-    userId: string;
-    displayName: string;
-    avatar?: string;
-    role?: string;
-  };
-  
-  /** Optional CSS class name for styling */
-  className?: string;
-  
-  /** Whether the cell is currently selected */
-  isSelected?: boolean;
-  
-  /** Whether the cell is currently being edited */
-  isEditing?: boolean;
-  
-  /** Callback fired when lock status changes */
-  onLockStatusChange?: (cellId: string, lockInfo: ILockMetadata | null) => void;
-  
-  /** Callback fired when lock acquisition is requested */
-  onLockRequested?: (cellId: string) => void;
-  
-  /** Callback fired when lock release is requested */
-  onLockReleased?: (cellId: string) => void;
-  
-  /** Callback fired when conflict resolution is needed */
-  onConflictResolution?: (cellId: string, conflictInfo: ILockConflictInfo) => void;
+    /** Unique cell identifier to monitor for locks */
+    cellId: string;
+    /** Lock manager instance for coordination */
+    lockManager: LockManager;
+    /** Awareness system for user presence integration */
+    awareness: CollaborativeAwareness;
+    /** Yjs provider for collaborative state */
+    provider: YjsNotebookProvider;
+    /** Current user information */
+    currentUser: {
+        userId: string;
+        displayName: string;
+        avatar?: string;
+        role?: string;
+    };
+    /** Display mode for the indicator */
+    mode?: LockIndicatorMode;
+    /** Visual theme for the indicator */
+    theme?: LockIndicatorTheme;
+    /** Enable interactive lock controls */
+    enableControls?: boolean;
+    /** Enable administrative override controls */
+    enableAdminOverride?: boolean;
+    /** Show queue information for contended locks */
+    showQueueInfo?: boolean;
+    /** Enable accessibility features */
+    enableAccessibility?: boolean;
+    /** Custom CSS class for styling */
+    className?: string;
+    /** Callback for lock state changes */
+    onLockStateChange?: (lockMetadata: ILockMetadata | null) => void;
+    /** Callback for user interaction events */
+    onUserInteraction?: (event: string, data: JSONObject) => void;
+    /** Custom lock acquisition handler */
+    onLockAcquire?: (cellId: string) => Promise<void>;
+    /** Custom lock release handler */
+    onLockRelease?: (lockId: string) => Promise<void>;
 }
 
 /**
- * Interface for lock conflict information
- */
-export interface ILockConflictInfo {
-  /** Current lock holder information */
-  currentHolder: {
-    userId: string;
-    displayName: string;
-    lockAcquiredAt: string;
-    lockExpiresAt: string;
-  };
-  
-  /** Queue position if waiting for lock */
-  queuePosition?: number;
-  
-  /** Estimated time until lock becomes available */
-  estimatedWaitTime?: number;
-  
-  /** Available conflict resolution actions */
-  resolutionOptions: ILockResolutionOption[];
-}
-
-/**
- * Interface for lock resolution options
- */
-export interface ILockResolutionOption {
-  /** Unique identifier for the resolution action */
-  id: string;
-  
-  /** Human-readable label for the action */
-  label: string;
-  
-  /** Detailed description of the action */
-  description: string;
-  
-  /** Whether this action requires elevated permissions */
-  requiresElevatedPermissions: boolean;
-  
-  /** Function to execute the resolution action */
-  execute: () => Promise<void>;
-}
-
-/**
- * Lock status display information
- */
-interface ILockDisplayInfo {
-  status: LockStatus;
-  displayText: string;
-  iconClass: string;
-  colorClass: string;
-  isActionable: boolean;
-  tooltipText: string;
-}
-
-/**
- * Hook for managing lock state and operations
- */
-const useLockManager = (
-  cellId: string,
-  lockManager: LockManager | null,
-  currentUser: ICellLockIndicatorProps['currentUser']
-) => {
-  const [lockInfo, setLockInfo] = useState<ILockMetadata | null>(null);
-  const [queueInfo, setQueueInfo] = useState<ILockQueueEntry | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Update lock status from lock manager
-  const updateLockStatus = useCallback(async () => {
-    if (!lockManager) return;
-
-    try {
-      const currentLock = await lockManager.getLockStatus(cellId);
-      setLockInfo(currentLock);
-      
-      if (!currentLock) {
-        setQueueInfo(null);
-      } else if (currentLock.userId !== currentUser.userId) {
-        // Check if current user is queued for this lock
-        const queueStatus = await lockManager.getQueueStatus(cellId);
-        if (queueStatus.userPosition !== undefined) {
-          // User is in queue - get queue entry details if needed
-          setQueueInfo({
-            entryId: `queue-${cellId}-${currentUser.userId}`,
-            request: {
-              cellId,
-              userId: currentUser.userId,
-              userName: currentUser.displayName,
-              sessionId: lockManager.sessionId,
-              priority: LockPriority.Normal
-            },
-            queuedAt: new Date().toISOString(),
-            queueExpiresAt: new Date(Date.now() + 60000).toISOString(),
-            position: queueStatus.userPosition
-          });
-        } else {
-          setQueueInfo(null);
-        }
-      }
-    } catch (err) {
-      console.error('Failed to update lock status:', err);
-      setError(err instanceof Error ? err.message : 'Unknown error');
-    }
-  }, [lockManager, cellId, currentUser]);
-
-  // Acquire lock for the current cell
-  const acquireLock = useCallback(async (priority: LockPriority = LockPriority.Normal): Promise<boolean> => {
-    if (!lockManager) return false;
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const request: ILockRequest = {
-        cellId,
-        userId: currentUser.userId,
-        userName: currentUser.displayName,
-        sessionId: lockManager.sessionId,
-        priority,
-        timeoutMs: 120000 // 2 minutes
-      };
-
-      const lockResult = await lockManager.acquireLock(request);
-      setLockInfo(lockResult);
-      return true;
-    } catch (err) {
-      console.error('Failed to acquire lock:', err);
-      setError(err instanceof Error ? err.message : 'Failed to acquire lock');
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
-  }, [lockManager, cellId, currentUser]);
-
-  // Release lock for the current cell
-  const releaseLock = useCallback(async (force: boolean = false): Promise<boolean> => {
-    if (!lockManager || !lockInfo) return false;
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const releaseRequest: ILockReleaseRequest = {
-        lockId: lockInfo.lockId,
-        userId: currentUser.userId,
-        sessionId: lockManager.sessionId,
-        reason: 'user_release',
-        force
-      };
-
-      const released = await lockManager.releaseLock(releaseRequest);
-      if (released) {
-        setLockInfo(null);
-        setQueueInfo(null);
-      }
-      return released;
-    } catch (err) {
-      console.error('Failed to release lock:', err);
-      setError(err instanceof Error ? err.message : 'Failed to release lock');
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
-  }, [lockManager, lockInfo, currentUser]);
-
-  // Cancel queued lock request
-  const cancelQueuedRequest = useCallback(async (): Promise<boolean> => {
-    if (!lockManager) return false;
-
-    try {
-      const cancelled = await lockManager.cancelQueuedRequest(cellId);
-      if (cancelled) {
-        setQueueInfo(null);
-      }
-      return cancelled;
-    } catch (err) {
-      console.error('Failed to cancel queued request:', err);
-      setError(err instanceof Error ? err.message : 'Failed to cancel request');
-      return false;
-    }
-  }, [lockManager, cellId]);
-
-  // Set up event listeners for lock changes
-  useEffect(() => {
-    if (!lockManager) return;
-
-    const onLockAcquired = (event: ILockEvent) => {
-      if (event.lock.cellId === cellId) {
-        setLockInfo(event.lock);
-        setError(null);
-      }
-    };
-
-    const onLockReleased = (event: ILockEvent) => {
-      if (event.lock.cellId === cellId) {
-        setLockInfo(null);
-        setQueueInfo(null);
-        setError(null);
-      }
-    };
-
-    const onLockFailed = (event: ILockEvent) => {
-      if (event.lock.cellId === cellId) {
-        setError('Lock acquisition failed');
-      }
-    };
-
-    // Connect to lock manager signals
-    lockManager.lockAcquired.connect(onLockAcquired);
-    lockManager.lockReleased.connect(onLockReleased);
-    lockManager.lockFailed.connect(onLockFailed);
-
-    // Initial lock status check
-    updateLockStatus();
-
-    return () => {
-      lockManager.lockAcquired.disconnect(onLockAcquired);
-      lockManager.lockReleased.disconnect(onLockReleased);
-      lockManager.lockFailed.disconnect(onLockFailed);
-    };
-  }, [lockManager, cellId, updateLockStatus]);
-
-  return {
-    lockInfo,
-    queueInfo,
-    isLoading,
-    error,
-    acquireLock,
-    releaseLock,
-    cancelQueuedRequest,
-    updateLockStatus
-  };
-};
-
-/**
- * Hook for managing lock display information
- */
-const useLockDisplayInfo = (
-  lockInfo: ILockMetadata | null,
-  queueInfo: ILockQueueEntry | null,
-  currentUser: ICellLockIndicatorProps['currentUser']
-): ILockDisplayInfo => {
-  return useMemo(() => {
-    if (!lockInfo) {
-      if (queueInfo) {
-        return {
-          status: LockStatus.Pending,
-          displayText: `Queued (position ${queueInfo.position})`,
-          iconClass: 'jp-collab-lock-queued-icon',
-          colorClass: 'jp-collab-lock-queued',
-          isActionable: true,
-          tooltipText: `You are in queue for this cell at position ${queueInfo.position}`
-        };
-      }
-      
-      return {
-        status: LockStatus.Available,
-        displayText: 'Available',
-        iconClass: 'jp-collab-lock-available-icon',
-        colorClass: 'jp-collab-lock-available',
-        isActionable: true,
-        tooltipText: 'Cell is available for editing'
-      };
-    }
-
-    const isOwnLock = lockInfo.userId === currentUser.userId;
-    const timeRemaining = new Date(lockInfo.expiresAt).getTime() - Date.now();
-    const timeRemainingText = timeRemaining > 0 ? 
-      `${Math.ceil(timeRemaining / 1000)}s remaining` : 
-      'Expired';
-
-    if (isOwnLock) {
-      return {
-        status: lockInfo.status,
-        displayText: `Locked by you (${timeRemainingText})`,
-        iconClass: 'jp-collab-lock-owned-icon',
-        colorClass: 'jp-collab-lock-owned',
-        isActionable: true,
-        tooltipText: `You have exclusive editing access to this cell. ${timeRemainingText}`
-      };
-    }
-
-    return {
-      status: lockInfo.status,
-      displayText: `Locked by ${lockInfo.userName}`,
-      iconClass: 'jp-collab-lock-locked-icon',
-      colorClass: 'jp-collab-lock-locked',
-      isActionable: false,
-      tooltipText: `Cell is locked by ${lockInfo.userName}. ${timeRemainingText}`
-    };
-  }, [lockInfo, queueInfo, currentUser]);
-};
-
-/**
- * CellLockIndicator React component
+ * Cell lock indicator component providing comprehensive lock status visualization
+ * and interaction capabilities for collaborative editing coordination.
+ * 
+ * This component serves as the primary interface for users to understand and
+ * interact with cell-level locking mechanisms, providing clear visual feedback
+ * about lock ownership, timeout status, and queue positions while maintaining
+ * accessibility and responsive design principles.
  */
 export const CellLockIndicator: React.FC<ICellLockIndicatorProps> = ({
-  cellId,
-  collaborationProvider,
-  lockManager,
-  awareness,
-  currentUser,
-  className,
-  isSelected = false,
-  isEditing = false,
-  onLockStatusChange,
-  onLockRequested,
-  onLockReleased,
-  onConflictResolution
+    cellId,
+    lockManager,
+    awareness,
+    provider,
+    currentUser,
+    mode = LockIndicatorMode.COMPACT,
+    theme = LockIndicatorTheme.DEFAULT,
+    enableControls = true,
+    enableAdminOverride = false,
+    showQueueInfo = true,
+    enableAccessibility = true,
+    className = '',
+    onLockStateChange,
+    onUserInteraction,
+    onLockAcquire,
+    onLockRelease
 }) => {
-  // Lock management hooks
-  const {
-    lockInfo,
-    queueInfo,
-    isLoading,
-    error,
-    acquireLock,
-    releaseLock,
-    cancelQueuedRequest
-  } = useLockManager(cellId, lockManager, currentUser);
+    // Component state management
+    const [lockMetadata, setLockMetadata] = useState<ILockMetadata | null>(null);
+    const [queueInfo, setQueueInfo] = useState<IQueueInfo | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [remainingTime, setRemainingTime] = useState<number>(0);
+    const [userPresence, setUserPresence] = useState<IUserPresence | null>(null);
+    const [showTooltip, setShowTooltip] = useState(false);
+    const [showControls, setShowControls] = useState(false);
 
-  // Display information hook
-  const displayInfo = useLockDisplayInfo(lockInfo, queueInfo, currentUser);
+    // Component refs for DOM manipulation and cleanup
+    const disposablesRef = useRef<IDisposable[]>([]);
+    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const tooltipRef = useRef<HTMLDivElement>(null);
+    const mountedRef = useRef(true);
 
-  // Component state
-  const [showTooltip, setShowTooltip] = useState(false);
-  const [showConflictDialog, setShowConflictDialog] = useState(false);
-  const tooltipTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Notify parent of lock status changes
-  useEffect(() => {
-    onLockStatusChange?.(cellId, lockInfo);
-  }, [cellId, lockInfo, onLockStatusChange]);
-
-  // Handle lock acquisition
-  const handleAcquireLock = useCallback(async () => {
-    if (!lockManager) return;
-
-    onLockRequested?.(cellId);
-
-    const success = await acquireLock(LockPriority.Normal);
-    if (!success && lockInfo && lockInfo.userId !== currentUser.userId) {
-      // Show conflict resolution dialog
-      setShowConflictDialog(true);
-      
-      const conflictInfo: ILockConflictInfo = {
-        currentHolder: {
-          userId: lockInfo.userId,
-          displayName: lockInfo.userName,
-          lockAcquiredAt: lockInfo.acquiredAt,
-          lockExpiresAt: lockInfo.expiresAt
-        },
-        queuePosition: queueInfo?.position,
-        estimatedWaitTime: queueInfo ? 
-          (new Date(queueInfo.queueExpiresAt).getTime() - Date.now()) : undefined,
-        resolutionOptions: [
-          {
-            id: 'wait',
-            label: 'Wait in Queue',
-            description: 'Wait for the current user to release the lock',
-            requiresElevatedPermissions: false,
-            execute: async () => {
-              // Already queued, just close dialog
-              setShowConflictDialog(false);
-            }
-          },
-          {
-            id: 'force',
-            label: 'Force Acquire',
-            description: 'Force acquire the lock (requires admin privileges)',
-            requiresElevatedPermissions: true,
-            execute: async () => {
-              await acquireLock(LockPriority.Emergency);
-              setShowConflictDialog(false);
-            }
-          }
-        ]
-      };
-
-      onConflictResolution?.(cellId, conflictInfo);
-    }
-  }, [lockManager, cellId, currentUser, lockInfo, queueInfo, acquireLock, onLockRequested, onConflictResolution]);
-
-  // Handle lock release
-  const handleReleaseLock = useCallback(async () => {
-    if (!lockManager || !lockInfo) return;
-
-    onLockReleased?.(cellId);
-    await releaseLock(false);
-  }, [lockManager, lockInfo, cellId, releaseLock, onLockReleased]);
-
-  // Handle queue cancellation
-  const handleCancelQueue = useCallback(async () => {
-    await cancelQueuedRequest();
-  }, [cancelQueuedRequest]);
-
-  // Tooltip management
-  const showTooltipDelayed = useCallback(() => {
-    if (tooltipTimeoutRef.current) {
-      clearTimeout(tooltipTimeoutRef.current);
-    }
-    tooltipTimeoutRef.current = setTimeout(() => {
-      setShowTooltip(true);
-    }, 500);
-  }, []);
-
-  const hideTooltip = useCallback(() => {
-    if (tooltipTimeoutRef.current) {
-      clearTimeout(tooltipTimeoutRef.current);
-      tooltipTimeoutRef.current = null;
-    }
-    setShowTooltip(false);
-  }, []);
-
-  // Cleanup timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (tooltipTimeoutRef.current) {
-        clearTimeout(tooltipTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  // If collaboration is not available, don't render
-  if (!collaborationProvider || collaborationProvider.connectionState !== ConnectionState.CONNECTED) {
-    return null;
-  }
-
-  // Generate CSS classes
-  const containerClasses = classes(
-    'jp-collab-cell-lock-indicator',
-    displayInfo.colorClass,
-    {
-      'jp-collab-lock-selected': isSelected,
-      'jp-collab-lock-editing': isEditing,
-      'jp-collab-lock-loading': isLoading,
-      'jp-collab-lock-error': !!error
-    },
-    className || ''
-  );
-
-  return (
-    <div className={containerClasses}>
-      {/* Lock status icon and text */}
-      <div 
-        className="jp-collab-lock-status"
-        onMouseEnter={showTooltipDelayed}
-        onMouseLeave={hideTooltip}
-        role="status"
-        aria-label={displayInfo.tooltipText}
-        aria-live="polite"
-      >
-        <div className={classes('jp-collab-lock-icon', displayInfo.iconClass)}>
-          {displayInfo.status === LockStatus.Locked && (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M4 7V5C4 2.79086 5.79086 1 8 1C10.2091 1 12 2.79086 12 5V7H13C13.5523 7 14 7.44772 14 8V14C14 14.5523 13.5523 15 13 15H3C2.44772 15 2 14.5523 2 14V8C2 7.44772 2.44772 7 3 7H4ZM6 7H10V5C10 3.89543 9.10457 3 8 3C6.89543 3 6 3.89543 6 5V7Z"/>
-            </svg>
-          )}
-          {displayInfo.status === LockStatus.Available && (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M4 7V5C4 2.79086 5.79086 1 8 1C10.2091 1 12 2.79086 12 5V5.5C12 5.77614 11.7761 6 11.5 6C11.2239 6 11 5.77614 11 5.5V5C11 3.34315 9.65685 2 8 2C6.34315 2 5 3.34315 5 5V7H13C13.5523 7 14 7.44772 14 8V14C14 14.5523 13.5523 15 13 15H3C2.44772 15 2 14.5523 2 14V8C2 7.44772 2.44772 7 3 7H4Z"/>
-            </svg>
-          )}
-          {displayInfo.status === LockStatus.Pending && (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M8 1C4.13401 1 1 4.13401 1 8C1 11.866 4.13401 15 8 15C11.866 15 15 11.866 15 8C15 4.13401 11.866 1 8 1ZM8 2C11.3137 2 14 4.68629 14 8C14 11.3137 11.3137 14 8 14C4.68629 14 2 11.3137 2 8C2 4.68629 4.68629 2 8 2ZM8 3C7.44772 3 7 3.44772 7 4V8C7 8.26522 7.10536 8.51957 7.29289 8.70711L9.29289 10.7071C9.68342 11.0976 10.3166 11.0976 10.7071 10.7071C11.0976 10.3166 11.0976 9.68342 10.7071 9.29289L9 7.58579V4C9 3.44772 8.55228 3 8 3Z"/>
-            </svg>
-          )}
-        </div>
+    /**
+     * Cleanup function to dispose of all event listeners and timers
+     */
+    const cleanup = useCallback(() => {
+        mountedRef.current = false;
         
-        <span className="jp-collab-lock-text">
-          {displayInfo.displayText}
-        </span>
-      </div>
+        // Clear timeout
+        if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
+        }
 
-      {/* Action buttons */}
-      <div className="jp-collab-lock-actions">
-        {displayInfo.status === LockStatus.Available && (
-          <button
-            className="jp-collab-lock-acquire-btn"
-            onClick={handleAcquireLock}
-            disabled={isLoading}
-            title="Acquire exclusive editing lock for this cell"
-            aria-label="Acquire editing lock"
-          >
-            Lock
-          </button>
-        )}
+        // Dispose of all signal connections
+        disposablesRef.current.forEach(disposable => {
+            try {
+                disposable.dispose();
+            } catch (error) {
+                console.warn('[CellLockIndicator] Error disposing signal connection:', error);
+            }
+        });
+        disposablesRef.current = [];
+    }, []);
 
-        {displayInfo.status === LockStatus.Locked && lockInfo?.userId === currentUser.userId && (
-          <button
-            className="jp-collab-lock-release-btn"
-            onClick={handleReleaseLock}
-            disabled={isLoading}
-            title="Release exclusive editing lock"
-            aria-label="Release editing lock"
-          >
-            Release
-          </button>
-        )}
+    /**
+     * Initialize component and set up event listeners
+     */
+    useEffect(() => {
+        mountedRef.current = true;
 
-        {displayInfo.status === LockStatus.Pending && queueInfo && (
-          <button
-            className="jp-collab-lock-cancel-btn"
-            onClick={handleCancelQueue}
-            disabled={isLoading}
-            title="Cancel lock request and leave queue"
-            aria-label="Cancel lock request"
-          >
-            Cancel
-          </button>
-        )}
-      </div>
+        const initializeComponent = async () => {
+            try {
+                // Initial lock status check
+                await updateLockStatus();
 
-      {/* Error display */}
-      {error && (
-        <div className="jp-collab-lock-error-message" role="alert">
-          <span className="jp-collab-lock-error-icon">⚠</span>
-          <span className="jp-collab-lock-error-text">{error}</span>
-        </div>
-      )}
+                // Set up lock event listeners
+                setupLockEventListeners();
 
-      {/* Loading indicator */}
-      {isLoading && (
-        <div className="jp-collab-lock-loading-indicator" aria-hidden="true">
-          <div className="jp-collab-lock-spinner"></div>
-        </div>
-      )}
+                // Set up awareness event listeners
+                setupAwarenessEventListeners();
 
-      {/* Tooltip */}
-      {showTooltip && (
-        <div className="jp-collab-lock-tooltip" role="tooltip">
-          {displayInfo.tooltipText}
-          {lockInfo && (
-            <div className="jp-collab-lock-tooltip-details">
-              <div>Acquired: {new Date(lockInfo.acquiredAt).toLocaleTimeString()}</div>
-              <div>Expires: {new Date(lockInfo.expiresAt).toLocaleTimeString()}</div>
-              {lockInfo.attempts > 1 && (
-                <div>Attempts: {lockInfo.attempts}</div>
-              )}
+                // Start timeout monitoring
+                startTimeoutMonitoring();
+
+            } catch (error) {
+                console.error('[CellLockIndicator] Initialization error:', error);
+                setError(`Failed to initialize lock indicator: ${error.message}`);
+            }
+        };
+
+        initializeComponent();
+
+        // Cleanup on unmount
+        return cleanup;
+    }, [cellId, lockManager, awareness]);
+
+    /**
+     * Sets up event listeners for lock-related events
+     */
+    const setupLockEventListeners = useCallback(() => {
+        if (!lockManager || !mountedRef.current) {
+            return;
+        }
+
+        try {
+            // Listen for lock acquisition events
+            const lockAcquiredConnection = lockManager.lockAcquired.connect((sender, event: ILockEvent) => {
+                if (event.lock.cellId === cellId && mountedRef.current) {
+                    setLockMetadata(event.lock);
+                    setError(null);
+                    onLockStateChange?.(event.lock);
+                    onUserInteraction?.('lock_acquired', { 
+                        cellId, 
+                        lockId: event.lock.lockId,
+                        userId: event.userId 
+                    });
+                }
+            });
+
+            // Listen for lock release events
+            const lockReleasedConnection = lockManager.lockReleased.connect((sender, event: ILockEvent) => {
+                if (event.lock.cellId === cellId && mountedRef.current) {
+                    setLockMetadata(null);
+                    setQueueInfo(null);
+                    setError(null);
+                    onLockStateChange?.(null);
+                    onUserInteraction?.('lock_released', { 
+                        cellId, 
+                        lockId: event.lock.lockId,
+                        userId: event.userId 
+                    });
+                }
+            });
+
+            // Listen for lock contention events
+            const lockContentionConnection = lockManager.lockContention.connect((sender, event: ILockEvent) => {
+                if (event.lock.cellId === cellId && mountedRef.current) {
+                    setQueueInfo({
+                        position: event.lock.queuePosition || 0,
+                        estimatedWaitMs: estimateWaitTime(event.lock.queuePosition || 0),
+                        queuedAt: event.timestamp,
+                        user: {
+                            userId: event.userId,
+                            displayName: event.lock.userName,
+                            avatar: getUserAvatar(event.userId)
+                        }
+                    });
+                    onUserInteraction?.('lock_contention', { 
+                        cellId, 
+                        queuePosition: event.lock.queuePosition,
+                        userId: event.userId 
+                    });
+                }
+            });
+
+            // Listen for lock timeout events
+            const lockTimeoutConnection = lockManager.lockTimeout.connect((sender, event: ILockEvent) => {
+                if (event.lock.cellId === cellId && mountedRef.current) {
+                    setLockMetadata(null);
+                    setError('Lock expired');
+                    onLockStateChange?.(null);
+                    onUserInteraction?.('lock_timeout', { 
+                        cellId, 
+                        lockId: event.lock.lockId,
+                        userId: event.userId 
+                    });
+                }
+            });
+
+            // Listen for lock error events
+            const lockErrorConnection = lockManager.lockError.connect((sender, event: ILockEvent) => {
+                if (event.lock.cellId === cellId && mountedRef.current) {
+                    setError(`Lock error: ${event.data.error}`);
+                    setIsLoading(false);
+                    onUserInteraction?.('lock_error', { 
+                        cellId, 
+                        error: event.data.error,
+                        userId: event.userId 
+                    });
+                }
+            });
+
+            // Store connections for cleanup
+            disposablesRef.current.push(
+                lockAcquiredConnection,
+                lockReleasedConnection,
+                lockContentionConnection,
+                lockTimeoutConnection,
+                lockErrorConnection
+            );
+
+        } catch (error) {
+            console.error('[CellLockIndicator] Error setting up lock event listeners:', error);
+        }
+    }, [cellId, lockManager, onLockStateChange, onUserInteraction]);
+
+    /**
+     * Sets up event listeners for awareness events
+     */
+    const setupAwarenessEventListeners = useCallback(() => {
+        if (!awareness || !mountedRef.current) {
+            return;
+        }
+
+        try {
+            // Listen for user presence updates
+            const presenceConnection = awareness.presenceUpdated.connect((sender, event) => {
+                if (lockMetadata && event.userId === lockMetadata.userId && mountedRef.current) {
+                    setUserPresence(event.presence);
+                }
+            });
+
+            // Listen for user leaving events
+            const userLeftConnection = awareness.userLeft.connect((sender, event) => {
+                if (lockMetadata && event.userId === lockMetadata.userId && mountedRef.current) {
+                    setUserPresence(null);
+                }
+            });
+
+            // Store connections for cleanup
+            disposablesRef.current.push(presenceConnection, userLeftConnection);
+
+        } catch (error) {
+            console.error('[CellLockIndicator] Error setting up awareness event listeners:', error);
+        }
+    }, [awareness, lockMetadata]);
+
+    /**
+     * Updates the current lock status for the cell
+     */
+    const updateLockStatus = useCallback(async () => {
+        if (!lockManager || !mountedRef.current) {
+            return;
+        }
+
+        try {
+            const currentLock = await lockManager.getCellLockStatus(cellId);
+            if (mountedRef.current) {
+                setLockMetadata(currentLock);
+                
+                // Update user presence if lock exists
+                if (currentLock && awareness) {
+                    const presence = awareness.getUserPresence(currentLock.userId);
+                    setUserPresence(presence);
+                }
+                
+                onLockStateChange?.(currentLock);
+            }
+        } catch (error) {
+            console.error('[CellLockIndicator] Error updating lock status:', error);
+            if (mountedRef.current) {
+                setError(`Failed to check lock status: ${error.message}`);
+            }
+        }
+    }, [cellId, lockManager, awareness, onLockStateChange]);
+
+    /**
+     * Starts monitoring for lock timeout countdown
+     */
+    const startTimeoutMonitoring = useCallback(() => {
+        const updateRemainingTime = () => {
+            if (!lockMetadata || !mountedRef.current) {
+                return;
+            }
+
+            const remaining = LockUtils.getRemainingTime(lockMetadata);
+            setRemainingTime(remaining);
+
+            if (remaining > 0) {
+                timeoutRef.current = setTimeout(updateRemainingTime, 1000);
+            }
+        };
+
+        if (lockMetadata && lockMetadata.status === LockStatus.ACQUIRED) {
+            updateRemainingTime();
+        }
+    }, [lockMetadata]);
+
+    /**
+     * Handles lock acquisition requests
+     */
+    const handleLockAcquire = useCallback(async () => {
+        if (!lockManager || !enableControls || isLoading) {
+            return;
+        }
+
+        setIsLoading(true);
+        setError(null);
+
+        try {
+            if (onLockAcquire) {
+                await onLockAcquire(cellId);
+            } else {
+                const lockRequest: ILockRequest = LockUtils.createLockRequest(
+                    cellId,
+                    currentUser.userId,
+                    currentUser.displayName,
+                    provider.sessionId,
+                    {
+                        priority: LockPriority.Normal,
+                        timeoutMs: 120000, // 2 minutes
+                        reason: 'User requested lock'
+                    }
+                );
+
+                await lockManager.acquireLock(lockRequest);
+            }
+
+            onUserInteraction?.('lock_acquire_requested', { cellId, userId: currentUser.userId });
+
+        } catch (error) {
+            console.error('[CellLockIndicator] Lock acquisition failed:', error);
+            setError(`Failed to acquire lock: ${error.message}`);
+            onUserInteraction?.('lock_acquire_failed', { 
+                cellId, 
+                userId: currentUser.userId, 
+                error: error.message 
+            });
+        } finally {
+            if (mountedRef.current) {
+                setIsLoading(false);
+            }
+        }
+    }, [cellId, lockManager, enableControls, isLoading, currentUser, provider, onLockAcquire, onUserInteraction]);
+
+    /**
+     * Handles lock release requests
+     */
+    const handleLockRelease = useCallback(async () => {
+        if (!lockManager || !lockMetadata || !enableControls || isLoading) {
+            return;
+        }
+
+        setIsLoading(true);
+        setError(null);
+
+        try {
+            if (onLockRelease) {
+                await onLockRelease(lockMetadata.lockId);
+            } else {
+                await lockManager.releaseLock({
+                    lockId: lockMetadata.lockId,
+                    userId: currentUser.userId,
+                    sessionId: provider.sessionId,
+                    reason: 'User requested release'
+                });
+            }
+
+            onUserInteraction?.('lock_release_requested', { 
+                cellId, 
+                lockId: lockMetadata.lockId, 
+                userId: currentUser.userId 
+            });
+
+        } catch (error) {
+            console.error('[CellLockIndicator] Lock release failed:', error);
+            setError(`Failed to release lock: ${error.message}`);
+            onUserInteraction?.('lock_release_failed', { 
+                cellId, 
+                lockId: lockMetadata.lockId, 
+                userId: currentUser.userId, 
+                error: error.message 
+            });
+        } finally {
+            if (mountedRef.current) {
+                setIsLoading(false);
+            }
+        }
+    }, [lockMetadata, lockManager, enableControls, isLoading, currentUser, provider, onLockRelease, onUserInteraction]);
+
+    /**
+     * Handles administrative lock override
+     */
+    const handleAdminOverride = useCallback(async () => {
+        if (!lockManager || !lockMetadata || !enableAdminOverride) {
+            return;
+        }
+
+        const reason = prompt('Enter reason for administrative override:');
+        if (!reason) {
+            return;
+        }
+
+        setIsLoading(true);
+        setError(null);
+
+        try {
+            await lockManager.forceReleaseLock(lockMetadata.lockId, currentUser.userId, reason);
+            onUserInteraction?.('admin_override', { 
+                cellId, 
+                lockId: lockMetadata.lockId, 
+                adminUserId: currentUser.userId, 
+                reason 
+            });
+
+        } catch (error) {
+            console.error('[CellLockIndicator] Admin override failed:', error);
+            setError(`Admin override failed: ${error.message}`);
+        } finally {
+            if (mountedRef.current) {
+                setIsLoading(false);
+            }
+        }
+    }, [lockMetadata, lockManager, enableAdminOverride, currentUser, onUserInteraction]);
+
+    /**
+     * Estimates wait time based on queue position
+     */
+    const estimateWaitTime = useCallback((position: number): number => {
+        // Estimate 30 seconds per position in queue
+        return position * 30000;
+    }, []);
+
+    /**
+     * Gets user avatar URL from awareness system
+     */
+    const getUserAvatar = useCallback((userId: string): string | undefined => {
+        if (!awareness) {
+            return undefined;
+        }
+
+        const presence = awareness.getUserPresence(userId);
+        return presence?.avatar;
+    }, [awareness]);
+
+    /**
+     * Determines if current user owns the lock
+     */
+    const isOwnLock = useMemo(() => {
+        return lockMetadata?.userId === currentUser.userId;
+    }, [lockMetadata, currentUser.userId]);
+
+    /**
+     * Determines if current user can override the lock
+     */
+    const canOverride = useMemo(() => {
+        if (!enableAdminOverride || !lockMetadata) {
+            return false;
+        }
+
+        return currentUser.role === 'admin' || currentUser.role === 'owner';
+    }, [enableAdminOverride, lockMetadata, currentUser.role]);
+
+    /**
+     * Generates CSS classes based on component props and state
+     */
+    const cssClasses = useMemo(() => {
+        const classes = [
+            'jp-cell-lock-indicator',
+            `jp-cell-lock-indicator-${mode}`,
+            `jp-cell-lock-indicator-${theme}`,
+            className
+        ];
+
+        if (lockMetadata) {
+            classes.push('jp-cell-lock-indicator-locked');
+            classes.push(`jp-cell-lock-indicator-${lockMetadata.status}`);
+            
+            if (isOwnLock) {
+                classes.push('jp-cell-lock-indicator-own');
+            }
+        }
+
+        if (queueInfo) {
+            classes.push('jp-cell-lock-indicator-queued');
+        }
+
+        if (error) {
+            classes.push('jp-cell-lock-indicator-error');
+        }
+
+        if (isLoading) {
+            classes.push('jp-cell-lock-indicator-loading');
+        }
+
+        return classes.filter(Boolean).join(' ');
+    }, [mode, theme, className, lockMetadata, queueInfo, error, isLoading, isOwnLock]);
+
+    /**
+     * Generates ARIA attributes for accessibility
+     */
+    const ariaAttributes = useMemo(() => {
+        if (!enableAccessibility) {
+            return {};
+        }
+
+        const attributes: any = {
+            'role': 'status',
+            'aria-live': 'polite',
+            'aria-atomic': true
+        };
+
+        if (lockMetadata) {
+            attributes['aria-label'] = `Cell locked by ${lockMetadata.userName}`;
+            if (remainingTime > 0) {
+                attributes['aria-label'] += `, ${LockUtils.formatLockDuration(remainingTime)} remaining`;
+            }
+        } else if (queueInfo) {
+            attributes['aria-label'] = `Lock requested, position ${queueInfo.position + 1} in queue`;
+        } else {
+            attributes['aria-label'] = 'Cell available for editing';
+        }
+
+        return attributes;
+    }, [enableAccessibility, lockMetadata, queueInfo, remainingTime]);
+
+    /**
+     * Renders the lock status icon
+     */
+    const renderLockIcon = useCallback(() => {
+        if (isLoading) {
+            return (
+                <div className="jp-cell-lock-spinner" aria-hidden="true">
+                    <div className="jp-cell-lock-spinner-inner"></div>
+                </div>
+            );
+        }
+
+        if (lockMetadata) {
+            const iconClass = isOwnLock ? 'jp-icon-lock-open' : 'jp-icon-lock';
+            return (
+                <div className={`jp-cell-lock-icon ${iconClass}`} aria-hidden="true">
+                    {lockMetadata.status === LockStatus.ACQUIRED && (
+                        <div className="jp-cell-lock-pulse"></div>
+                    )}
+                </div>
+            );
+        }
+
+        if (queueInfo) {
+            return (
+                <div className="jp-cell-lock-icon jp-icon-queue" aria-hidden="true">
+                    <span className="jp-cell-lock-queue-position">{queueInfo.position + 1}</span>
+                </div>
+            );
+        }
+
+        return (
+            <div className="jp-cell-lock-icon jp-icon-unlock" aria-hidden="true"></div>
+        );
+    }, [isLoading, lockMetadata, queueInfo, isOwnLock]);
+
+    /**
+     * Renders user information display
+     */
+    const renderUserInfo = useCallback(() => {
+        if (mode === LockIndicatorMode.COMPACT) {
+            return null;
+        }
+
+        if (lockMetadata) {
+            const avatar = getUserAvatar(lockMetadata.userId);
+            return (
+                <div className="jp-cell-lock-user-info">
+                    {avatar && (
+                        <img 
+                            src={avatar} 
+                            alt={`${lockMetadata.userName} avatar`}
+                            className="jp-cell-lock-user-avatar"
+                            loading="lazy"
+                        />
+                    )}
+                    <span className="jp-cell-lock-user-name">{lockMetadata.userName}</span>
+                    {userPresence?.activityStatus === UserActivityStatus.EDITING && (
+                        <span className="jp-cell-lock-activity-indicator" title="Currently editing">
+                            ✏️
+                        </span>
+                    )}
+                </div>
+            );
+        }
+
+        if (queueInfo) {
+            return (
+                <div className="jp-cell-lock-queue-info">
+                    <span className="jp-cell-lock-queue-text">
+                        Position {queueInfo.position + 1} in queue
+                    </span>
+                    <span className="jp-cell-lock-queue-time">
+                        ~{LockUtils.formatLockDuration(queueInfo.estimatedWaitMs)} wait
+                    </span>
+                </div>
+            );
+        }
+
+        return null;
+    }, [mode, lockMetadata, queueInfo, userPresence, getUserAvatar]);
+
+    /**
+     * Renders timeout countdown display
+     */
+    const renderTimeoutDisplay = useCallback(() => {
+        if (!lockMetadata || remainingTime <= 0 || mode === LockIndicatorMode.COMPACT) {
+            return null;
+        }
+
+        const progress = remainingTime / lockMetadata.timeoutMs;
+        const isExpiringSoon = remainingTime < 30000; // 30 seconds
+
+        return (
+            <div className={`jp-cell-lock-timeout ${isExpiringSoon ? 'jp-cell-lock-timeout-warning' : ''}`}>
+                <div className="jp-cell-lock-timeout-bar">
+                    <div 
+                        className="jp-cell-lock-timeout-progress"
+                        style={{ width: `${progress * 100}%` }}
+                    ></div>
+                </div>
+                <span className="jp-cell-lock-timeout-text">
+                    {LockUtils.formatLockDuration(remainingTime)}
+                </span>
             </div>
-          )}
-        </div>
-      )}
+        );
+    }, [lockMetadata, remainingTime, mode]);
 
-      {/* Live region for screen readers */}
-      <div 
-        className="jp-collab-lock-live-region" 
-        aria-live="polite" 
-        aria-atomic="true"
-        style={{ position: 'absolute', left: '-10000px', width: '1px', height: '1px', overflow: 'hidden' }}
-      >
-        {lockInfo && `Cell lock status: ${displayInfo.displayText}`}
-        {error && `Lock error: ${error}`}
-      </div>
-    </div>
-  );
+    /**
+     * Renders interactive controls
+     */
+    const renderControls = useCallback(() => {
+        if (!enableControls || mode === LockIndicatorMode.COMPACT || !showControls) {
+            return null;
+        }
+
+        return (
+            <div className="jp-cell-lock-controls">
+                {lockMetadata ? (
+                    <>
+                        {isOwnLock && (
+                            <button
+                                className="jp-cell-lock-button jp-cell-lock-release"
+                                onClick={handleLockRelease}
+                                disabled={isLoading}
+                                title="Release lock"
+                                aria-label="Release cell lock"
+                            >
+                                Release
+                            </button>
+                        )}
+                        {canOverride && !isOwnLock && (
+                            <button
+                                className="jp-cell-lock-button jp-cell-lock-override"
+                                onClick={handleAdminOverride}
+                                disabled={isLoading}
+                                title="Administrative override"
+                                aria-label="Force release lock (admin)"
+                            >
+                                Override
+                            </button>
+                        )}
+                    </>
+                ) : (
+                    <button
+                        className="jp-cell-lock-button jp-cell-lock-acquire"
+                        onClick={handleLockAcquire}
+                        disabled={isLoading}
+                        title="Acquire lock"
+                        aria-label="Acquire cell lock"
+                    >
+                        Lock
+                    </button>
+                )}
+            </div>
+        );
+    }, [enableControls, mode, showControls, lockMetadata, isOwnLock, canOverride, isLoading, handleLockRelease, handleAdminOverride, handleLockAcquire]);
+
+    /**
+     * Renders error display
+     */
+    const renderError = useCallback(() => {
+        if (!error) {
+            return null;
+        }
+
+        return (
+            <div className="jp-cell-lock-error" role="alert">
+                <span className="jp-cell-lock-error-icon" aria-hidden="true">⚠</span>
+                <span className="jp-cell-lock-error-text">{error}</span>
+                <button
+                    className="jp-cell-lock-error-dismiss"
+                    onClick={() => setError(null)}
+                    aria-label="Dismiss error"
+                >
+                    ×
+                </button>
+            </div>
+        );
+    }, [error]);
+
+    /**
+     * Renders tooltip content
+     */
+    const renderTooltip = useCallback(() => {
+        if (!showTooltip || mode !== LockIndicatorMode.COMPACT) {
+            return null;
+        }
+
+        const tooltipContent = (
+            <div 
+                ref={tooltipRef}
+                className="jp-cell-lock-tooltip"
+                role="tooltip"
+                aria-hidden={!showTooltip}
+            >
+                {lockMetadata && (
+                    <div>
+                        <strong>{lockMetadata.userName}</strong> is editing this cell
+                        {remainingTime > 0 && (
+                            <div>Lock expires in {LockUtils.formatLockDuration(remainingTime)}</div>
+                        )}
+                    </div>
+                )}
+                {queueInfo && (
+                    <div>
+                        Position {queueInfo.position + 1} in editing queue
+                        <div>Estimated wait: {LockUtils.formatLockDuration(queueInfo.estimatedWaitMs)}</div>
+                    </div>
+                )}
+                {!lockMetadata && !queueInfo && (
+                    <div>Cell available for editing</div>
+                )}
+            </div>
+        );
+
+        // Use portal to render tooltip at document root for proper positioning
+        return createPortal(tooltipContent, document.body);
+    }, [showTooltip, mode, lockMetadata, queueInfo, remainingTime]);
+
+    // Update timeout monitoring when lock metadata changes
+    useEffect(() => {
+        if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
+        }
+        startTimeoutMonitoring();
+    }, [lockMetadata, startTimeoutMonitoring]);
+
+    // Handle keyboard events for accessibility
+    const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
+        if (!enableAccessibility) {
+            return;
+        }
+
+        switch (event.key) {
+            case 'Enter':
+            case ' ':
+                event.preventDefault();
+                if (lockMetadata && isOwnLock) {
+                    handleLockRelease();
+                } else if (!lockMetadata) {
+                    handleLockAcquire();
+                }
+                break;
+            case 'Escape':
+                setShowControls(false);
+                setShowTooltip(false);
+                break;
+        }
+    }, [enableAccessibility, lockMetadata, isOwnLock, handleLockRelease, handleLockAcquire]);
+
+    return (
+        <div 
+            className={cssClasses}
+            {...ariaAttributes}
+            onMouseEnter={() => setShowTooltip(true)}
+            onMouseLeave={() => setShowTooltip(false)}
+            onFocus={() => setShowTooltip(true)}
+            onBlur={() => setShowTooltip(false)}
+            onClick={() => setShowControls(!showControls)}
+            onKeyDown={handleKeyDown}
+            tabIndex={enableAccessibility ? 0 : -1}
+        >
+            {renderLockIcon()}
+            {renderUserInfo()}
+            {renderTimeoutDisplay()}
+            {renderControls()}
+            {renderError()}
+            {renderTooltip()}
+        </div>
+    );
 };
 
 /**
- * CellLockIndicator widget class for Lumino integration
+ * Default props for the CellLockIndicator component
  */
-export class CellLockIndicatorWidget extends Widget {
-  private _reactComponent: React.ReactElement | null = null;
-  private _props: ICellLockIndicatorProps;
-
-  constructor(options: ICellLockIndicatorProps) {
-    super();
-    this._props = options;
-    this.addClass('jp-collab-cell-lock-indicator-widget');
-    this._renderComponent();
-  }
-
-  /**
-   * Update component props
-   */
-  updateProps(newProps: Partial<ICellLockIndicatorProps>): void {
-    this._props = { ...this._props, ...newProps };
-    this._renderComponent();
-  }
-
-  /**
-   * Get current lock status
-   */
-  async getLockStatus(): Promise<ILockMetadata | null> {
-    if (!this._props.lockManager) return null;
-    return this._props.lockManager.getLockStatus(this._props.cellId);
-  }
-
-  /**
-   * Force refresh lock status
-   */
-  async refreshLockStatus(): Promise<void> {
-    // This would trigger a re-render of the React component
-    this._renderComponent();
-  }
-
-  private _renderComponent(): void {
-    this._reactComponent = React.createElement(CellLockIndicator, this._props);
-    // Note: In a real implementation, this would use ReactDOM.render or a similar method
-    // to render the React component into this widget's DOM node
-  }
-
-  /**
-   * Dispose of the widget
-   */
-  dispose(): void {
-    if (this.isDisposed) {
-      return;
-    }
-    
-    this._reactComponent = null;
-    super.dispose();
-  }
-}
+CellLockIndicator.defaultProps = {
+    mode: LockIndicatorMode.COMPACT,
+    theme: LockIndicatorTheme.DEFAULT,
+    enableControls: true,
+    enableAdminOverride: false,
+    showQueueInfo: true,
+    enableAccessibility: true,
+    className: ''
+};
 
 /**
- * CSS styling for the CellLockIndicator component
+ * CSS styles for the CellLockIndicator component
+ * These styles should be included in the notebook extension's CSS file
  */
-export const cellLockIndicatorStyles = `
-.jp-collab-cell-lock-indicator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  line-height: 1.4;
-  transition: all 0.2s ease;
-  position: relative;
+export const CELL_LOCK_INDICATOR_STYLES = `
+/* Base styles for cell lock indicator */
+.jp-cell-lock-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    position: relative;
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.2s ease;
 }
 
-.jp-collab-lock-status {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  cursor: default;
+.jp-cell-lock-indicator:focus {
+    outline: 2px solid var(--jp-accent-color1);
+    outline-offset: 2px;
 }
 
-.jp-collab-lock-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
+/* Mode-specific styles */
+.jp-cell-lock-indicator-compact {
+    padding: 2px;
+    min-width: 20px;
+    min-height: 20px;
 }
 
-.jp-collab-lock-text {
-  font-weight: 500;
-  white-space: nowrap;
+.jp-cell-lock-indicator-detailed {
+    padding: 8px;
+    min-width: 200px;
+    border: 1px solid var(--jp-border-color1);
+    border-radius: 4px;
+    background: var(--jp-layout-color0);
 }
 
-.jp-collab-lock-actions {
-  display: flex;
-  gap: 4px;
+.jp-cell-lock-indicator-inline {
+    padding: 4px 8px;
+    border-radius: 12px;
+    background: var(--jp-layout-color1);
 }
 
-.jp-collab-lock-actions button {
-  padding: 2px 8px;
-  border: 1px solid;
-  border-radius: 3px;
-  font-size: 11px;
-  cursor: pointer;
-  transition: all 0.2s ease;
+.jp-cell-lock-indicator-overlay {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    padding: 4px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-.jp-collab-lock-actions button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+/* Lock status styles */
+.jp-cell-lock-indicator-locked {
+    color: var(--jp-error-color1);
 }
 
-/* Status-specific styling */
-.jp-collab-lock-available {
-  background-color: var(--jp-collab-lock-available-bg, rgba(34, 197, 94, 0.1));
-  border: 1px solid var(--jp-collab-lock-available-border, rgba(34, 197, 94, 0.3));
-  color: var(--jp-collab-lock-available-text, #059669);
+.jp-cell-lock-indicator-own {
+    color: var(--jp-success-color1);
 }
 
-.jp-collab-lock-locked {
-  background-color: var(--jp-collab-lock-locked-bg, rgba(239, 68, 68, 0.1));
-  border: 1px solid var(--jp-collab-lock-locked-border, rgba(239, 68, 68, 0.3));
-  color: var(--jp-collab-lock-locked-text, #dc2626);
+.jp-cell-lock-indicator-queued {
+    color: var(--jp-warn-color1);
 }
 
-.jp-collab-lock-owned {
-  background-color: var(--jp-collab-lock-owned-bg, rgba(59, 130, 246, 0.1));
-  border: 1px solid var(--jp-collab-lock-owned-border, rgba(59, 130, 246, 0.3));
-  color: var(--jp-collab-lock-owned-text, #2563eb);
+/* Icon styles */
+.jp-cell-lock-icon {
+    width: 16px;
+    height: 16px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-.jp-collab-lock-queued {
-  background-color: var(--jp-collab-lock-queued-bg, rgba(245, 158, 11, 0.1));
-  border: 1px solid var(--jp-collab-lock-queued-border, rgba(245, 158, 11, 0.3));
-  color: var(--jp-collab-lock-queued-text, #d97706);
+.jp-icon-lock::before {
+    content: "🔒";
+    font-size: 14px;
 }
 
-/* Interactive states */
-.jp-collab-lock-selected {
-  box-shadow: 0 0 0 2px var(--jp-collab-selection-color, #2563eb);
+.jp-icon-lock-open::before {
+    content: "🔓";
+    font-size: 14px;
 }
 
-.jp-collab-lock-editing {
-  background-color: var(--jp-collab-editing-bg, rgba(59, 130, 246, 0.05));
+.jp-icon-unlock::before {
+    content: "🔐";
+    font-size: 14px;
+    opacity: 0.5;
 }
 
-.jp-collab-lock-loading {
-  opacity: 0.7;
-}
-
-.jp-collab-lock-error {
-  border-color: var(--jp-collab-error-color, #dc2626) !important;
+.jp-icon-queue::before {
+    content: "⏳";
+    font-size: 14px;
 }
 
 /* Loading spinner */
-.jp-collab-lock-loading-indicator {
-  position: absolute;
-  top: 50%;
-  right: 8px;
-  transform: translateY(-50%);
+.jp-cell-lock-spinner {
+    width: 16px;
+    height: 16px;
+    position: relative;
 }
 
-.jp-collab-lock-spinner {
-  width: 12px;
-  height: 12px;
-  border: 1px solid var(--jp-collab-spinner-bg, #e5e7eb);
-  border-top-color: var(--jp-collab-spinner-color, #2563eb);
-  border-radius: 50%;
-  animation: jp-collab-spin 0.8s linear infinite;
+.jp-cell-lock-spinner-inner {
+    width: 100%;
+    height: 100%;
+    border: 2px solid var(--jp-border-color2);
+    border-top-color: var(--jp-accent-color1);
+    border-radius: 50%;
+    animation: jp-cell-lock-spin 1s linear infinite;
 }
 
-@keyframes jp-collab-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+@keyframes jp-cell-lock-spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 
-/* Tooltip */
-.jp-collab-lock-tooltip {
-  position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--jp-collab-tooltip-bg, rgba(0, 0, 0, 0.9));
-  color: var(--jp-collab-tooltip-text, white);
-  padding: 8px 12px;
-  border-radius: 4px;
-  font-size: 11px;
-  white-space: nowrap;
-  z-index: 1000;
-  pointer-events: none;
+/* Pulse animation for active locks */
+.jp-cell-lock-pulse {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.3;
+    animation: jp-cell-lock-pulse 2s ease-in-out infinite;
 }
 
-.jp-collab-lock-tooltip::after {
-  content: '';
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 4px solid transparent;
-  border-top-color: var(--jp-collab-tooltip-bg, rgba(0, 0, 0, 0.9));
+@keyframes jp-cell-lock-pulse {
+    0%, 100% {
+        transform: scale(1);
+        opacity: 0.3;
+    }
+    50% {
+        transform: scale(1.2);
+        opacity: 0.1;
+    }
 }
 
-.jp-collab-lock-tooltip-details {
-  margin-top: 4px;
-  padding-top: 4px;
-  border-top: 1px solid rgba(255, 255, 255, 0.2);
-  font-size: 10px;
+/* User info styles */
+.jp-cell-lock-user-info {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
 }
 
-/* Error message */
-.jp-collab-lock-error-message {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--jp-collab-error-color, #dc2626);
-  font-size: 11px;
+.jp-cell-lock-user-avatar {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    object-fit: cover;
 }
 
-.jp-collab-lock-error-icon {
-  font-size: 12px;
+.jp-cell-lock-user-name {
+    font-weight: 500;
+}
+
+.jp-cell-lock-activity-indicator {
+    font-size: 10px;
+}
+
+/* Queue info styles */
+.jp-cell-lock-queue-info {
+    display: flex;
+    flex-direction: column;
+    font-size: 11px;
+    line-height: 1.3;
+}
+
+.jp-cell-lock-queue-position {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 10px;
+    font-weight: bold;
+    color: white;
+    text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.5);
+}
+
+/* Timeout display styles */
+.jp-cell-lock-timeout {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+}
+
+.jp-cell-lock-timeout-bar {
+    width: 40px;
+    height: 4px;
+    background: var(--jp-border-color2);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.jp-cell-lock-timeout-progress {
+    height: 100%;
+    background: var(--jp-success-color1);
+    transition: width 1s linear;
+}
+
+.jp-cell-lock-timeout-warning .jp-cell-lock-timeout-progress {
+    background: var(--jp-error-color1);
+}
+
+/* Controls styles */
+.jp-cell-lock-controls {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.jp-cell-lock-button {
+    padding: 4px 8px;
+    font-size: 11px;
+    border: 1px solid var(--jp-border-color1);
+    border-radius: 3px;
+    background: var(--jp-layout-color1);
+    color: var(--jp-content-font-color1);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.jp-cell-lock-button:hover {
+    background: var(--jp-layout-color2);
+}
+
+.jp-cell-lock-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.jp-cell-lock-release {
+    background: var(--jp-success-color1);
+    color: white;
+    border-color: var(--jp-success-color1);
+}
+
+.jp-cell-lock-override {
+    background: var(--jp-error-color1);
+    color: white;
+    border-color: var(--jp-error-color1);
+}
+
+.jp-cell-lock-acquire {
+    background: var(--jp-accent-color1);
+    color: white;
+    border-color: var(--jp-accent-color1);
+}
+
+/* Error display styles */
+.jp-cell-lock-error {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: var(--jp-error-color2);
+    border: 1px solid var(--jp-error-color1);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--jp-error-color1);
+    margin-top: 4px;
+}
+
+.jp-cell-lock-error-dismiss {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 0;
+    margin-left: auto;
+}
+
+/* Tooltip styles */
+.jp-cell-lock-tooltip {
+    position: fixed;
+    z-index: 9999;
+    padding: 8px 12px;
+    background: var(--jp-layout-color3);
+    border: 1px solid var(--jp-border-color1);
+    border-radius: 4px;
+    font-size: 12px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    max-width: 250px;
+    pointer-events: none;
+}
+
+/* Theme variants */
+.jp-cell-lock-indicator-high-contrast {
+    filter: contrast(1.5);
+}
+
+.jp-cell-lock-indicator-minimal {
+    opacity: 0.7;
+}
+
+.jp-cell-lock-indicator-minimal:hover {
+    opacity: 1;
+}
+
+.jp-cell-lock-indicator-dark {
+    color-scheme: dark;
 }
 
 /* Responsive design */
 @media (max-width: 768px) {
-  .jp-collab-cell-lock-indicator {
-    font-size: 11px;
-    padding: 3px 6px;
-    gap: 6px;
-  }
-  
-  .jp-collab-lock-actions button {
-    padding: 1px 6px;
-    font-size: 10px;
-  }
-  
-  .jp-collab-lock-tooltip {
-    font-size: 10px;
-    padding: 6px 8px;
-  }
+    .jp-cell-lock-indicator-detailed {
+        min-width: 150px;
+        font-size: 11px;
+    }
+    
+    .jp-cell-lock-user-avatar {
+        width: 16px;
+        height: 16px;
+    }
+    
+    .jp-cell-lock-controls {
+        flex-direction: column;
+    }
+}
+
+/* Accessibility improvements */
+@media (prefers-reduced-motion: reduce) {
+    .jp-cell-lock-indicator,
+    .jp-cell-lock-pulse,
+    .jp-cell-lock-spinner-inner,
+    .jp-cell-lock-timeout-progress {
+        animation: none;
+        transition: none;
+    }
 }
 
 /* High contrast mode support */
 @media (prefers-contrast: high) {
-  .jp-collab-cell-lock-indicator {
-    border-width: 2px;
-  }
-  
-  .jp-collab-lock-actions button {
-    border-width: 2px;
-  }
-}
-
-/* Reduced motion support */
-@media (prefers-reduced-motion: reduce) {
-  .jp-collab-cell-lock-indicator,
-  .jp-collab-lock-actions button,
-  .jp-collab-lock-spinner {
-    transition: none;
-    animation: none;
-  }
+    .jp-cell-lock-indicator {
+        border: 2px solid currentColor;
+    }
+    
+    .jp-cell-lock-button {
+        border-width: 2px;
+    }
 }
 `;
 
-// Export the default component
 export default CellLockIndicator;
