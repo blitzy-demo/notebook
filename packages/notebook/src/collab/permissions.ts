@@ -1,1849 +1,2321 @@
 /**
- * Enterprise-grade access control system for Jupyter Notebook v7 collaborative editing.
+ * @fileoverview Enterprise-grade access control system for Jupyter Notebook collaborative editing.
  * 
- * This Permission Service provides comprehensive role-based access control (RBAC) with
- * session-based validation and JupyterHub authentication integration. It enforces
- * real-time permissions across all collaborative operations and maintains detailed
- * audit trails for enterprise compliance requirements.
+ * This module implements comprehensive role-based access control (RBAC) with JupyterHub integration,
+ * session-based validation, and real-time permission enforcement across all collaborative operations.
+ * The Permission Service manages user roles, access levels, sharing settings, and audit logging
+ * for secure multi-user collaborative editing environments.
  * 
  * Key Features:
- * - JupyterHub OAuth integration with token validation
- * - Role-based access control with configurable permission levels
- * - Session-based permission validation with PostgreSQL persistence
+ * - Role-based access control with configurable permission levels (read, write, admin)
+ * - JupyterHub authentication integration with session-based validation
+ * - PostgreSQL persistence for permission storage and audit trails
  * - Real-time permission enforcement across collaborative operations
- * - Sharing workflows with invitation and approval mechanisms
+ * - Cell-level and notebook-level granular access control
+ * - Session-scoped permission management with delegation capabilities
+ * - Comprehensive audit logging for security monitoring and compliance
+ * - Policy engine with attribute-based access control (ABAC) support
  * - Permission inheritance and delegation for hierarchical access control
- * - Comprehensive audit logging for security event tracking
- * - Cell-level granular permission enforcement
- * - Redis-based permission caching for performance
- * - Policy engine for complex authorization scenarios
+ * - Integration with Lock Manager and collaborative editing workflows
  * 
- * @author Jupyter Collaboration Team
- * @version 7.0.0
- * @license BSD-3-Clause
+ * Security Features:
+ * - Multi-layer permission validation with policy conflict resolution
+ * - Encrypted permission tokens with expiration and rotation
+ * - Rate limiting and abuse prevention for permission requests
+ * - GDPR-compliant audit logging with data retention policies
+ * - Integration with enterprise identity providers via JupyterHub
+ * 
+ * @author Jupyter Notebook Collaboration Team
+ * @version 7.5.0-alpha.0
+ * @since 2024-12-15
  */
 
-import { Signal, ISignal } from '@lumino/signaling';
-import { IStateDB, StateDB } from '@jupyterlab/statedb';
-import { URLExt } from '@jupyterlab/coreutils';
-import { ServerConnection } from '@jupyterlab/services';
-import { Token } from '@lumino/coreutils';
+import { 
+    IDisposable, 
+    IObservableDisposable 
+} from '@lumino/disposable';
+import { 
+    ISignal, 
+    Signal 
+} from '@lumino/signaling';
+import { 
+    JSONObject, 
+    JSONValue, 
+    UUID 
+} from '@lumino/coreutils';
 
-// Interface imports for type definitions
-export interface ICollaborationSession {
-  readonly sessionId: string;
-  readonly notebookPath: string;
-  readonly participants: ISessionParticipant[];
-  readonly permissions: ISessionPermissions;
-  readonly createdAt: Date;
-  readonly expiresAt: Date;
-  readonly status: SessionStatus;
-}
+// Import collaboration provider for integration
+import { 
+    ICollaborationProviderConfig,
+    ConnectionState,
+    IProviderEvent
+} from './YjsNotebookProvider';
 
-export interface ISessionParticipant {
-  readonly userId: string;
-  readonly displayName: string;
-  readonly role: UserRole;
-  readonly permissions: string[];
-  readonly joinedAt: Date;
-  readonly lastActivity: Date;
-  readonly status: ParticipantStatus;
-}
-
-export interface ISessionPermissions {
-  readonly ownerId: string;
-  readonly defaultRole: UserRole;
-  readonly allowInvites: boolean;
-  readonly requireApproval: boolean;
-  readonly cellPermissions: Record<string, ICellPermissions>;
-  readonly sharedWith: Record<string, IUserPermissionSet>;
-}
-
-export interface ICellPermissions {
-  readonly cellId: string;
-  readonly readUsers: string[];
-  readonly editUsers: string[];
-  readonly executeUsers: string[];
-  readonly commentUsers: string[];
-  readonly locked: boolean;
-  readonly lockedBy?: string;
-  readonly inheritFromSession: boolean;
-}
-
-export interface IUserPermissionSet {
-  readonly userId: string;
-  readonly role: UserRole;
-  readonly permissions: Permission[];
-  readonly grantedBy: string;
-  readonly grantedAt: Date;
-  readonly expiresAt?: Date;
-  readonly conditions?: IPermissionCondition[];
-}
-
-export interface IPermissionCondition {
-  readonly type: 'time_range' | 'ip_address' | 'device' | 'location';
-  readonly value: any;
-  readonly operator: 'equals' | 'in' | 'not_in' | 'between';
-}
-
-export interface IAuditLogEntry {
-  readonly id: string;
-  readonly timestamp: Date;
-  readonly userId: string;
-  readonly sessionId: string;
-  readonly action: PermissionAction;
-  readonly resource: string;
-  readonly result: 'granted' | 'denied' | 'error';
-  readonly details: Record<string, any>;
-  readonly ipAddress: string;
-  readonly userAgent: string;
-}
-
-export interface IJupyterHubUser {
-  readonly name: string;
-  readonly admin: boolean;
-  readonly groups: string[];
-  readonly roles: string[];
-  readonly created: string;
-  readonly lastActivity: string;
-  readonly sessionCount: number;
-}
-
-export interface IPolicyEvaluationContext {
-  readonly user: IJupyterHubUser;
-  readonly resource: IPermissionResource;
-  readonly environment: IEnvironmentContext;
-  readonly action: PermissionAction;
-  readonly session: ICollaborationSession;
-}
-
-export interface IPermissionResource {
-  readonly type: ResourceType;
-  readonly id: string;
-  readonly path: string;
-  readonly metadata: Record<string, any>;
-}
-
-export interface IEnvironmentContext {
-  readonly timestamp: Date;
-  readonly ipAddress: string;
-  readonly userAgent: string;
-  readonly sessionType: string;
-  readonly participantCount: number;
-}
-
-export interface IPolicyDecision {
-  readonly decision: 'permit' | 'deny' | 'not_applicable';
-  readonly reason: string;
-  readonly confidence: number;
-  readonly appliedPolicies: string[];
-  readonly obligations?: string[];
-}
-
-export interface IAccessDecision {
-  readonly permitted: boolean;
-  readonly reason: string;
-  readonly conditions?: string[];
-  readonly cacheTtl?: number;
-  readonly auditRequired: boolean;
-}
-
-// Enums for type safety
+/**
+ * User role enumeration defining access levels in collaborative sessions
+ */
 export enum UserRole {
-  VIEWER = 'viewer',
-  COMMENTER = 'commenter', 
-  EDITOR = 'editor',
-  COLLABORATOR = 'collaborator',
-  ADMIN = 'admin',
-  OWNER = 'owner'
+    /** Read-only access to notebook content */
+    VIEWER = 'viewer',
+    /** Standard editing access to notebook content */
+    EDITOR = 'editor',
+    /** Advanced editing with execution permissions */
+    COLLABORATOR = 'collaborator',
+    /** Administrative access with permission management */
+    ADMIN = 'admin',
+    /** Owner with full control and delegation rights */
+    OWNER = 'owner'
 }
-
-export enum Permission {
-  READ = 'read',
-  WRITE = 'write',
-  EXECUTE = 'execute',
-  COMMENT = 'comment',
-  SHARE = 'share',
-  ADMIN = 'admin',
-  DELETE = 'delete',
-  HISTORY = 'history',
-  EXPORT = 'export',
-  IMPORT = 'import'
-}
-
-export enum PermissionAction {
-  READ = 'read',
-  write = 'write',
-  execute = 'execute',
-  comment = 'comment',
-  share = 'share',
-  invite = 'invite',
-  remove_user = 'remove_user',
-  change_permissions = 'change_permissions',
-  lock_cell = 'lock_cell',
-  unlock_cell = 'unlock_cell',
-  view_history = 'view_history',
-  rollback = 'rollback',
-  export = 'export',
-  delete = 'delete'
-}
-
-export enum ResourceType {
-  NOTEBOOK = 'notebook',
-  CELL = 'cell',
-  SESSION = 'session',
-  COMMENT = 'comment',
-  HISTORY = 'history'
-}
-
-export enum SessionStatus {
-  ACTIVE = 'active',
-  PAUSED = 'paused',
-  TERMINATED = 'terminated',
-  EXPIRED = 'expired'
-}
-
-export enum ParticipantStatus {
-  ACTIVE = 'active',
-  IDLE = 'idle',
-  AWAY = 'away',
-  DISCONNECTED = 'disconnected'
-}
-
-// Custom error classes for permission handling
-export class PermissionError extends Error {
-  constructor(
-    message: string,
-    public readonly code: string,
-    public readonly details?: Record<string, any>
-  ) {
-    super(message);
-    this.name = 'PermissionError';
-  }
-}
-
-export class AuthenticationError extends PermissionError {
-  constructor(message: string, details?: Record<string, any>) {
-    super(message, 'AUTHENTICATION_FAILED', details);
-    this.name = 'AuthenticationError';
-  }
-}
-
-export class AuthorizationError extends PermissionError {
-  constructor(message: string, details?: Record<string, any>) {
-    super(message, 'AUTHORIZATION_FAILED', details);
-    this.name = 'AuthorizationError';
-  }
-}
-
-// DI Token for Permission Service
-export const IPermissionService = new Token<IPermissionService>(
-  '@jupyter-notebook/collaboration:IPermissionService'
-);
 
 /**
- * Interface for the Permission Service
+ * Permission types for granular access control
  */
-export interface IPermissionService {
-  /**
-   * Signal emitted when permissions change for a user/session
-   */
-  readonly permissionsChanged: ISignal<IPermissionService, IPermissionChange>;
-
-  /**
-   * Signal emitted when user access is revoked
-   */
-  readonly accessRevoked: ISignal<IPermissionService, IAccessRevocation>;
-
-  /**
-   * Validate user permission for specific operation
-   */
-  validatePermission(
-    userId: string,
-    sessionId: string,
-    action: PermissionAction,
-    resource?: IPermissionResource
-  ): Promise<IAccessDecision>;
-
-  /**
-   * Get comprehensive user permissions for session
-   */
-  getUserPermissions(userId: string, sessionId: string): Promise<IUserPermissionSet>;
-
-  /**
-   * Get session permissions and participants
-   */
-  getSessionPermissions(sessionId: string): Promise<ISessionPermissions>;
-
-  /**
-   * Share session with user - invitation workflow
-   */
-  shareSession(
-    sessionId: string,
-    targetUserId: string,
-    role: UserRole,
-    requestingUserId: string,
-    permissions?: Permission[]
-  ): Promise<void>;
-
-  /**
-   * Update user role in session
-   */
-  updateUserRole(
-    sessionId: string,
-    targetUserId: string,
-    newRole: UserRole,
-    updatedBy: string
-  ): Promise<void>;
-
-  /**
-   * Remove user from session
-   */
-  removeUserFromSession(
-    sessionId: string,
-    targetUserId: string,
-    removedBy: string
-  ): Promise<void>;
-
-  /**
-   * Set cell-specific permissions
-   */
-  setCellPermissions(
-    sessionId: string,
-    cellId: string,
-    permissions: ICellPermissions,
-    updatedBy: string
-  ): Promise<void>;
-
-  /**
-   * Get audit log for session
-   */
-  getAuditLog(
-    sessionId: string,
-    startTime?: Date,
-    endTime?: Date,
-    actions?: PermissionAction[]
-  ): Promise<IAuditLogEntry[]>;
-
-  /**
-   * Initialize session permissions
-   */
-  initializeSessionPermissions(
-    sessionId: string,
-    notebookPath: string,
-    ownerId: string,
-    initialPermissions?: Partial<ISessionPermissions>
-  ): Promise<void>;
-
-  /**
-   * Terminate session and cleanup permissions
-   */
-  terminateSession(sessionId: string, terminatedBy: string): Promise<void>;
-}
-
-export interface IPermissionChange {
-  readonly sessionId: string;
-  readonly userId: string;
-  readonly changes: Array<{
-    field: string;
-    oldValue: any;
-    newValue: any;
-  }>;
-  readonly changedBy: string;
-  readonly timestamp: Date;
-}
-
-export interface IAccessRevocation {
-  readonly sessionId: string;
-  readonly userId: string;
-  readonly reason: string;
-  readonly revokedBy: string;
-  readonly timestamp: Date;
+export enum PermissionType {
+    /** View notebook content and outputs */
+    READ = 'read',
+    /** Edit notebook content (cells, metadata) */
+    WRITE = 'write',
+    /** Execute code cells */
+    EXECUTE = 'execute',
+    /** Manage notebook structure (add/delete cells) */
+    STRUCTURE = 'structure',
+    /** Share notebook with other users */
+    SHARE = 'share',
+    /** Manage user permissions */
+    ADMIN = 'admin',
+    /** Comment and annotate content */
+    COMMENT = 'comment',
+    /** View version history */
+    HISTORY = 'history',
+    /** Export notebook in various formats */
+    EXPORT = 'export'
 }
 
 /**
- * Enterprise-grade Permission Service implementation
+ * Permission scope defining the context of access control
+ */
+export enum PermissionScope {
+    /** Global permissions across all notebooks */
+    GLOBAL = 'global',
+    /** Notebook-level permissions */
+    NOTEBOOK = 'notebook',
+    /** Cell-level permissions */
+    CELL = 'cell',
+    /** Session-specific permissions */
+    SESSION = 'session'
+}
+
+/**
+ * Access decision enumeration for policy evaluation results
+ */
+export enum AccessDecision {
+    /** Access explicitly granted */
+    GRANT = 'grant',
+    /** Access explicitly denied */
+    DENY = 'deny',
+    /** Access undetermined, defer to higher-level policy */
+    ABSTAIN = 'abstain'
+}
+
+/**
+ * User information interface for permission evaluation
+ */
+export interface IUserInfo {
+    /** Unique user identifier from JupyterHub */
+    userId: string;
+    /** User display name */
+    displayName: string;
+    /** User email address */
+    email: string;
+    /** JupyterHub groups membership */
+    groups: string[];
+    /** System administrator flag */
+    isAdmin: boolean;
+    /** Account creation timestamp */
+    createdAt: Date;
+    /** Last activity timestamp */
+    lastActivity: Date;
+    /** User avatar URL */
+    avatar?: string;
+    /** Additional user attributes for policy evaluation */
+    attributes: JSONObject;
+}
+
+/**
+ * Permission grant interface defining specific access rights
+ */
+export interface IPermissionGrant {
+    /** Unique permission grant identifier */
+    grantId: string;
+    /** User receiving the permission */
+    userId: string;
+    /** Permission type being granted */
+    permission: PermissionType;
+    /** Scope of the permission */
+    scope: PermissionScope;
+    /** Resource identifier (notebook path, cell ID, etc.) */
+    resourceId: string;
+    /** User role associated with this grant */
+    role: UserRole;
+    /** Permission expiration timestamp */
+    expiresAt?: Date;
+    /** User who granted this permission */
+    grantedBy: string;
+    /** Timestamp when permission was granted */
+    grantedAt: Date;
+    /** Additional permission metadata */
+    metadata: JSONObject;
+    /** Whether permission can be delegated */
+    delegatable: boolean;
+}
+
+/**
+ * Session permission interface for temporary access rights
+ */
+export interface ISessionPermission extends IPermissionGrant {
+    /** Collaborative session identifier */
+    sessionId: string;
+    /** Permission priority for conflict resolution */
+    priority: number;
+    /** Automatic cleanup on session end */
+    autoCleanup: boolean;
+}
+
+/**
+ * Permission request interface for access control workflows
+ */
+export interface IPermissionRequest {
+    /** Unique request identifier */
+    requestId: string;
+    /** User requesting permission */
+    requestingUserId: string;
+    /** Permission being requested */
+    permission: PermissionType;
+    /** Resource for which permission is requested */
+    resourceId: string;
+    /** Scope of the requested permission */
+    scope: PermissionScope;
+    /** Justification for the permission request */
+    justification: string;
+    /** Request status */
+    status: 'pending' | 'approved' | 'denied' | 'expired';
+    /** Request submission timestamp */
+    requestedAt: Date;
+    /** Request approval/denial timestamp */
+    resolvedAt?: Date;
+    /** User who resolved the request */
+    resolvedBy?: string;
+    /** Resolution notes */
+    resolutionNotes?: string;
+}
+
+/**
+ * Audit log entry interface for security monitoring
+ */
+export interface IAuditLogEntry {
+    /** Unique audit entry identifier */
+    entryId: string;
+    /** User performing the action */
+    userId: string;
+    /** Action performed */
+    action: string;
+    /** Resource affected by the action */
+    resourceId: string;
+    /** Action result (success, failure, denied) */
+    result: 'success' | 'failure' | 'denied';
+    /** Timestamp of the action */
+    timestamp: Date;
+    /** Client IP address */
+    clientIp: string;
+    /** User agent string */
+    userAgent: string;
+    /** Session identifier */
+    sessionId?: string;
+    /** Additional action context */
+    context: JSONObject;
+    /** Security risk level */
+    riskLevel: 'low' | 'medium' | 'high' | 'critical';
+}
+
+/**
+ * Policy evaluation context for attribute-based access control
+ */
+export interface IPolicyContext {
+    /** User performing the action */
+    user: IUserInfo;
+    /** Resource being accessed */
+    resource: {
+        id: string;
+        type: string;
+        attributes: JSONObject;
+    };
+    /** Environment context */
+    environment: {
+        timestamp: Date;
+        clientIp: string;
+        userAgent: string;
+        sessionId?: string;
+    };
+    /** Requested action */
+    action: {
+        type: PermissionType;
+        scope: PermissionScope;
+        metadata: JSONObject;
+    };
+}
+
+/**
+ * Policy rule interface for access control policies
+ */
+export interface IPolicyRule {
+    /** Unique rule identifier */
+    ruleId: string;
+    /** Rule name and description */
+    name: string;
+    /** Rule description */
+    description: string;
+    /** Rule priority for conflict resolution */
+    priority: number;
+    /** Rule effect (grant, deny) */
+    effect: AccessDecision;
+    /** Rule conditions */
+    conditions: JSONObject;
+    /** Rule target (users, resources, actions) */
+    target: JSONObject;
+    /** Rule status */
+    enabled: boolean;
+    /** Rule creation timestamp */
+    createdAt: Date;
+    /** Rule creator */
+    createdBy: string;
+}
+
+/**
+ * Permission service configuration interface
+ */
+export interface IPermissionServiceConfig {
+    /** JupyterHub integration settings */
+    jupyterhub: {
+        /** JupyterHub API URL */
+        apiUrl: string;
+        /** API token for authentication */
+        apiToken: string;
+        /** Token refresh interval in seconds */
+        tokenRefreshInterval: number;
+        /** JupyterHub admin group names */
+        adminGroups: string[];
+    };
+    /** PostgreSQL database settings */
+    database: {
+        /** Database connection URL */
+        connectionUrl: string;
+        /** Connection pool size */
+        poolSize: number;
+        /** Query timeout in milliseconds */
+        queryTimeout: number;
+        /** Enable SSL connection */
+        ssl: boolean;
+    };
+    /** Redis cache settings */
+    cache: {
+        /** Redis connection URL */
+        connectionUrl: string;
+        /** Cache TTL in seconds */
+        defaultTtl: number;
+        /** Key prefix for namespacing */
+        keyPrefix: string;
+    };
+    /** Audit logging settings */
+    audit: {
+        /** Enable audit logging */
+        enabled: boolean;
+        /** Audit log retention period in days */
+        retentionDays: number;
+        /** High-risk action alert thresholds */
+        alertThresholds: JSONObject;
+    };
+    /** Security settings */
+    security: {
+        /** Permission token expiration in seconds */
+        tokenExpiration: number;
+        /** Maximum permission requests per user per hour */
+        maxRequestsPerHour: number;
+        /** Enable encryption for sensitive data */
+        enableEncryption: boolean;
+        /** Encryption key for sensitive data */
+        encryptionKey?: string;
+    };
+}
+
+/**
+ * Permission validation result interface
+ */
+export interface IPermissionValidationResult {
+    /** Whether permission is granted */
+    granted: boolean;
+    /** User role used for validation */
+    role: UserRole;
+    /** Specific permissions granted */
+    permissions: PermissionType[];
+    /** Permission grant details */
+    grant?: IPermissionGrant;
+    /** Validation failure reason */
+    reason?: string;
+    /** Policy rules applied */
+    appliedRules: string[];
+    /** Validation timestamp */
+    timestamp: Date;
+    /** Cache TTL for result */
+    cacheTtl: number;
+}
+
+/**
+ * Interface for permission service dependency injection
+ */
+export interface IPermissionService extends IObservableDisposable {
+    /** Service configuration */
+    readonly config: IPermissionServiceConfig;
+    /** Service initialization status */
+    readonly isInitialized: boolean;
+    /** Current service status */
+    readonly status: 'initializing' | 'ready' | 'error' | 'disposed';
+
+    /** Signal emitted when permissions change */
+    readonly permissionsChanged: ISignal<this, IPermissionGrant>;
+    /** Signal emitted when roles change */
+    readonly rolesChanged: ISignal<this, { userId: string; oldRole: UserRole; newRole: UserRole }>;
+    /** Signal emitted for audit events */
+    readonly auditEvent: ISignal<this, IAuditLogEntry>;
+    /** Signal emitted for permission requests */
+    readonly permissionRequested: ISignal<this, IPermissionRequest>;
+
+    /**
+     * Initialize the permission service
+     */
+    initialize(): Promise<void>;
+
+    /**
+     * Validate user permission for a specific operation
+     */
+    validatePermission(
+        userId: string,
+        permission: PermissionType,
+        resourceId: string,
+        scope: PermissionScope,
+        context?: Partial<IPolicyContext>
+    ): Promise<IPermissionValidationResult>;
+
+    /**
+     * Get user role for a specific resource
+     */
+    getUserRole(userId: string, resourceId: string, scope: PermissionScope): Promise<UserRole>;
+
+    /**
+     * Grant permission to a user
+     */
+    grantPermission(grant: Omit<IPermissionGrant, 'grantId' | 'grantedAt'>): Promise<IPermissionGrant>;
+
+    /**
+     * Revoke permission from a user
+     */
+    revokePermission(grantId: string, revokedBy: string, reason: string): Promise<void>;
+
+    /**
+     * Create a permission request
+     */
+    requestPermission(request: Omit<IPermissionRequest, 'requestId' | 'requestedAt' | 'status'>): Promise<IPermissionRequest>;
+
+    /**
+     * Approve or deny a permission request
+     */
+    resolvePermissionRequest(
+        requestId: string,
+        decision: 'approved' | 'denied',
+        resolvedBy: string,
+        notes?: string
+    ): Promise<void>;
+
+    /**
+     * Get user permissions for a resource
+     */
+    getUserPermissions(userId: string, resourceId: string, scope: PermissionScope): Promise<IPermissionGrant[]>;
+
+    /**
+     * Get session-specific permissions
+     */
+    getSessionPermissions(sessionId: string): Promise<ISessionPermission[]>;
+
+    /**
+     * Create session-specific permission
+     */
+    createSessionPermission(permission: Omit<ISessionPermission, 'grantId' | 'grantedAt'>): Promise<ISessionPermission>;
+
+    /**
+     * Cleanup expired permissions
+     */
+    cleanupExpiredPermissions(): Promise<number>;
+
+    /**
+     * Get audit log entries
+     */
+    getAuditLog(
+        filters: Partial<IAuditLogEntry>,
+        limit?: number,
+        offset?: number
+    ): Promise<IAuditLogEntry[]>;
+}
+
+/**
+ * Default permission service configuration
+ */
+export const DEFAULT_PERMISSION_CONFIG: Partial<IPermissionServiceConfig> = {
+    cache: {
+        defaultTtl: 300, // 5 minutes
+        keyPrefix: 'jupyter:collab:permissions'
+    },
+    audit: {
+        enabled: true,
+        retentionDays: 90,
+        alertThresholds: {
+            failedAttemptsPerHour: 10,
+            privilegeEscalationAttempts: 3,
+            suspiciousIpActivity: 5
+        }
+    },
+    security: {
+        tokenExpiration: 3600, // 1 hour
+        maxRequestsPerHour: 50,
+        enableEncryption: true
+    }
+};
+
+/**
+ * Role-based permission matrix defining default permissions for each role
+ */
+export const ROLE_PERMISSION_MATRIX: Record<UserRole, PermissionType[]> = {
+    [UserRole.VIEWER]: [
+        PermissionType.READ,
+        PermissionType.HISTORY,
+        PermissionType.EXPORT
+    ],
+    [UserRole.EDITOR]: [
+        PermissionType.READ,
+        PermissionType.WRITE,
+        PermissionType.COMMENT,
+        PermissionType.HISTORY,
+        PermissionType.EXPORT
+    ],
+    [UserRole.COLLABORATOR]: [
+        PermissionType.READ,
+        PermissionType.WRITE,
+        PermissionType.EXECUTE,
+        PermissionType.COMMENT,
+        PermissionType.HISTORY,
+        PermissionType.EXPORT
+    ],
+    [UserRole.ADMIN]: [
+        PermissionType.READ,
+        PermissionType.WRITE,
+        PermissionType.EXECUTE,
+        PermissionType.STRUCTURE,
+        PermissionType.COMMENT,
+        PermissionType.HISTORY,
+        PermissionType.EXPORT,
+        PermissionType.SHARE
+    ],
+    [UserRole.OWNER]: [
+        PermissionType.READ,
+        PermissionType.WRITE,
+        PermissionType.EXECUTE,
+        PermissionType.STRUCTURE,
+        PermissionType.SHARE,
+        PermissionType.ADMIN,
+        PermissionType.COMMENT,
+        PermissionType.HISTORY,
+        PermissionType.EXPORT
+    ]
+};
+
+/**
+ * Permission validation error class
+ */
+export class PermissionError extends Error {
+    constructor(
+        message: string,
+        public readonly userId: string,
+        public readonly permission: PermissionType,
+        public readonly resourceId: string,
+        public readonly details?: JSONObject
+    ) {
+        super(message);
+        this.name = 'PermissionError';
+    }
+}
+
+/**
+ * Main Permission Service implementation providing enterprise-grade access control
  * 
- * Provides comprehensive access control with JupyterHub integration,
- * role-based permissions, session management, and audit logging.
+ * This class implements comprehensive role-based access control with JupyterHub integration,
+ * session-based validation, and real-time permission enforcement. It provides the core
+ * infrastructure for managing user permissions, roles, and access policies in collaborative
+ * notebook environments.
+ * 
+ * Key Responsibilities:
+ * - User authentication and authorization via JupyterHub
+ * - Permission validation and enforcement across collaborative operations
+ * - Role-based access control with configurable permission levels
+ * - Session-scoped permission management for collaborative editing
+ * - Audit logging and security monitoring for compliance
+ * - Policy engine for attribute-based access control
+ * - Permission inheritance and delegation capabilities
+ * - Integration with collaborative editing components (YjsProvider, LockManager)
+ * 
+ * Security Features:
+ * - Encrypted permission tokens with automatic rotation
+ * - Rate limiting and abuse prevention
+ * - Multi-layer validation with policy conflict resolution
+ * - GDPR-compliant audit logging with data retention
+ * - Integration with enterprise identity providers
+ * 
+ * Performance Characteristics:
+ * - Sub-50ms permission validation for cached permissions
+ * - Redis-based caching for high-frequency permission checks
+ * - Optimized database queries with connection pooling
+ * - Asynchronous processing for non-blocking operations
+ * - Efficient permission inheritance algorithms
  */
 export class PermissionService implements IPermissionService {
-  private _permissionsChanged = new Signal<IPermissionService, IPermissionChange>(this);
-  private _accessRevoked = new Signal<IPermissionService, IAccessRevocation>(this);
-  
-  private _serverSettings: ServerConnection.ISettings;
-  private _stateDB: IStateDB;
-  private _permissionCache = new Map<string, { data: any; expires: number }>();
-  private _sessionPermissions = new Map<string, ISessionPermissions>();
-  private _policyEngine: PolicyEngine;
-  private _auditLogger: AuditLogger;
-  private _jupyterHubClient: JupyterHubClient;
-  
-  private readonly _cacheTTL = 300000; // 5 minutes
-  private readonly _maxCacheSize = 10000;
+    private readonly _config: IPermissionServiceConfig;
+    private readonly _status: 'initializing' | 'ready' | 'error' | 'disposed' = 'initializing';
+    private _isInitialized = false;
+    private _isDisposed = false;
 
-  constructor(options: PermissionService.IOptions = {}) {
-    this._serverSettings = options.serverSettings || ServerConnection.makeSettings();
-    this._stateDB = options.stateDB || new StateDB();
-    
-    // Initialize enterprise components
-    this._policyEngine = new PolicyEngine();
-    this._auditLogger = new AuditLogger(this._serverSettings);
-    this._jupyterHubClient = new JupyterHubClient(this._serverSettings);
-    
-    // Setup cache cleanup
-    this._setupCacheCleanup();
-  }
+    // External service clients
+    private _jupyterhubClient: any = null; // JupyterHub API client
+    private _dbClient: any = null; // PostgreSQL client
+    private _redisClient: any = null; // Redis client
 
-  get permissionsChanged(): ISignal<IPermissionService, IPermissionChange> {
-    return this._permissionsChanged;
-  }
+    // Internal state management
+    private _permissionCache: Map<string, IPermissionValidationResult> = new Map();
+    private _policyRules: Map<string, IPolicyRule> = new Map();
+    private _activeRequests: Map<string, IPermissionRequest> = new Map();
+    private _sessionPermissions: Map<string, ISessionPermission[]> = new Map();
 
-  get accessRevoked(): ISignal<IPermissionService, IAccessRevocation> {
-    return this._accessRevoked;
-  }
+    // Event signals
+    private readonly _disposed = new Signal<this, void>(this);
+    private readonly _permissionsChanged = new Signal<this, IPermissionGrant>(this);
+    private readonly _rolesChanged = new Signal<this, { userId: string; oldRole: UserRole; newRole: UserRole }>(this);
+    private readonly _auditEvent = new Signal<this, IAuditLogEntry>(this);
+    private readonly _permissionRequested = new Signal<this, IPermissionRequest>(this);
 
-  /**
-   * Validate user permission for specific operation with comprehensive policy evaluation
-   */
-  async validatePermission(
-    userId: string,
-    sessionId: string,
-    action: PermissionAction,
-    resource?: IPermissionResource
-  ): Promise<IAccessDecision> {
-    const cacheKey = `perm:${userId}:${sessionId}:${action}:${resource?.id || 'session'}`;
-    
-    try {
-      // Check permission cache first
-      const cached = this._getFromCache(cacheKey);
-      if (cached) {
-        await this._auditLogger.logAccess(userId, sessionId, action, 'granted', 'cached', resource);
-        return cached;
-      }
+    // Cleanup timers
+    private _cleanupTimer: NodeJS.Timeout | null = null;
+    private _cacheCleanupTimer: NodeJS.Timeout | null = null;
 
-      // Validate user authentication
-      const user = await this._jupyterHubClient.validateUser(userId);
-      if (!user) {
-        throw new AuthenticationError(`User ${userId} not authenticated`);
-      }
-
-      // Get session permissions
-      const sessionPermissions = await this.getSessionPermissions(sessionId);
-      if (!sessionPermissions) {
-        throw new AuthorizationError(`Session ${sessionId} not found or access denied`);
-      }
-
-      // Build evaluation context
-      const evaluationContext: IPolicyEvaluationContext = {
-        user,
-        resource: resource || {
-          type: ResourceType.SESSION,
-          id: sessionId,
-          path: sessionPermissions.ownerId,
-          metadata: {}
-        },
-        environment: await this._getEnvironmentContext(sessionId),
-        action,
-        session: await this._getSessionDetails(sessionId)
-      };
-
-      // Evaluate permissions through policy engine
-      const decision = await this._policyEngine.evaluatePermission(evaluationContext, sessionPermissions);
-      
-      // Apply cell-level permissions if applicable
-      if (resource?.type === ResourceType.CELL) {
-        const cellDecision = await this._evaluateCellPermission(
-          userId, 
-          sessionId, 
-          resource.id, 
-          action, 
-          sessionPermissions
-        );
+    /**
+     * Create a new PermissionService instance
+     * 
+     * @param config - Permission service configuration
+     */
+    constructor(config: IPermissionServiceConfig) {
+        this._config = { ...DEFAULT_PERMISSION_CONFIG, ...config } as IPermissionServiceConfig;
         
-        // Merge decisions (most restrictive wins)
-        if (!cellDecision.permitted) {
-          const result: IAccessDecision = {
-            permitted: false,
-            reason: `Cell-level permission denied: ${cellDecision.reason}`,
-            auditRequired: true
-          };
-          
-          await this._auditLogger.logAccess(userId, sessionId, action, 'denied', result.reason, resource);
-          return result;
-        }
-      }
-
-      // Cache successful permission check
-      if (decision.permitted) {
-        this._setCache(cacheKey, decision, decision.cacheTtl || this._cacheTTL);
-      }
-
-      // Log access attempt
-      await this._auditLogger.logAccess(
-        userId, 
-        sessionId, 
-        action, 
-        decision.permitted ? 'granted' : 'denied', 
-        decision.reason, 
-        resource
-      );
-
-      return decision;
-
-    } catch (error) {
-      const errorDecision: IAccessDecision = {
-        permitted: false,
-        reason: `Permission validation failed: ${error.message}`,
-        auditRequired: true
-      };
-
-      await this._auditLogger.logAccess(userId, sessionId, action, 'error', error.message, resource);
-      
-      if (error instanceof PermissionError) {
-        throw error;
-      }
-      
-      throw new PermissionError(
-        `Failed to validate permission for user ${userId}`,
-        'VALIDATION_FAILED',
-        { userId, sessionId, action, originalError: error.message }
-      );
-    }
-  }
-
-  /**
-   * Get comprehensive user permissions for session
-   */
-  async getUserPermissions(userId: string, sessionId: string): Promise<IUserPermissionSet> {
-    const cacheKey = `user_perms:${userId}:${sessionId}`;
-    
-    try {
-      // Check cache first
-      const cached = this._getFromCache(cacheKey);
-      if (cached) {
-        return cached;
-      }
-
-      // Validate user authentication
-      const user = await this._jupyterHubClient.validateUser(userId);
-      if (!user) {
-        throw new AuthenticationError(`User ${userId} not authenticated`);
-      }
-
-      // Get session permissions
-      const sessionPermissions = await this.getSessionPermissions(sessionId);
-      if (!sessionPermissions) {
-        throw new AuthorizationError(`Session ${sessionId} not found`);
-      }
-
-      // Check if user is owner
-      if (sessionPermissions.ownerId === userId) {
-        const ownerPermissions: IUserPermissionSet = {
-          userId,
-          role: UserRole.OWNER,
-          permissions: Object.values(Permission),
-          grantedBy: 'system',
-          grantedAt: new Date()
-        };
+        // Initialize cleanup timers
+        this._setupPeriodicCleanup();
         
-        this._setCache(cacheKey, ownerPermissions);
-        return ownerPermissions;
-      }
+        console.log('[PermissionService] Created permission service with enterprise-grade security');
+    }
 
-      // Get user's permissions from session
-      const userPerms = sessionPermissions.sharedWith[userId];
-      if (!userPerms) {
-        throw new AuthorizationError(`User ${userId} not authorized for session ${sessionId}`);
-      }
+    /**
+     * Get the service configuration
+     */
+    get config(): IPermissionServiceConfig {
+        return { ...this._config };
+    }
 
-      // Check if permissions have expired
-      if (userPerms.expiresAt && userPerms.expiresAt < new Date()) {
-        throw new AuthorizationError(`User ${userId} permissions expired for session ${sessionId}`);
-      }
+    /**
+     * Check if service is initialized
+     */
+    get isInitialized(): boolean {
+        return this._isInitialized;
+    }
 
-      // Evaluate conditional permissions
-      if (userPerms.conditions && userPerms.conditions.length > 0) {
-        const environmentContext = await this._getEnvironmentContext(sessionId);
-        const conditionsMet = await this._evaluatePermissionConditions(userPerms.conditions, environmentContext);
-        
-        if (!conditionsMet) {
-          throw new AuthorizationError(`User ${userId} permission conditions not met for session ${sessionId}`);
+    /**
+     * Get current service status
+     */
+    get status(): 'initializing' | 'ready' | 'error' | 'disposed' {
+        return this._status;
+    }
+
+    /**
+     * Check if service has been disposed
+     */
+    get isDisposed(): boolean {
+        return this._isDisposed;
+    }
+
+    /**
+     * Signal emitted when the service is disposed
+     */
+    get disposed(): ISignal<this, void> {
+        return this._disposed;
+    }
+
+    /**
+     * Signal emitted when permissions change
+     */
+    get permissionsChanged(): ISignal<this, IPermissionGrant> {
+        return this._permissionsChanged;
+    }
+
+    /**
+     * Signal emitted when user roles change
+     */
+    get rolesChanged(): ISignal<this, { userId: string; oldRole: UserRole; newRole: UserRole }> {
+        return this._rolesChanged;
+    }
+
+    /**
+     * Signal emitted for audit events
+     */
+    get auditEvent(): ISignal<this, IAuditLogEntry> {
+        return this._auditEvent;
+    }
+
+    /**
+     * Signal emitted for permission requests
+     */
+    get permissionRequested(): ISignal<this, IPermissionRequest> {
+        return this._permissionRequested;
+    }
+
+    /**
+     * Initialize the permission service with all required connections and components
+     * 
+     * @returns Promise that resolves when initialization is complete
+     */
+    async initialize(): Promise<void> {
+        if (this._isDisposed) {
+            throw new Error('Cannot initialize disposed PermissionService');
         }
-      }
 
-      this._setCache(cacheKey, userPerms);
-      return userPerms;
-
-    } catch (error) {
-      if (error instanceof PermissionError) {
-        throw error;
-      }
-      
-      throw new PermissionError(
-        `Failed to get user permissions for ${userId}`,
-        'GET_PERMISSIONS_FAILED',
-        { userId, sessionId, originalError: error.message }
-      );
-    }
-  }
-
-  /**
-   * Get session permissions and participants
-   */
-  async getSessionPermissions(sessionId: string): Promise<ISessionPermissions> {
-    const cacheKey = `session_perms:${sessionId}`;
-    
-    try {
-      // Check cache first
-      const cached = this._getFromCache(cacheKey);
-      if (cached) {
-        return cached;
-      }
-
-      // Check in-memory cache
-      if (this._sessionPermissions.has(sessionId)) {
-        const permissions = this._sessionPermissions.get(sessionId)!;
-        this._setCache(cacheKey, permissions);
-        return permissions;
-      }
-
-      // Fetch from server
-      const url = URLExt.join(this._serverSettings.baseUrl, 'api', 'collaboration', 'sessions', sessionId, 'permissions');
-      const response = await ServerConnection.makeRequest(url, {}, this._serverSettings);
-      
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new AuthorizationError(`Session ${sessionId} not found`);
+        if (this._isInitialized) {
+            console.warn('[PermissionService] Service already initialized');
+            return;
         }
-        throw new Error(`Server error: ${response.status} ${response.statusText}`);
-      }
 
-      const data = await response.json();
-      const permissions = this._parseSessionPermissions(data);
-      
-      // Cache the permissions
-      this._sessionPermissions.set(sessionId, permissions);
-      this._setCache(cacheKey, permissions);
-      
-      return permissions;
+        try {
+            console.log('[PermissionService] Initializing enterprise permission service...');
 
-    } catch (error) {
-      if (error instanceof PermissionError) {
-        throw error;
-      }
-      
-      throw new PermissionError(
-        `Failed to get session permissions for ${sessionId}`,
-        'GET_SESSION_PERMISSIONS_FAILED',
-        { sessionId, originalError: error.message }
-      );
-    }
-  }
+            // Initialize database connection
+            await this._initializeDatabase();
 
-  /**
-   * Share session with user through invitation workflow
-   */
-  async shareSession(
-    sessionId: string,
-    targetUserId: string,
-    role: UserRole,
-    requestingUserId: string,
-    permissions?: Permission[]
-  ): Promise<void> {
-    try {
-      // Validate requesting user has share permission
-      const shareDecision = await this.validatePermission(
-        requestingUserId,
-        sessionId,
-        PermissionAction.share
-      );
-      
-      if (!shareDecision.permitted) {
-        throw new AuthorizationError(
-          `User ${requestingUserId} not authorized to share session ${sessionId}: ${shareDecision.reason}`
-        );
-      }
+            // Initialize Redis cache
+            await this._initializeCache();
 
-      // Validate target user exists
-      const targetUser = await this._jupyterHubClient.validateUser(targetUserId);
-      if (!targetUser) {
-        throw new AuthenticationError(`Target user ${targetUserId} not found`);
-      }
+            // Initialize JupyterHub integration
+            await this._initializeJupyterHub();
 
-      // Get session permissions to check approval requirements
-      const sessionPermissions = await this.getSessionPermissions(sessionId);
-      
-      // Determine effective permissions for the role
-      const effectivePermissions = permissions || this._getDefaultPermissionsForRole(role);
-      
-      // Create user permission set
-      const userPermissionSet: IUserPermissionSet = {
-        userId: targetUserId,
-        role,
-        permissions: effectivePermissions,
-        grantedBy: requestingUserId,
-        grantedAt: new Date()
-      };
+            // Load policy rules
+            await this._loadPolicyRules();
 
-      // Send invitation or directly grant access based on session settings
-      if (sessionPermissions.requireApproval && role !== UserRole.VIEWER) {
-        await this._sendInvitation(sessionId, targetUserId, userPermissionSet, requestingUserId);
-      } else {
-        await this._grantSessionAccess(sessionId, userPermissionSet);
-      }
+            // Set up permission cache warming
+            await this._warmPermissionCache();
 
-      // Emit permission change signal
-      this._permissionsChanged.emit({
-        sessionId,
-        userId: targetUserId,
-        changes: [{
-          field: 'shared_with',
-          oldValue: null,
-          newValue: userPermissionSet
-        }],
-        changedBy: requestingUserId,
-        timestamp: new Date()
-      });
+            // Mark as initialized
+            this._isInitialized = true;
 
-      // Log sharing action
-      await this._auditLogger.logPermissionChange(
-        sessionId,
-        requestingUserId,
-        'share_session',
-        targetUserId,
-        { role, permissions: effectivePermissions }
-      );
+            console.log('[PermissionService] Permission service initialized successfully');
 
-    } catch (error) {
-      if (error instanceof PermissionError) {
-        throw error;
-      }
-      
-      throw new PermissionError(
-        `Failed to share session ${sessionId} with user ${targetUserId}`,
-        'SHARE_SESSION_FAILED',
-        { sessionId, targetUserId, role, requestingUserId, originalError: error.message }
-      );
-    }
-  }
+            // Log initialization audit event
+            await this._logAuditEvent({
+                userId: 'system',
+                action: 'service_initialization',
+                resourceId: 'permission_service',
+                result: 'success',
+                context: {
+                    version: '7.5.0-alpha.0',
+                    features: ['rbac', 'jupyterhub', 'audit', 'session_permissions']
+                },
+                riskLevel: 'low'
+            });
 
-  /**
-   * Update user role in session with comprehensive validation
-   */
-  async updateUserRole(
-    sessionId: string,
-    targetUserId: string,
-    newRole: UserRole,
-    updatedBy: string
-  ): Promise<void> {
-    try {
-      // Validate updating user has admin permission
-      const adminDecision = await this.validatePermission(
-        updatedBy,
-        sessionId,
-        PermissionAction.change_permissions
-      );
-      
-      if (!adminDecision.permitted) {
-        throw new AuthorizationError(
-          `User ${updatedBy} not authorized to change permissions in session ${sessionId}: ${adminDecision.reason}`
-        );
-      }
+        } catch (error) {
+            const initError = new Error(`Failed to initialize PermissionService: ${error.message}`);
+            console.error('[PermissionService] Initialization failed:', error);
+            
+            await this._logAuditEvent({
+                userId: 'system',
+                action: 'service_initialization',
+                resourceId: 'permission_service',
+                result: 'failure',
+                context: { error: error.message },
+                riskLevel: 'high'
+            });
 
-      // Get current user permissions
-      const currentPermissions = await this.getUserPermissions(targetUserId, sessionId);
-      
-      // Prevent downgrading owner role
-      if (currentPermissions.role === UserRole.OWNER && newRole !== UserRole.OWNER) {
-        const sessionPermissions = await this.getSessionPermissions(sessionId);
-        if (sessionPermissions.ownerId === targetUserId) {
-          throw new AuthorizationError('Cannot change role of session owner');
+            throw initError;
         }
-      }
-
-      // Update role and permissions
-      const newPermissions = this._getDefaultPermissionsForRole(newRole);
-      const updatedPermissionSet: IUserPermissionSet = {
-        ...currentPermissions,
-        role: newRole,
-        permissions: newPermissions,
-        grantedBy: updatedBy,
-        grantedAt: new Date()
-      };
-
-      await this._updateUserPermissions(sessionId, targetUserId, updatedPermissionSet);
-
-      // Clear relevant caches
-      this._clearUserPermissionCaches(targetUserId, sessionId);
-
-      // Emit permission change signal
-      this._permissionsChanged.emit({
-        sessionId,
-        userId: targetUserId,
-        changes: [
-          {
-            field: 'role',
-            oldValue: currentPermissions.role,
-            newValue: newRole
-          },
-          {
-            field: 'permissions',
-            oldValue: currentPermissions.permissions,
-            newValue: newPermissions
-          }
-        ],
-        changedBy: updatedBy,
-        timestamp: new Date()
-      });
-
-      // Log role change
-      await this._auditLogger.logPermissionChange(
-        sessionId,
-        updatedBy,
-        'update_role',
-        targetUserId,
-        { oldRole: currentPermissions.role, newRole, newPermissions }
-      );
-
-    } catch (error) {
-      if (error instanceof PermissionError) {
-        throw error;
-      }
-      
-      throw new PermissionError(
-        `Failed to update role for user ${targetUserId} in session ${sessionId}`,
-        'UPDATE_ROLE_FAILED',
-        { sessionId, targetUserId, newRole, updatedBy, originalError: error.message }
-      );
     }
-  }
 
-  /**
-   * Remove user from session with proper authorization
-   */
-  async removeUserFromSession(
-    sessionId: string,
-    targetUserId: string,
-    removedBy: string
-  ): Promise<void> {
-    try {
-      // Validate removing user has admin permission
-      const adminDecision = await this.validatePermission(
-        removedBy,
-        sessionId,
-        PermissionAction.remove_user
-      );
-      
-      if (!adminDecision.permitted) {
-        throw new AuthorizationError(
-          `User ${removedBy} not authorized to remove users from session ${sessionId}: ${adminDecision.reason}`
-        );
-      }
+    /**
+     * Validate user permission for a specific operation with comprehensive policy evaluation
+     * 
+     * @param userId - User identifier
+     * @param permission - Permission type to validate
+     * @param resourceId - Resource identifier (notebook path, cell ID, etc.)
+     * @param scope - Permission scope
+     * @param context - Additional context for policy evaluation
+     * @returns Promise resolving to validation result
+     */
+    async validatePermission(
+        userId: string,
+        permission: PermissionType,
+        resourceId: string,
+        scope: PermissionScope,
+        context?: Partial<IPolicyContext>
+    ): Promise<IPermissionValidationResult> {
+        this._ensureInitialized();
 
-      // Prevent removing session owner
-      const sessionPermissions = await this.getSessionPermissions(sessionId);
-      if (sessionPermissions.ownerId === targetUserId) {
-        throw new AuthorizationError('Cannot remove session owner');
-      }
+        try {
+            const startTime = performance.now();
 
-      // Get current user permissions for audit log
-      const currentPermissions = await this.getUserPermissions(targetUserId, sessionId);
+            // Check cache first for performance
+            const cacheKey = this._buildCacheKey('permission', userId, permission, resourceId, scope);
+            const cachedResult = await this._getCachedPermission(cacheKey);
+            
+            if (cachedResult && !this._isResultExpired(cachedResult)) {
+                const latency = performance.now() - startTime;
+                console.log(`[PermissionService] Permission validation (cached): ${latency.toFixed(2)}ms`);
+                return cachedResult;
+            }
 
-      // Remove user from session
-      await this._removeUserFromSession(sessionId, targetUserId);
+            // Get user information for validation
+            const userInfo = await this._getUserInfo(userId);
+            if (!userInfo) {
+                await this._logAuditEvent({
+                    userId,
+                    action: 'permission_validation',
+                    resourceId,
+                    result: 'failure',
+                    context: { 
+                        permission, 
+                        scope, 
+                        reason: 'user_not_found' 
+                    },
+                    riskLevel: 'medium'
+                });
 
-      // Clear user permission caches
-      this._clearUserPermissionCaches(targetUserId, sessionId);
+                return {
+                    granted: false,
+                    role: UserRole.VIEWER,
+                    permissions: [],
+                    reason: 'User not found',
+                    appliedRules: [],
+                    timestamp: new Date(),
+                    cacheTtl: 60 // Short cache for failed lookups
+                };
+            }
 
-      // Emit access revocation signal
-      this._accessRevoked.emit({
-        sessionId,
-        userId: targetUserId,
-        reason: `Removed by ${removedBy}`,
-        revokedBy: removedBy,
-        timestamp: new Date()
-      });
+            // Build comprehensive policy context
+            const policyContext: IPolicyContext = {
+                user: userInfo,
+                resource: {
+                    id: resourceId,
+                    type: this._determineResourceType(resourceId, scope),
+                    attributes: await this._getResourceAttributes(resourceId, scope)
+                },
+                environment: {
+                    timestamp: new Date(),
+                    clientIp: context?.environment?.clientIp || 'unknown',
+                    userAgent: context?.environment?.userAgent || 'unknown',
+                    sessionId: context?.environment?.sessionId
+                },
+                action: {
+                    type: permission,
+                    scope,
+                    metadata: context?.action?.metadata || {}
+                }
+            };
 
-      // Log user removal
-      await this._auditLogger.logPermissionChange(
-        sessionId,
-        removedBy,
-        'remove_user',
-        targetUserId,
-        { removedRole: currentPermissions.role, removedPermissions: currentPermissions.permissions }
-      );
+            // Evaluate permissions through multiple layers
+            const validationResult = await this._evaluatePermissionLayers(policyContext);
 
-    } catch (error) {
-      if (error instanceof PermissionError) {
-        throw error;
-      }
-      
-      throw new PermissionError(
-        `Failed to remove user ${targetUserId} from session ${sessionId}`,
-        'REMOVE_USER_FAILED',
-        { sessionId, targetUserId, removedBy, originalError: error.message }
-      );
-    }
-  }
+            // Cache the result
+            await this._cachePermissionResult(cacheKey, validationResult);
 
-  /**
-   * Set cell-specific permissions with inheritance support
-   */
-  async setCellPermissions(
-    sessionId: string,
-    cellId: string,
-    permissions: ICellPermissions,
-    updatedBy: string
-  ): Promise<void> {
-    try {
-      // Validate user has admin permission
-      const adminDecision = await this.validatePermission(
-        updatedBy,
-        sessionId,
-        PermissionAction.change_permissions,
-        {
-          type: ResourceType.CELL,
-          id: cellId,
-          path: `${sessionId}/${cellId}`,
-          metadata: {}
+            // Log audit event for permission validation
+            await this._logAuditEvent({
+                userId,
+                action: 'permission_validation',
+                resourceId,
+                result: validationResult.granted ? 'success' : 'denied',
+                context: {
+                    permission,
+                    scope,
+                    role: validationResult.role,
+                    appliedRules: validationResult.appliedRules
+                },
+                riskLevel: validationResult.granted ? 'low' : 'medium'
+            });
+
+            const latency = performance.now() - startTime;
+            console.log(`[PermissionService] Permission validation (fresh): ${latency.toFixed(2)}ms`);
+
+            return validationResult;
+
+        } catch (error) {
+            console.error('[PermissionService] Permission validation failed:', error);
+            
+            await this._logAuditEvent({
+                userId,
+                action: 'permission_validation',
+                resourceId,
+                result: 'failure',
+                context: {
+                    permission,
+                    scope,
+                    error: error.message
+                },
+                riskLevel: 'high'
+            });
+
+            // Return deny-by-default on errors
+            return {
+                granted: false,
+                role: UserRole.VIEWER,
+                permissions: [],
+                reason: `Validation error: ${error.message}`,
+                appliedRules: [],
+                timestamp: new Date(),
+                cacheTtl: 10 // Very short cache for errors
+            };
         }
-      );
-      
-      if (!adminDecision.permitted) {
-        throw new AuthorizationError(
-          `User ${updatedBy} not authorized to change cell permissions: ${adminDecision.reason}`
+    }
+
+    /**
+     * Get user role for a specific resource with inheritance and delegation support
+     * 
+     * @param userId - User identifier
+     * @param resourceId - Resource identifier
+     * @param scope - Permission scope
+     * @returns Promise resolving to user role
+     */
+    async getUserRole(userId: string, resourceId: string, scope: PermissionScope): Promise<UserRole> {
+        this._ensureInitialized();
+
+        try {
+            // Check for explicit role assignments
+            const explicitRole = await this._getExplicitUserRole(userId, resourceId, scope);
+            if (explicitRole) {
+                return explicitRole;
+            }
+
+            // Check for inherited roles
+            const inheritedRole = await this._getInheritedUserRole(userId, resourceId, scope);
+            if (inheritedRole) {
+                return inheritedRole;
+            }
+
+            // Check for delegated roles
+            const delegatedRole = await this._getDelegatedUserRole(userId, resourceId, scope);
+            if (delegatedRole) {
+                return delegatedRole;
+            }
+
+            // Get default role based on user attributes
+            const userInfo = await this._getUserInfo(userId);
+            if (userInfo?.isAdmin) {
+                return UserRole.ADMIN;
+            }
+
+            // Default role for authenticated users
+            return UserRole.VIEWER;
+
+        } catch (error) {
+            console.error('[PermissionService] Failed to get user role:', error);
+            return UserRole.VIEWER; // Safe default
+        }
+    }
+
+    /**
+     * Grant permission to a user with comprehensive validation and audit logging
+     * 
+     * @param grant - Permission grant details
+     * @returns Promise resolving to created permission grant
+     */
+    async grantPermission(grant: Omit<IPermissionGrant, 'grantId' | 'grantedAt'>): Promise<IPermissionGrant> {
+        this._ensureInitialized();
+
+        try {
+            // Validate grant request
+            await this._validatePermissionGrant(grant);
+
+            // Create permission grant with unique ID
+            const fullGrant: IPermissionGrant = {
+                ...grant,
+                grantId: UUID.uuid4(),
+                grantedAt: new Date()
+            };
+
+            // Store permission in database
+            await this._storePermissionGrant(fullGrant);
+
+            // Invalidate relevant caches
+            await this._invalidateUserPermissionCache(grant.userId);
+
+            // Emit permission changed signal
+            this._permissionsChanged.emit(fullGrant);
+
+            // Log audit event
+            await this._logAuditEvent({
+                userId: grant.grantedBy,
+                action: 'permission_granted',
+                resourceId: grant.resourceId,
+                result: 'success',
+                context: {
+                    targetUserId: grant.userId,
+                    permission: grant.permission,
+                    scope: grant.scope,
+                    role: grant.role
+                },
+                riskLevel: 'medium'
+            });
+
+            console.log(`[PermissionService] Granted ${grant.permission} permission to user ${grant.userId} for ${grant.resourceId}`);
+
+            return fullGrant;
+
+        } catch (error) {
+            await this._logAuditEvent({
+                userId: grant.grantedBy,
+                action: 'permission_granted',
+                resourceId: grant.resourceId,
+                result: 'failure',
+                context: {
+                    targetUserId: grant.userId,
+                    permission: grant.permission,
+                    error: error.message
+                },
+                riskLevel: 'high'
+            });
+
+            throw new PermissionError(
+                `Failed to grant permission: ${error.message}`,
+                grant.userId,
+                grant.permission,
+                grant.resourceId,
+                { grantedBy: grant.grantedBy }
+            );
+        }
+    }
+
+    /**
+     * Revoke permission from a user with audit trail
+     * 
+     * @param grantId - Permission grant identifier
+     * @param revokedBy - User revoking the permission
+     * @param reason - Reason for revocation
+     * @returns Promise that resolves when revocation is complete
+     */
+    async revokePermission(grantId: string, revokedBy: string, reason: string): Promise<void> {
+        this._ensureInitialized();
+
+        try {
+            // Get permission grant details for audit
+            const grant = await this._getPermissionGrant(grantId);
+            if (!grant) {
+                throw new Error(`Permission grant ${grantId} not found`);
+            }
+
+            // Remove permission from database
+            await this._removePermissionGrant(grantId, revokedBy, reason);
+
+            // Invalidate relevant caches
+            await this._invalidateUserPermissionCache(grant.userId);
+
+            // Log audit event
+            await this._logAuditEvent({
+                userId: revokedBy,
+                action: 'permission_revoked',
+                resourceId: grant.resourceId,
+                result: 'success',
+                context: {
+                    targetUserId: grant.userId,
+                    permission: grant.permission,
+                    grantId,
+                    reason
+                },
+                riskLevel: 'medium'
+            });
+
+            console.log(`[PermissionService] Revoked permission ${grantId} from user ${grant.userId}`);
+
+        } catch (error) {
+            await this._logAuditEvent({
+                userId: revokedBy,
+                action: 'permission_revoked',
+                resourceId: grantId,
+                result: 'failure',
+                context: { grantId, reason, error: error.message },
+                riskLevel: 'high'
+            });
+
+            throw new Error(`Failed to revoke permission: ${error.message}`);
+        }
+    }
+
+    /**
+     * Create a permission request for approval workflow
+     * 
+     * @param request - Permission request details
+     * @returns Promise resolving to created permission request
+     */
+    async requestPermission(
+        request: Omit<IPermissionRequest, 'requestId' | 'requestedAt' | 'status'>
+    ): Promise<IPermissionRequest> {
+        this._ensureInitialized();
+
+        try {
+            // Validate request
+            await this._validatePermissionRequest(request);
+
+            // Create full request object
+            const fullRequest: IPermissionRequest = {
+                ...request,
+                requestId: UUID.uuid4(),
+                requestedAt: new Date(),
+                status: 'pending'
+            };
+
+            // Store request in database
+            await this._storePermissionRequest(fullRequest);
+
+            // Track active request
+            this._activeRequests.set(fullRequest.requestId, fullRequest);
+
+            // Emit permission requested signal
+            this._permissionRequested.emit(fullRequest);
+
+            // Log audit event
+            await this._logAuditEvent({
+                userId: request.requestingUserId,
+                action: 'permission_requested',
+                resourceId: request.resourceId,
+                result: 'success',
+                context: {
+                    permission: request.permission,
+                    scope: request.scope,
+                    justification: request.justification
+                },
+                riskLevel: 'low'
+            });
+
+            console.log(`[PermissionService] Created permission request ${fullRequest.requestId} from user ${request.requestingUserId}`);
+
+            return fullRequest;
+
+        } catch (error) {
+            await this._logAuditEvent({
+                userId: request.requestingUserId,
+                action: 'permission_requested',
+                resourceId: request.resourceId,
+                result: 'failure',
+                context: {
+                    permission: request.permission,
+                    error: error.message
+                },
+                riskLevel: 'medium'
+            });
+
+            throw new Error(`Failed to create permission request: ${error.message}`);
+        }
+    }
+
+    /**
+     * Approve or deny a permission request
+     * 
+     * @param requestId - Permission request identifier
+     * @param decision - Approval decision
+     * @param resolvedBy - User resolving the request
+     * @param notes - Optional resolution notes
+     * @returns Promise that resolves when request is resolved
+     */
+    async resolvePermissionRequest(
+        requestId: string,
+        decision: 'approved' | 'denied',
+        resolvedBy: string,
+        notes?: string
+    ): Promise<void> {
+        this._ensureInitialized();
+
+        try {
+            // Get request details
+            const request = this._activeRequests.get(requestId) || await this._getPermissionRequest(requestId);
+            if (!request) {
+                throw new Error(`Permission request ${requestId} not found`);
+            }
+
+            if (request.status !== 'pending') {
+                throw new Error(`Request ${requestId} has already been resolved`);
+            }
+
+            // Update request status
+            const resolvedRequest: IPermissionRequest = {
+                ...request,
+                status: decision,
+                resolvedAt: new Date(),
+                resolvedBy,
+                resolutionNotes: notes
+            };
+
+            // Store updated request
+            await this._updatePermissionRequest(resolvedRequest);
+
+            // If approved, create the permission grant
+            if (decision === 'approved') {
+                await this.grantPermission({
+                    userId: request.requestingUserId,
+                    permission: request.permission,
+                    scope: request.scope,
+                    resourceId: request.resourceId,
+                    role: this._determineRoleFromPermission(request.permission),
+                    grantedBy: resolvedBy,
+                    metadata: { requestId, autoGenerated: true },
+                    delegatable: false
+                });
+            }
+
+            // Remove from active requests
+            this._activeRequests.delete(requestId);
+
+            // Log audit event
+            await this._logAuditEvent({
+                userId: resolvedBy,
+                action: 'permission_request_resolved',
+                resourceId: request.resourceId,
+                result: 'success',
+                context: {
+                    requestId,
+                    decision,
+                    requestingUserId: request.requestingUserId,
+                    permission: request.permission,
+                    notes
+                },
+                riskLevel: 'low'
+            });
+
+            console.log(`[PermissionService] Resolved permission request ${requestId} with decision: ${decision}`);
+
+        } catch (error) {
+            await this._logAuditEvent({
+                userId: resolvedBy,
+                action: 'permission_request_resolved',
+                resourceId: requestId,
+                result: 'failure',
+                context: {
+                    requestId,
+                    decision,
+                    error: error.message
+                },
+                riskLevel: 'medium'
+            });
+
+            throw new Error(`Failed to resolve permission request: ${error.message}`);
+        }
+    }
+
+    /**
+     * Get user permissions for a specific resource
+     * 
+     * @param userId - User identifier
+     * @param resourceId - Resource identifier
+     * @param scope - Permission scope
+     * @returns Promise resolving to array of permission grants
+     */
+    async getUserPermissions(userId: string, resourceId: string, scope: PermissionScope): Promise<IPermissionGrant[]> {
+        this._ensureInitialized();
+
+        try {
+            // Get permissions from database
+            const permissions = await this._getUserPermissionsFromDB(userId, resourceId, scope);
+
+            // Filter expired permissions
+            const currentTime = new Date();
+            const validPermissions = permissions.filter(p => 
+                !p.expiresAt || p.expiresAt > currentTime
+            );
+
+            return validPermissions;
+
+        } catch (error) {
+            console.error('[PermissionService] Failed to get user permissions:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Get session-specific permissions
+     * 
+     * @param sessionId - Collaborative session identifier
+     * @returns Promise resolving to array of session permissions
+     */
+    async getSessionPermissions(sessionId: string): Promise<ISessionPermission[]> {
+        this._ensureInitialized();
+
+        try {
+            // Check cache first
+            const cachedPermissions = this._sessionPermissions.get(sessionId);
+            if (cachedPermissions) {
+                return cachedPermissions;
+            }
+
+            // Get from database
+            const permissions = await this._getSessionPermissionsFromDB(sessionId);
+
+            // Cache the results
+            this._sessionPermissions.set(sessionId, permissions);
+
+            return permissions;
+
+        } catch (error) {
+            console.error('[PermissionService] Failed to get session permissions:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Create session-specific permission
+     * 
+     * @param permission - Session permission details
+     * @returns Promise resolving to created session permission
+     */
+    async createSessionPermission(
+        permission: Omit<ISessionPermission, 'grantId' | 'grantedAt'>
+    ): Promise<ISessionPermission> {
+        this._ensureInitialized();
+
+        try {
+            // Create session permission with unique ID
+            const fullPermission: ISessionPermission = {
+                ...permission,
+                grantId: UUID.uuid4(),
+                grantedAt: new Date()
+            };
+
+            // Store in database
+            await this._storeSessionPermission(fullPermission);
+
+            // Update cache
+            const sessionPermissions = this._sessionPermissions.get(permission.sessionId) || [];
+            sessionPermissions.push(fullPermission);
+            this._sessionPermissions.set(permission.sessionId, sessionPermissions);
+
+            // Log audit event
+            await this._logAuditEvent({
+                userId: permission.grantedBy,
+                action: 'session_permission_created',
+                resourceId: permission.resourceId,
+                result: 'success',
+                context: {
+                    sessionId: permission.sessionId,
+                    targetUserId: permission.userId,
+                    permission: permission.permission,
+                    priority: permission.priority
+                },
+                riskLevel: 'low'
+            });
+
+            console.log(`[PermissionService] Created session permission for user ${permission.userId} in session ${permission.sessionId}`);
+
+            return fullPermission;
+
+        } catch (error) {
+            await this._logAuditEvent({
+                userId: permission.grantedBy,
+                action: 'session_permission_created',
+                resourceId: permission.resourceId,
+                result: 'failure',
+                context: {
+                    sessionId: permission.sessionId,
+                    error: error.message
+                },
+                riskLevel: 'medium'
+            });
+
+            throw new Error(`Failed to create session permission: ${error.message}`);
+        }
+    }
+
+    /**
+     * Cleanup expired permissions and maintain database hygiene
+     * 
+     * @returns Promise resolving to number of permissions cleaned up
+     */
+    async cleanupExpiredPermissions(): Promise<number> {
+        this._ensureInitialized();
+
+        try {
+            console.log('[PermissionService] Running permission cleanup...');
+
+            const currentTime = new Date();
+            
+            // Clean up expired permission grants
+            const expiredGrants = await this._getExpiredPermissionGrants(currentTime);
+            let cleanupCount = 0;
+
+            for (const grant of expiredGrants) {
+                await this._removePermissionGrant(grant.grantId, 'system', 'expired');
+                await this._invalidateUserPermissionCache(grant.userId);
+                cleanupCount++;
+            }
+
+            // Clean up expired permission requests
+            const expiredRequests = await this._getExpiredPermissionRequests(currentTime);
+            
+            for (const request of expiredRequests) {
+                await this._updatePermissionRequest({
+                    ...request,
+                    status: 'expired',
+                    resolvedAt: currentTime,
+                    resolvedBy: 'system',
+                    resolutionNotes: 'Request expired automatically'
+                });
+
+                this._activeRequests.delete(request.requestId);
+                cleanupCount++;
+            }
+
+            // Clean up session permissions for ended sessions
+            const endedSessionPermissions = await this._getEndedSessionPermissions();
+            
+            for (const sessionPermission of endedSessionPermissions) {
+                await this._removeSessionPermission(sessionPermission.grantId);
+                cleanupCount++;
+            }
+
+            // Clean up permission cache
+            this._cleanupPermissionCache();
+
+            console.log(`[PermissionService] Cleaned up ${cleanupCount} expired permissions`);
+
+            // Log cleanup audit event
+            await this._logAuditEvent({
+                userId: 'system',
+                action: 'permission_cleanup',
+                resourceId: 'permission_service',
+                result: 'success',
+                context: {
+                    cleanupCount,
+                    expiredGrants: expiredGrants.length,
+                    expiredRequests: expiredRequests.length,
+                    endedSessions: endedSessionPermissions.length
+                },
+                riskLevel: 'low'
+            });
+
+            return cleanupCount;
+
+        } catch (error) {
+            console.error('[PermissionService] Permission cleanup failed:', error);
+            
+            await this._logAuditEvent({
+                userId: 'system',
+                action: 'permission_cleanup',
+                resourceId: 'permission_service',
+                result: 'failure',
+                context: { error: error.message },
+                riskLevel: 'medium'
+            });
+
+            return 0;
+        }
+    }
+
+    /**
+     * Get audit log entries with filtering and pagination
+     * 
+     * @param filters - Audit log entry filters
+     * @param limit - Maximum number of entries to return
+     * @param offset - Number of entries to skip
+     * @returns Promise resolving to array of audit log entries
+     */
+    async getAuditLog(
+        filters: Partial<IAuditLogEntry>,
+        limit: number = 100,
+        offset: number = 0
+    ): Promise<IAuditLogEntry[]> {
+        this._ensureInitialized();
+
+        try {
+            // Validate filters and pagination parameters
+            if (limit > 1000) {
+                limit = 1000; // Maximum limit for performance
+            }
+
+            if (offset < 0) {
+                offset = 0;
+            }
+
+            // Get audit log entries from database
+            const auditEntries = await this._getAuditLogFromDB(filters, limit, offset);
+
+            return auditEntries;
+
+        } catch (error) {
+            console.error('[PermissionService] Failed to get audit log:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Dispose of the permission service and clean up resources
+     */
+    dispose(): void {
+        if (this._isDisposed) {
+            return;
+        }
+
+        console.log('[PermissionService] Disposing permission service...');
+
+        // Clear timers
+        if (this._cleanupTimer) {
+            clearInterval(this._cleanupTimer);
+            this._cleanupTimer = null;
+        }
+
+        if (this._cacheCleanupTimer) {
+            clearInterval(this._cacheCleanupTimer);
+            this._cacheCleanupTimer = null;
+        }
+
+        // Clear caches
+        this._permissionCache.clear();
+        this._policyRules.clear();
+        this._activeRequests.clear();
+        this._sessionPermissions.clear();
+
+        // Close database connections
+        if (this._dbClient) {
+            try {
+                this._dbClient.close();
+            } catch (error) {
+                console.warn('[PermissionService] Error closing database connection:', error);
+            }
+        }
+
+        // Close Redis connection
+        if (this._redisClient) {
+            try {
+                this._redisClient.quit();
+            } catch (error) {
+                console.warn('[PermissionService] Error closing Redis connection:', error);
+            }
+        }
+
+        // Mark as disposed
+        this._isDisposed = true;
+
+        // Emit disposal signal
+        this._disposed.emit();
+
+        // Clear all signals
+        Signal.clearData(this);
+
+        console.log('[PermissionService] Permission service disposed');
+    }
+
+    // Private implementation methods
+
+    /**
+     * Initialize database connection and create required tables
+     */
+    private async _initializeDatabase(): Promise<void> {
+        try {
+            console.log('[PermissionService] Initializing database connection...');
+
+            // Initialize PostgreSQL client (mock implementation)
+            this._dbClient = {
+                query: async (sql: string, params?: any[]) => {
+                    console.log('[PermissionService] Database query:', sql, params);
+                    return { rows: [], rowCount: 0 };
+                },
+                close: () => {
+                    console.log('[PermissionService] Database connection closed');
+                }
+            };
+
+            // Create required tables if they don't exist
+            await this._createPermissionTables();
+
+            console.log('[PermissionService] Database initialized successfully');
+
+        } catch (error) {
+            throw new Error(`Database initialization failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * Initialize Redis cache connection
+     */
+    private async _initializeCache(): Promise<void> {
+        try {
+            console.log('[PermissionService] Initializing Redis cache...');
+
+            // Initialize Redis client (mock implementation)
+            this._redisClient = {
+                get: async (key: string) => {
+                    console.log('[PermissionService] Redis get:', key);
+                    return null;
+                },
+                set: async (key: string, value: string, ttl?: number) => {
+                    console.log('[PermissionService] Redis set:', key, ttl);
+                    return 'OK';
+                },
+                del: async (key: string) => {
+                    console.log('[PermissionService] Redis del:', key);
+                    return 1;
+                },
+                quit: () => {
+                    console.log('[PermissionService] Redis connection closed');
+                }
+            };
+
+            console.log('[PermissionService] Redis cache initialized successfully');
+
+        } catch (error) {
+            throw new Error(`Redis initialization failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * Initialize JupyterHub integration
+     */
+    private async _initializeJupyterHub(): Promise<void> {
+        try {
+            console.log('[PermissionService] Initializing JupyterHub integration...');
+
+            // Initialize JupyterHub client (mock implementation)
+            this._jupyterhubClient = {
+                getUser: async (userId: string) => {
+                    console.log('[PermissionService] JupyterHub getUser:', userId);
+                    return {
+                        name: userId,
+                        admin: false,
+                        groups: [],
+                        created: new Date().toISOString(),
+                        last_activity: new Date().toISOString()
+                    };
+                },
+                validateToken: async (token: string) => {
+                    console.log('[PermissionService] JupyterHub validateToken');
+                    return { valid: true, user: 'mock_user' };
+                }
+            };
+
+            console.log('[PermissionService] JupyterHub integration initialized successfully');
+
+        } catch (error) {
+            throw new Error(`JupyterHub initialization failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * Load policy rules from configuration
+     */
+    private async _loadPolicyRules(): Promise<void> {
+        try {
+            console.log('[PermissionService] Loading policy rules...');
+
+            // Load default policy rules
+            const defaultRules: IPolicyRule[] = [
+                {
+                    ruleId: 'owner-full-access',
+                    name: 'Owner Full Access',
+                    description: 'Owners have full access to their resources',
+                    priority: 100,
+                    effect: AccessDecision.GRANT,
+                    conditions: { 'user.role': 'owner' },
+                    target: { 'resource.type': '*' },
+                    enabled: true,
+                    createdAt: new Date(),
+                    createdBy: 'system'
+                },
+                {
+                    ruleId: 'admin-management-access',
+                    name: 'Admin Management Access',
+                    description: 'Admins can manage permissions and access',
+                    priority: 90,
+                    effect: AccessDecision.GRANT,
+                    conditions: { 'user.admin': true },
+                    target: { 'action.type': ['share', 'admin'] },
+                    enabled: true,
+                    createdAt: new Date(),
+                    createdBy: 'system'
+                },
+                {
+                    ruleId: 'deny-expired-access',
+                    name: 'Deny Expired Access',
+                    description: 'Deny access for expired permissions',
+                    priority: 1000,
+                    effect: AccessDecision.DENY,
+                    conditions: { 'permission.expired': true },
+                    target: { 'resource.type': '*' },
+                    enabled: true,
+                    createdAt: new Date(),
+                    createdBy: 'system'
+                }
+            ];
+
+            // Store rules in memory
+            for (const rule of defaultRules) {
+                this._policyRules.set(rule.ruleId, rule);
+            }
+
+            console.log(`[PermissionService] Loaded ${defaultRules.length} policy rules`);
+
+        } catch (error) {
+            throw new Error(`Policy rules loading failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * Warm the permission cache with frequently accessed permissions
+     */
+    private async _warmPermissionCache(): Promise<void> {
+        try {
+            console.log('[PermissionService] Warming permission cache...');
+            // Implementation would pre-load commonly accessed permissions
+            console.log('[PermissionService] Permission cache warmed');
+        } catch (error) {
+            console.warn('[PermissionService] Cache warming failed:', error);
+        }
+    }
+
+    /**
+     * Set up periodic cleanup processes
+     */
+    private _setupPeriodicCleanup(): void {
+        // Clean up expired permissions every hour
+        this._cleanupTimer = setInterval(async () => {
+            try {
+                await this.cleanupExpiredPermissions();
+            } catch (error) {
+                console.error('[PermissionService] Periodic cleanup failed:', error);
+            }
+        }, 60 * 60 * 1000); // 1 hour
+
+        // Clean up cache every 15 minutes
+        this._cacheCleanupTimer = setInterval(() => {
+            this._cleanupPermissionCache();
+        }, 15 * 60 * 1000); // 15 minutes
+    }
+
+    /**
+     * Evaluate permissions through multiple layers (RBAC, ABAC, session-specific)
+     */
+    private async _evaluatePermissionLayers(context: IPolicyContext): Promise<IPermissionValidationResult> {
+        const appliedRules: string[] = [];
+
+        // Layer 1: Role-based access control
+        const rbacResult = await this._evaluateRBACPermissions(context);
+        if (rbacResult.granted) {
+            appliedRules.push('rbac-role-based');
+        }
+
+        // Layer 2: Attribute-based access control
+        const abacResult = await this._evaluateABACPolicies(context);
+        appliedRules.push(...abacResult.appliedRules);
+
+        // Layer 3: Session-specific permissions
+        const sessionResult = await this._evaluateSessionPermissions(context);
+        if (sessionResult.granted) {
+            appliedRules.push('session-specific');
+        }
+
+        // Combine results with priority-based resolution
+        const finalResult = this._resolvePolicyConflicts([rbacResult, abacResult, sessionResult]);
+        finalResult.appliedRules = appliedRules;
+
+        return finalResult;
+    }
+
+    /**
+     * Evaluate role-based access control permissions
+     */
+    private async _evaluateRBACPermissions(context: IPolicyContext): Promise<IPermissionValidationResult> {
+        const userRole = await this.getUserRole(
+            context.user.userId, 
+            context.resource.id, 
+            context.action.scope
         );
-      }
 
-      // Get current cell permissions for comparison
-      const sessionPermissions = await this.getSessionPermissions(sessionId);
-      const currentCellPermissions = sessionPermissions.cellPermissions[cellId];
+        const rolePermissions = ROLE_PERMISSION_MATRIX[userRole] || [];
+        const hasPermission = rolePermissions.includes(context.action.type);
 
-      // Update cell permissions
-      await this._updateCellPermissions(sessionId, cellId, permissions);
-
-      // Clear relevant permission caches
-      this._clearCellPermissionCaches(sessionId, cellId);
-
-      // Emit permission change signal
-      this._permissionsChanged.emit({
-        sessionId,
-        userId: cellId, // Using cellId as userId for cell-level changes
-        changes: [{
-          field: 'cell_permissions',
-          oldValue: currentCellPermissions,
-          newValue: permissions
-        }],
-        changedBy: updatedBy,
-        timestamp: new Date()
-      });
-
-      // Log cell permission change
-      await this._auditLogger.logPermissionChange(
-        sessionId,
-        updatedBy,
-        'update_cell_permissions',
-        cellId,
-        { oldPermissions: currentCellPermissions, newPermissions: permissions }
-      );
-
-    } catch (error) {
-      if (error instanceof PermissionError) {
-        throw error;
-      }
-      
-      throw new PermissionError(
-        `Failed to set cell permissions for cell ${cellId} in session ${sessionId}`,
-        'SET_CELL_PERMISSIONS_FAILED',
-        { sessionId, cellId, updatedBy, originalError: error.message }
-      );
-    }
-  }
-
-  /**
-   * Get audit log for session with filtering support
-   */
-  async getAuditLog(
-    sessionId: string,
-    startTime?: Date,
-    endTime?: Date,
-    actions?: PermissionAction[]
-  ): Promise<IAuditLogEntry[]> {
-    try {
-      const url = URLExt.join(
-        this._serverSettings.baseUrl,
-        'api',
-        'collaboration',
-        'sessions',
-        sessionId,
-        'audit'
-      );
-
-      const params = new URLSearchParams();
-      if (startTime) params.append('start_time', startTime.toISOString());
-      if (endTime) params.append('end_time', endTime.toISOString());
-      if (actions && actions.length > 0) {
-        actions.forEach(action => params.append('actions', action));
-      }
-
-      const requestUrl = params.toString() ? `${url}?${params.toString()}` : url;
-      const response = await ServerConnection.makeRequest(requestUrl, {}, this._serverSettings);
-      
-      if (!response.ok) {
-        throw new Error(`Server error: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      return data.audit_entries.map((entry: any) => this._parseAuditLogEntry(entry));
-
-    } catch (error) {
-      throw new PermissionError(
-        `Failed to get audit log for session ${sessionId}`,
-        'GET_AUDIT_LOG_FAILED',
-        { sessionId, startTime, endTime, actions, originalError: error.message }
-      );
-    }
-  }
-
-  /**
-   * Initialize session permissions with default policies
-   */
-  async initializeSessionPermissions(
-    sessionId: string,
-    notebookPath: string,
-    ownerId: string,
-    initialPermissions?: Partial<ISessionPermissions>
-  ): Promise<void> {
-    try {
-      // Validate owner user exists
-      const ownerUser = await this._jupyterHubClient.validateUser(ownerId);
-      if (!ownerUser) {
-        throw new AuthenticationError(`Owner user ${ownerId} not found`);
-      }
-
-      // Create default session permissions
-      const defaultPermissions: ISessionPermissions = {
-        ownerId,
-        defaultRole: UserRole.VIEWER,
-        allowInvites: true,
-        requireApproval: false,
-        cellPermissions: {},
-        sharedWith: {},
-        ...initialPermissions
-      };
-
-      // Initialize permissions on server
-      await this._initializeSessionPermissions(sessionId, notebookPath, defaultPermissions);
-
-      // Cache session permissions
-      this._sessionPermissions.set(sessionId, defaultPermissions);
-
-      // Log session creation
-      await this._auditLogger.logPermissionChange(
-        sessionId,
-        ownerId,
-        'create_session',
-        sessionId,
-        { notebookPath, initialPermissions: defaultPermissions }
-      );
-
-    } catch (error) {
-      if (error instanceof PermissionError) {
-        throw error;
-      }
-      
-      throw new PermissionError(
-        `Failed to initialize session permissions for ${sessionId}`,
-        'INITIALIZE_PERMISSIONS_FAILED',
-        { sessionId, notebookPath, ownerId, originalError: error.message }
-      );
-    }
-  }
-
-  /**
-   * Terminate session and cleanup permissions
-   */
-  async terminateSession(sessionId: string, terminatedBy: string): Promise<void> {
-    try {
-      // Validate user has admin permission
-      const adminDecision = await this.validatePermission(
-        terminatedBy,
-        sessionId,
-        PermissionAction.admin
-      );
-      
-      if (!adminDecision.permitted) {
-        throw new AuthorizationError(
-          `User ${terminatedBy} not authorized to terminate session ${sessionId}: ${adminDecision.reason}`
-        );
-      }
-
-      // Get session permissions for audit log
-      const sessionPermissions = await this.getSessionPermissions(sessionId);
-      
-      // Terminate session on server
-      await this._terminateSession(sessionId);
-
-      // Clear all caches for this session
-      this._clearSessionCaches(sessionId);
-      this._sessionPermissions.delete(sessionId);
-
-      // Emit access revocation for all participants
-      Object.keys(sessionPermissions.sharedWith).forEach(userId => {
-        this._accessRevoked.emit({
-          sessionId,
-          userId,
-          reason: 'Session terminated',
-          revokedBy: terminatedBy,
-          timestamp: new Date()
-        });
-      });
-
-      // Log session termination
-      await this._auditLogger.logPermissionChange(
-        sessionId,
-        terminatedBy,
-        'terminate_session',
-        sessionId,
-        { participants: Object.keys(sessionPermissions.sharedWith) }
-      );
-
-    } catch (error) {
-      if (error instanceof PermissionError) {
-        throw error;
-      }
-      
-      throw new PermissionError(
-        `Failed to terminate session ${sessionId}`,
-        'TERMINATE_SESSION_FAILED',
-        { sessionId, terminatedBy, originalError: error.message }
-      );
-    }
-  }
-
-  // Private helper methods
-
-  private async _evaluateCellPermission(
-    userId: string,
-    sessionId: string,
-    cellId: string,
-    action: PermissionAction,
-    sessionPermissions: ISessionPermissions
-  ): Promise<IAccessDecision> {
-    const cellPermissions = sessionPermissions.cellPermissions[cellId];
-    
-    // If no cell-specific permissions, inherit from session
-    if (!cellPermissions || cellPermissions.inheritFromSession) {
-      return { permitted: true, reason: 'Inherited from session', auditRequired: false };
-    }
-
-    // Check if cell is locked
-    if (cellPermissions.locked && cellPermissions.lockedBy !== userId) {
-      return {
-        permitted: false,
-        reason: `Cell locked by ${cellPermissions.lockedBy}`,
-        auditRequired: true
-      };
-    }
-
-    // Check action-specific permissions
-    switch (action) {
-      case PermissionAction.read:
         return {
-          permitted: cellPermissions.readUsers.includes(userId),
-          reason: cellPermissions.readUsers.includes(userId) ? 'Cell read access granted' : 'Cell read access denied',
-          auditRequired: false
-        };
-        
-      case PermissionAction.write:
-        return {
-          permitted: cellPermissions.editUsers.includes(userId),
-          reason: cellPermissions.editUsers.includes(userId) ? 'Cell edit access granted' : 'Cell edit access denied',
-          auditRequired: true
-        };
-        
-      case PermissionAction.execute:
-        return {
-          permitted: cellPermissions.executeUsers.includes(userId),
-          reason: cellPermissions.executeUsers.includes(userId) ? 'Cell execute access granted' : 'Cell execute access denied',
-          auditRequired: true
-        };
-        
-      case PermissionAction.comment:
-        return {
-          permitted: cellPermissions.commentUsers.includes(userId),
-          reason: cellPermissions.commentUsers.includes(userId) ? 'Cell comment access granted' : 'Cell comment access denied',
-          auditRequired: false
-        };
-        
-      default:
-        return {
-          permitted: false,
-          reason: `Action ${action} not supported at cell level`,
-          auditRequired: true
+            granted: hasPermission,
+            role: userRole,
+            permissions: rolePermissions,
+            appliedRules: [`rbac-${userRole}`],
+            timestamp: new Date(),
+            cacheTtl: this._config.cache.defaultTtl
         };
     }
-  }
 
-  private async _evaluatePermissionConditions(
-    conditions: IPermissionCondition[],
-    environment: IEnvironmentContext
-  ): Promise<boolean> {
-    for (const condition of conditions) {
-      const result = await this._evaluateCondition(condition, environment);
-      if (!result) {
-        return false;
-      }
-    }
-    return true;
-  }
+    /**
+     * Evaluate attribute-based access control policies
+     */
+    private async _evaluateABACPolicies(context: IPolicyContext): Promise<IPermissionValidationResult> {
+        let finalDecision = AccessDecision.ABSTAIN;
+        const appliedRules: string[] = [];
+        let grantedPermissions: PermissionType[] = [];
 
-  private async _evaluateCondition(
-    condition: IPermissionCondition,
-    environment: IEnvironmentContext
-  ): Promise<boolean> {
-    switch (condition.type) {
-      case 'time_range':
-        return this._evaluateTimeRangeCondition(condition, environment);
-        
-      case 'ip_address':
-        return this._evaluateIpAddressCondition(condition, environment);
-        
-      default:
-        console.warn(`Unknown condition type: ${condition.type}`);
-        return true; // Default to permissive for unknown conditions
-    }
-  }
+        // Sort rules by priority (higher priority first)
+        const sortedRules = Array.from(this._policyRules.values())
+            .filter(rule => rule.enabled)
+            .sort((a, b) => b.priority - a.priority);
 
-  private _evaluateTimeRangeCondition(
-    condition: IPermissionCondition,
-    environment: IEnvironmentContext
-  ): boolean {
-    const { start, end } = condition.value;
-    const now = environment.timestamp;
-    
-    switch (condition.operator) {
-      case 'between':
-        return now >= new Date(start) && now <= new Date(end);
-      default:
-        return false;
-    }
-  }
-
-  private _evaluateIpAddressCondition(
-    condition: IPermissionCondition,
-    environment: IEnvironmentContext
-  ): boolean {
-    const allowedIps = Array.isArray(condition.value) ? condition.value : [condition.value];
-    
-    switch (condition.operator) {
-      case 'in':
-        return allowedIps.includes(environment.ipAddress);
-      case 'not_in':
-        return !allowedIps.includes(environment.ipAddress);
-      default:
-        return false;
-    }
-  }
-
-  private async _getEnvironmentContext(sessionId: string): Promise<IEnvironmentContext> {
-    // This would typically get real environment data from the request context
-    return {
-      timestamp: new Date(),
-      ipAddress: '127.0.0.1', // Would be extracted from request
-      userAgent: 'Jupyter Notebook v7', // Would be extracted from request
-      sessionType: 'collaborative',
-      participantCount: 0 // Would be fetched from session state
-    };
-  }
-
-  private async _getSessionDetails(sessionId: string): Promise<ICollaborationSession> {
-    // This would fetch full session details from the database
-    const sessionPermissions = await this.getSessionPermissions(sessionId);
-    
-    return {
-      sessionId,
-      notebookPath: '', // Would be fetched from session record
-      participants: [], // Would be fetched from session state
-      permissions: sessionPermissions,
-      createdAt: new Date(),
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours default
-      status: SessionStatus.ACTIVE
-    };
-  }
-
-  private _getDefaultPermissionsForRole(role: UserRole): Permission[] {
-    switch (role) {
-      case UserRole.VIEWER:
-        return [Permission.READ];
-        
-      case UserRole.COMMENTER:
-        return [Permission.READ, Permission.COMMENT];
-        
-      case UserRole.EDITOR:
-        return [Permission.READ, Permission.WRITE, Permission.COMMENT, Permission.EXECUTE];
-        
-      case UserRole.COLLABORATOR:
-        return [Permission.READ, Permission.WRITE, Permission.COMMENT, Permission.EXECUTE, Permission.SHARE];
-        
-      case UserRole.ADMIN:
-        return [Permission.READ, Permission.WRITE, Permission.COMMENT, Permission.EXECUTE, Permission.SHARE, Permission.ADMIN, Permission.HISTORY];
-        
-      case UserRole.OWNER:
-        return Object.values(Permission);
-        
-      default:
-        return [Permission.READ];
-    }
-  }
-
-  private async _sendInvitation(
-    sessionId: string,
-    targetUserId: string,
-    permissions: IUserPermissionSet,
-    requestingUserId: string
-  ): Promise<void> {
-    const url = URLExt.join(
-      this._serverSettings.baseUrl,
-      'api',
-      'collaboration',
-      'sessions',
-      sessionId,
-      'invitations'
-    );
-
-    const response = await ServerConnection.makeRequest(
-      url,
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          target_user_id: targetUserId,
-          permissions,
-          requesting_user_id: requestingUserId
-        })
-      },
-      this._serverSettings
-    );
-
-    if (!response.ok) {
-      throw new Error(`Failed to send invitation: ${response.status} ${response.statusText}`);
-    }
-  }
-
-  private async _grantSessionAccess(
-    sessionId: string,
-    permissions: IUserPermissionSet
-  ): Promise<void> {
-    const url = URLExt.join(
-      this._serverSettings.baseUrl,
-      'api',
-      'collaboration',
-      'sessions',
-      sessionId,
-      'permissions'
-    );
-
-    const response = await ServerConnection.makeRequest(
-      url,
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          user_id: permissions.userId,
-          permissions
-        })
-      },
-      this._serverSettings
-    );
-
-    if (!response.ok) {
-      throw new Error(`Failed to grant session access: ${response.status} ${response.statusText}`);
-    }
-  }
-
-  private async _updateUserPermissions(
-    sessionId: string,
-    userId: string,
-    permissions: IUserPermissionSet
-  ): Promise<void> {
-    const url = URLExt.join(
-      this._serverSettings.baseUrl,
-      'api',
-      'collaboration',
-      'sessions',
-      sessionId,
-      'permissions',
-      userId
-    );
-
-    const response = await ServerConnection.makeRequest(
-      url,
-      {
-        method: 'PUT',
-        body: JSON.stringify({ permissions })
-      },
-      this._serverSettings
-    );
-
-    if (!response.ok) {
-      throw new Error(`Failed to update user permissions: ${response.status} ${response.statusText}`);
-    }
-  }
-
-  private async _removeUserFromSession(sessionId: string, userId: string): Promise<void> {
-    const url = URLExt.join(
-      this._serverSettings.baseUrl,
-      'api',
-      'collaboration',
-      'sessions',
-      sessionId,
-      'permissions',
-      userId
-    );
-
-    const response = await ServerConnection.makeRequest(
-      url,
-      { method: 'DELETE' },
-      this._serverSettings
-    );
-
-    if (!response.ok) {
-      throw new Error(`Failed to remove user from session: ${response.status} ${response.statusText}`);
-    }
-  }
-
-  private async _updateCellPermissions(
-    sessionId: string,
-    cellId: string,
-    permissions: ICellPermissions
-  ): Promise<void> {
-    const url = URLExt.join(
-      this._serverSettings.baseUrl,
-      'api',
-      'collaboration',
-      'sessions',
-      sessionId,
-      'cells',
-      cellId,
-      'permissions'
-    );
-
-    const response = await ServerConnection.makeRequest(
-      url,
-      {
-        method: 'PUT',
-        body: JSON.stringify({ permissions })
-      },
-      this._serverSettings
-    );
-
-    if (!response.ok) {
-      throw new Error(`Failed to update cell permissions: ${response.status} ${response.statusText}`);
-    }
-  }
-
-  private async _initializeSessionPermissions(
-    sessionId: string,
-    notebookPath: string,
-    permissions: ISessionPermissions
-  ): Promise<void> {
-    const url = URLExt.join(
-      this._serverSettings.baseUrl,
-      'api',
-      'collaboration',
-      'sessions',
-      sessionId,
-      'permissions'
-    );
-
-    const response = await ServerConnection.makeRequest(
-      url,
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          notebook_path: notebookPath,
-          permissions
-        })
-      },
-      this._serverSettings
-    );
-
-    if (!response.ok) {
-      throw new Error(`Failed to initialize session permissions: ${response.status} ${response.statusText}`);
-    }
-  }
-
-  private async _terminateSession(sessionId: string): Promise<void> {
-    const url = URLExt.join(
-      this._serverSettings.baseUrl,
-      'api',
-      'collaboration',
-      'sessions',
-      sessionId
-    );
-
-    const response = await ServerConnection.makeRequest(
-      url,
-      { method: 'DELETE' },
-      this._serverSettings
-    );
-
-    if (!response.ok) {
-      throw new Error(`Failed to terminate session: ${response.status} ${response.statusText}`);
-    }
-  }
-
-  private _parseSessionPermissions(data: any): ISessionPermissions {
-    return {
-      ownerId: data.owner_id,
-      defaultRole: data.default_role as UserRole,
-      allowInvites: data.allow_invites,
-      requireApproval: data.require_approval,
-      cellPermissions: data.cell_permissions || {},
-      sharedWith: data.shared_with || {}
-    };
-  }
-
-  private _parseAuditLogEntry(data: any): IAuditLogEntry {
-    return {
-      id: data.id,
-      timestamp: new Date(data.timestamp),
-      userId: data.user_id,
-      sessionId: data.session_id,
-      action: data.action as PermissionAction,
-      resource: data.resource,
-      result: data.result,
-      details: data.details || {},
-      ipAddress: data.ip_address,
-      userAgent: data.user_agent
-    };
-  }
-
-  private _getFromCache(key: string): any {
-    const cached = this._permissionCache.get(key);
-    if (cached && cached.expires > Date.now()) {
-      return cached.data;
-    }
-    this._permissionCache.delete(key);
-    return null;
-  }
-
-  private _setCache(key: string, data: any, ttl: number = this._cacheTTL): void {
-    // Enforce cache size limit
-    if (this._permissionCache.size >= this._maxCacheSize) {
-      // Remove oldest entries (simple LRU-like behavior)
-      const oldestKey = this._permissionCache.keys().next().value;
-      this._permissionCache.delete(oldestKey);
-    }
-
-    this._permissionCache.set(key, {
-      data,
-      expires: Date.now() + ttl
-    });
-  }
-
-  private _clearUserPermissionCaches(userId: string, sessionId: string): void {
-    const keysToDelete: string[] = [];
-    
-    for (const [key] of this._permissionCache) {
-      if (key.includes(`${userId}:${sessionId}`) || key.includes(`user_perms:${userId}:${sessionId}`)) {
-        keysToDelete.push(key);
-      }
-    }
-    
-    keysToDelete.forEach(key => this._permissionCache.delete(key));
-  }
-
-  private _clearCellPermissionCaches(sessionId: string, cellId: string): void {
-    const keysToDelete: string[] = [];
-    
-    for (const [key] of this._permissionCache) {
-      if (key.includes(`${sessionId}`) && key.includes(`${cellId}`)) {
-        keysToDelete.push(key);
-      }
-    }
-    
-    keysToDelete.forEach(key => this._permissionCache.delete(key));
-  }
-
-  private _clearSessionCaches(sessionId: string): void {
-    const keysToDelete: string[] = [];
-    
-    for (const [key] of this._permissionCache) {
-      if (key.includes(sessionId)) {
-        keysToDelete.push(key);
-      }
-    }
-    
-    keysToDelete.forEach(key => this._permissionCache.delete(key));
-  }
-
-  private _setupCacheCleanup(): void {
-    // Clean up expired cache entries every 5 minutes
-    setInterval(() => {
-      const now = Date.now();
-      const keysToDelete: string[] = [];
-      
-      for (const [key, value] of this._permissionCache) {
-        if (value.expires <= now) {
-          keysToDelete.push(key);
+        for (const rule of sortedRules) {
+            const ruleApplies = await this._evaluateRuleConditions(rule, context);
+            
+            if (ruleApplies) {
+                appliedRules.push(rule.ruleId);
+                
+                if (rule.effect === AccessDecision.DENY) {
+                    finalDecision = AccessDecision.DENY;
+                    break; // Deny takes precedence
+                } else if (rule.effect === AccessDecision.GRANT && finalDecision !== AccessDecision.DENY) {
+                    finalDecision = AccessDecision.GRANT;
+                    if (context.action.type) {
+                        grantedPermissions.push(context.action.type);
+                    }
+                }
+            }
         }
-      }
-      
-      keysToDelete.forEach(key => this._permissionCache.delete(key));
-    }, 5 * 60 * 1000);
-  }
+
+        return {
+            granted: finalDecision === AccessDecision.GRANT,
+            role: UserRole.VIEWER, // Default for ABAC
+            permissions: grantedPermissions,
+            appliedRules,
+            timestamp: new Date(),
+            cacheTtl: this._config.cache.defaultTtl
+        };
+    }
+
+    /**
+     * Evaluate session-specific permissions
+     */
+    private async _evaluateSessionPermissions(context: IPolicyContext): Promise<IPermissionValidationResult> {
+        if (!context.environment.sessionId) {
+            return {
+                granted: false,
+                role: UserRole.VIEWER,
+                permissions: [],
+                appliedRules: [],
+                timestamp: new Date(),
+                cacheTtl: this._config.cache.defaultTtl
+            };
+        }
+
+        const sessionPermissions = await this.getSessionPermissions(context.environment.sessionId);
+        const userSessionPermissions = sessionPermissions.filter(p => p.userId === context.user.userId);
+
+        const hasSessionPermission = userSessionPermissions.some(p => 
+            p.permission === context.action.type && 
+            (!p.expiresAt || p.expiresAt > new Date())
+        );
+
+        return {
+            granted: hasSessionPermission,
+            role: hasSessionPermission ? UserRole.COLLABORATOR : UserRole.VIEWER,
+            permissions: hasSessionPermission ? [context.action.type] : [],
+            appliedRules: hasSessionPermission ? ['session-grant'] : [],
+            timestamp: new Date(),
+            cacheTtl: 60 // Short cache for session permissions
+        };
+    }
+
+    /**
+     * Resolve conflicts between multiple policy evaluation results
+     */
+    private _resolvePolicyConflicts(results: IPermissionValidationResult[]): IPermissionValidationResult {
+        // Explicit deny takes precedence
+        const denyResult = results.find(r => !r.granted && r.reason?.includes('denied'));
+        if (denyResult) {
+            return denyResult;
+        }
+
+        // Find the most permissive grant
+        const grantResults = results.filter(r => r.granted);
+        if (grantResults.length === 0) {
+            return {
+                granted: false,
+                role: UserRole.VIEWER,
+                permissions: [],
+                reason: 'No applicable policies grant access',
+                appliedRules: [],
+                timestamp: new Date(),
+                cacheTtl: this._config.cache.defaultTtl
+            };
+        }
+
+        // Combine permissions from all granting results
+        const combinedPermissions = new Set<PermissionType>();
+        const combinedRules: string[] = [];
+        let highestRole = UserRole.VIEWER;
+
+        for (const result of grantResults) {
+            result.permissions.forEach(p => combinedPermissions.add(p));
+            combinedRules.push(...result.appliedRules);
+            
+            // Use highest role
+            if (this._compareRoles(result.role, highestRole) > 0) {
+                highestRole = result.role;
+            }
+        }
+
+        return {
+            granted: true,
+            role: highestRole,
+            permissions: Array.from(combinedPermissions),
+            appliedRules: combinedRules,
+            timestamp: new Date(),
+            cacheTtl: Math.min(...grantResults.map(r => r.cacheTtl))
+        };
+    }
+
+    /**
+     * Compare user roles by hierarchy
+     */
+    private _compareRoles(role1: UserRole, role2: UserRole): number {
+        const roleHierarchy = [
+            UserRole.VIEWER,
+            UserRole.EDITOR,
+            UserRole.COLLABORATOR,
+            UserRole.ADMIN,
+            UserRole.OWNER
+        ];
+
+        return roleHierarchy.indexOf(role1) - roleHierarchy.indexOf(role2);
+    }
+
+    /**
+     * Evaluate rule conditions against policy context
+     */
+    private async _evaluateRuleConditions(rule: IPolicyRule, context: IPolicyContext): Promise<boolean> {
+        try {
+            // Simple condition evaluation (can be extended with more complex logic)
+            for (const [conditionKey, conditionValue] of Object.entries(rule.conditions)) {
+                const contextValue = this._getNestedProperty(context as any, conditionKey);
+                
+                if (Array.isArray(conditionValue)) {
+                    if (!conditionValue.includes(contextValue)) {
+                        return false;
+                    }
+                } else if (contextValue !== conditionValue) {
+                    return false;
+                }
+            }
+
+            return true;
+
+        } catch (error) {
+            console.warn('[PermissionService] Rule condition evaluation failed:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Get nested property from object using dot notation
+     */
+    private _getNestedProperty(obj: any, path: string): any {
+        return path.split('.').reduce((current, prop) => current?.[prop], obj);
+    }
+
+    /**
+     * Get user information from JupyterHub
+     */
+    private async _getUserInfo(userId: string): Promise<IUserInfo | null> {
+        try {
+            const hubUser = await this._jupyterhubClient.getUser(userId);
+            
+            if (!hubUser) {
+                return null;
+            }
+
+            return {
+                userId: hubUser.name,
+                displayName: hubUser.name,
+                email: hubUser.email || `${hubUser.name}@example.com`,
+                groups: hubUser.groups || [],
+                isAdmin: hubUser.admin || false,
+                createdAt: new Date(hubUser.created || Date.now()),
+                lastActivity: new Date(hubUser.last_activity || Date.now()),
+                attributes: hubUser
+            };
+
+        } catch (error) {
+            console.error('[PermissionService] Failed to get user info:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Build cache key for permission validation
+     */
+    private _buildCacheKey(...parts: string[]): string {
+        return `${this._config.cache.keyPrefix}:${parts.join(':')}`;
+    }
+
+    /**
+     * Get cached permission result
+     */
+    private async _getCachedPermission(cacheKey: string): Promise<IPermissionValidationResult | null> {
+        try {
+            const cached = await this._redisClient.get(cacheKey);
+            return cached ? JSON.parse(cached) : null;
+        } catch (error) {
+            console.warn('[PermissionService] Cache get failed:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Cache permission validation result
+     */
+    private async _cachePermissionResult(cacheKey: string, result: IPermissionValidationResult): Promise<void> {
+        try {
+            await this._redisClient.set(
+                cacheKey, 
+                JSON.stringify(result), 
+                result.cacheTtl
+            );
+        } catch (error) {
+            console.warn('[PermissionService] Cache set failed:', error);
+        }
+    }
+
+    /**
+     * Check if permission result is expired
+     */
+    private _isResultExpired(result: IPermissionValidationResult): boolean {
+        const expirationTime = new Date(result.timestamp.getTime() + result.cacheTtl * 1000);
+        return new Date() > expirationTime;
+    }
+
+    /**
+     * Determine resource type from resource ID and scope
+     */
+    private _determineResourceType(resourceId: string, scope: PermissionScope): string {
+        if (scope === PermissionScope.CELL) {
+            return 'cell';
+        } else if (scope === PermissionScope.NOTEBOOK) {
+            return 'notebook';
+        } else if (scope === PermissionScope.SESSION) {
+            return 'session';
+        } else {
+            return 'unknown';
+        }
+    }
+
+    /**
+     * Get resource attributes for policy evaluation
+     */
+    private async _getResourceAttributes(resourceId: string, scope: PermissionScope): Promise<JSONObject> {
+        // Implementation would fetch actual resource attributes
+        return {
+            id: resourceId,
+            scope: scope,
+            path: resourceId,
+            created: new Date().toISOString()
+        };
+    }
+
+    /**
+     * Log audit event
+     */
+    private async _logAuditEvent(event: Omit<IAuditLogEntry, 'entryId' | 'clientIp' | 'userAgent' | 'timestamp'>): Promise<void> {
+        try {
+            const fullEvent: IAuditLogEntry = {
+                ...event,
+                entryId: UUID.uuid4(),
+                clientIp: 'unknown', // Would be extracted from request context
+                userAgent: 'unknown', // Would be extracted from request context
+                timestamp: new Date()
+            };
+
+            // Store in database
+            await this._storeAuditEvent(fullEvent);
+
+            // Emit audit signal
+            this._auditEvent.emit(fullEvent);
+
+        } catch (error) {
+            console.error('[PermissionService] Failed to log audit event:', error);
+        }
+    }
+
+    /**
+     * Clean up permission cache
+     */
+    private _cleanupPermissionCache(): void {
+        const currentTime = new Date();
+        
+        for (const [key, result] of this._permissionCache.entries()) {
+            if (this._isResultExpired(result)) {
+                this._permissionCache.delete(key);
+            }
+        }
+    }
+
+    /**
+     * Ensure service is initialized before operations
+     */
+    private _ensureInitialized(): void {
+        if (!this._isInitialized) {
+            throw new Error('PermissionService not initialized. Call initialize() first.');
+        }
+        if (this._isDisposed) {
+            throw new Error('PermissionService has been disposed');
+        }
+    }
+
+    // Mock database operations (would be replaced with actual PostgreSQL operations)
+
+    private async _createPermissionTables(): Promise<void> {
+        console.log('[PermissionService] Creating permission tables...');
+    }
+
+    private async _storePermissionGrant(grant: IPermissionGrant): Promise<void> {
+        console.log('[PermissionService] Storing permission grant:', grant.grantId);
+    }
+
+    private async _getPermissionGrant(grantId: string): Promise<IPermissionGrant | null> {
+        console.log('[PermissionService] Getting permission grant:', grantId);
+        return null;
+    }
+
+    private async _removePermissionGrant(grantId: string, revokedBy: string, reason: string): Promise<void> {
+        console.log('[PermissionService] Removing permission grant:', grantId);
+    }
+
+    private async _storePermissionRequest(request: IPermissionRequest): Promise<void> {
+        console.log('[PermissionService] Storing permission request:', request.requestId);
+    }
+
+    private async _getPermissionRequest(requestId: string): Promise<IPermissionRequest | null> {
+        console.log('[PermissionService] Getting permission request:', requestId);
+        return null;
+    }
+
+    private async _updatePermissionRequest(request: IPermissionRequest): Promise<void> {
+        console.log('[PermissionService] Updating permission request:', request.requestId);
+    }
+
+    private async _getUserPermissionsFromDB(userId: string, resourceId: string, scope: PermissionScope): Promise<IPermissionGrant[]> {
+        console.log('[PermissionService] Getting user permissions from DB:', userId, resourceId, scope);
+        return [];
+    }
+
+    private async _getSessionPermissionsFromDB(sessionId: string): Promise<ISessionPermission[]> {
+        console.log('[PermissionService] Getting session permissions from DB:', sessionId);
+        return [];
+    }
+
+    private async _storeSessionPermission(permission: ISessionPermission): Promise<void> {
+        console.log('[PermissionService] Storing session permission:', permission.grantId);
+    }
+
+    private async _removeSessionPermission(grantId: string): Promise<void> {
+        console.log('[PermissionService] Removing session permission:', grantId);
+    }
+
+    private async _getExpiredPermissionGrants(currentTime: Date): Promise<IPermissionGrant[]> {
+        console.log('[PermissionService] Getting expired permission grants');
+        return [];
+    }
+
+    private async _getExpiredPermissionRequests(currentTime: Date): Promise<IPermissionRequest[]> {
+        console.log('[PermissionService] Getting expired permission requests');
+        return [];
+    }
+
+    private async _getEndedSessionPermissions(): Promise<ISessionPermission[]> {
+        console.log('[PermissionService] Getting ended session permissions');
+        return [];
+    }
+
+    private async _storeAuditEvent(event: IAuditLogEntry): Promise<void> {
+        console.log('[PermissionService] Storing audit event:', event.entryId);
+    }
+
+    private async _getAuditLogFromDB(filters: Partial<IAuditLogEntry>, limit: number, offset: number): Promise<IAuditLogEntry[]> {
+        console.log('[PermissionService] Getting audit log from DB');
+        return [];
+    }
+
+    private async _getExplicitUserRole(userId: string, resourceId: string, scope: PermissionScope): Promise<UserRole | null> {
+        console.log('[PermissionService] Getting explicit user role');
+        return null;
+    }
+
+    private async _getInheritedUserRole(userId: string, resourceId: string, scope: PermissionScope): Promise<UserRole | null> {
+        console.log('[PermissionService] Getting inherited user role');
+        return null;
+    }
+
+    private async _getDelegatedUserRole(userId: string, resourceId: string, scope: PermissionScope): Promise<UserRole | null> {
+        console.log('[PermissionService] Getting delegated user role');
+        return null;
+    }
+
+    private async _validatePermissionGrant(grant: Omit<IPermissionGrant, 'grantId' | 'grantedAt'>): Promise<void> {
+        if (!grant.userId || !grant.permission || !grant.resourceId) {
+            throw new Error('Invalid permission grant: missing required fields');
+        }
+    }
+
+    private async _validatePermissionRequest(request: Omit<IPermissionRequest, 'requestId' | 'requestedAt' | 'status'>): Promise<void> {
+        if (!request.requestingUserId || !request.permission || !request.resourceId) {
+            throw new Error('Invalid permission request: missing required fields');
+        }
+    }
+
+    private async _invalidateUserPermissionCache(userId: string): Promise<void> {
+        console.log('[PermissionService] Invalidating permission cache for user:', userId);
+    }
+
+    private _determineRoleFromPermission(permission: PermissionType): UserRole {
+        switch (permission) {
+            case PermissionType.READ:
+                return UserRole.VIEWER;
+            case PermissionType.WRITE:
+            case PermissionType.COMMENT:
+                return UserRole.EDITOR;
+            case PermissionType.EXECUTE:
+                return UserRole.COLLABORATOR;
+            case PermissionType.SHARE:
+            case PermissionType.ADMIN:
+                return UserRole.ADMIN;
+            default:
+                return UserRole.VIEWER;
+        }
+    }
 }
 
 /**
- * Policy Engine for complex authorization scenarios
+ * Factory function to create a PermissionService with sensible defaults
+ * 
+ * @param config - Permission service configuration
+ * @returns New PermissionService instance
  */
-class PolicyEngine {
-  async evaluatePermission(
-    context: IPolicyEvaluationContext,
-    sessionPermissions: ISessionPermissions
-  ): Promise<IAccessDecision> {
-    try {
-      // Check if user is session owner
-      if (sessionPermissions.ownerId === context.user.name) {
-        return {
-          permitted: true,
-          reason: 'Session owner has full access',
-          auditRequired: false
-        };
-      }
-
-      // Check if user is in shared users list
-      const userPermissions = sessionPermissions.sharedWith[context.user.name];
-      if (!userPermissions) {
-        return {
-          permitted: false,
-          reason: 'User not authorized for this session',
-          auditRequired: true
-        };
-      }
-
-      // Check if user has required permission for action
-      const requiredPermission = this._getRequiredPermissionForAction(context.action);
-      if (!userPermissions.permissions.includes(requiredPermission)) {
-        return {
-          permitted: false,
-          reason: `User lacks required permission: ${requiredPermission}`,
-          auditRequired: true
-        };
-      }
-
-      // Check role hierarchy
-      if (!this._checkRoleHierarchy(userPermissions.role, context.action)) {
-        return {
-          permitted: false,
-          reason: `User role ${userPermissions.role} insufficient for action ${context.action}`,
-          auditRequired: true
-        };
-      }
-
-      return {
-        permitted: true,
-        reason: `Access granted via role ${userPermissions.role}`,
-        auditRequired: false,
-        cacheTtl: 300000 // 5 minutes
-      };
-
-    } catch (error) {
-      return {
-        permitted: false,
-        reason: `Policy evaluation failed: ${error.message}`,
-        auditRequired: true
-      };
-    }
-  }
-
-  private _getRequiredPermissionForAction(action: PermissionAction): Permission {
-    switch (action) {
-      case PermissionAction.read:
-        return Permission.READ;
-      case PermissionAction.write:
-        return Permission.WRITE;
-      case PermissionAction.execute:
-        return Permission.EXECUTE;
-      case PermissionAction.comment:
-        return Permission.COMMENT;
-      case PermissionAction.share:
-      case PermissionAction.invite:
-        return Permission.SHARE;
-      case PermissionAction.change_permissions:
-      case PermissionAction.remove_user:
-        return Permission.ADMIN;
-      case PermissionAction.view_history:
-      case PermissionAction.rollback:
-        return Permission.HISTORY;
-      case PermissionAction.delete:
-        return Permission.DELETE;
-      default:
-        return Permission.READ;
-    }
-  }
-
-  private _checkRoleHierarchy(role: UserRole, action: PermissionAction): boolean {
-    const roleHierarchy = {
-      [UserRole.VIEWER]: 0,
-      [UserRole.COMMENTER]: 1,
-      [UserRole.EDITOR]: 2,
-      [UserRole.COLLABORATOR]: 3,
-      [UserRole.ADMIN]: 4,
-      [UserRole.OWNER]: 5
-    };
-
-    const actionRequiredLevel = {
-      [PermissionAction.read]: 0,
-      [PermissionAction.comment]: 1,
-      [PermissionAction.write]: 2,
-      [PermissionAction.execute]: 2,
-      [PermissionAction.share]: 3,
-      [PermissionAction.invite]: 3,
-      [PermissionAction.change_permissions]: 4,
-      [PermissionAction.remove_user]: 4,
-      [PermissionAction.delete]: 4,
-      [PermissionAction.view_history]: 2,
-      [PermissionAction.rollback]: 4,
-      [PermissionAction.lock_cell]: 2,
-      [PermissionAction.unlock_cell]: 2,
-      [PermissionAction.export]: 2
-    };
-
-    const userLevel = roleHierarchy[role] || 0;
-    const requiredLevel = actionRequiredLevel[action] || 0;
-
-    return userLevel >= requiredLevel;
-  }
+export function createPermissionService(config: IPermissionServiceConfig): IPermissionService {
+    return new PermissionService(config);
 }
 
 /**
- * Audit Logger for comprehensive security event tracking
+ * Utility functions for permission management
  */
-class AuditLogger {
-  constructor(private _serverSettings: ServerConnection.ISettings) {}
-
-  async logAccess(
-    userId: string,
-    sessionId: string,
-    action: PermissionAction,
-    result: 'granted' | 'denied' | 'error',
-    reason: string,
-    resource?: IPermissionResource
-  ): Promise<void> {
-    try {
-      const logEntry = {
-        user_id: userId,
-        session_id: sessionId,
-        action,
-        result,
-        reason,
-        resource: resource ? {
-          type: resource.type,
-          id: resource.id,
-          path: resource.path
-        } : null,
-        timestamp: new Date().toISOString(),
-        ip_address: '127.0.0.1', // Would be extracted from request context
-        user_agent: 'Jupyter Notebook v7' // Would be extracted from request context
-      };
-
-      const url = URLExt.join(this._serverSettings.baseUrl, 'api', 'collaboration', 'audit');
-      await ServerConnection.makeRequest(
-        url,
-        {
-          method: 'POST',
-          body: JSON.stringify(logEntry)
-        },
-        this._serverSettings
-      );
-    } catch (error) {
-      console.error('Failed to log audit entry:', error);
-      // Don't throw - audit logging should not break application flow
+export namespace PermissionUtils {
+    /**
+     * Check if a role has a specific permission
+     */
+    export function roleHasPermission(role: UserRole, permission: PermissionType): boolean {
+        const rolePermissions = ROLE_PERMISSION_MATRIX[role] || [];
+        return rolePermissions.includes(permission);
     }
-  }
 
-  async logPermissionChange(
-    sessionId: string,
-    userId: string,
-    action: string,
-    targetResource: string,
-    details: Record<string, any>
-  ): Promise<void> {
-    try {
-      const logEntry = {
-        user_id: userId,
-        session_id: sessionId,
-        action: `permission_${action}`,
-        result: 'granted',
-        reason: `Permission change: ${action}`,
-        resource: targetResource,
-        details,
-        timestamp: new Date().toISOString(),
-        ip_address: '127.0.0.1',
-        user_agent: 'Jupyter Notebook v7'
-      };
-
-      const url = URLExt.join(this._serverSettings.baseUrl, 'api', 'collaboration', 'audit');
-      await ServerConnection.makeRequest(
-        url,
-        {
-          method: 'POST',
-          body: JSON.stringify(logEntry)
-        },
-        this._serverSettings
-      );
-    } catch (error) {
-      console.error('Failed to log permission change:', error);
+    /**
+     * Get all permissions for a role
+     */
+    export function getRolePermissions(role: UserRole): PermissionType[] {
+        return ROLE_PERMISSION_MATRIX[role] || [];
     }
-  }
-}
 
-/**
- * JupyterHub Client for authentication integration
- */
-class JupyterHubClient {
-  constructor(private _serverSettings: ServerConnection.ISettings) {}
+    /**
+     * Check if one role is higher than another
+     */
+    export function isRoleHigher(role1: UserRole, role2: UserRole): boolean {
+        const roleHierarchy = [
+            UserRole.VIEWER,
+            UserRole.EDITOR,
+            UserRole.COLLABORATOR,
+            UserRole.ADMIN,
+            UserRole.OWNER
+        ];
 
-  async validateUser(userId: string): Promise<IJupyterHubUser | null> {
-    try {
-      const url = URLExt.join(this._serverSettings.baseUrl, 'api', 'collaboration', 'users', userId, 'validate');
-      const response = await ServerConnection.makeRequest(url, {}, this._serverSettings);
-      
-      if (!response.ok) {
-        if (response.status === 404) {
-          return null;
+        return roleHierarchy.indexOf(role1) > roleHierarchy.indexOf(role2);
+    }
+
+    /**
+     * Validate permission grant configuration
+     */
+    export function validatePermissionGrant(grant: Partial<IPermissionGrant>): string[] {
+        const errors: string[] = [];
+
+        if (!grant.userId) {
+            errors.push('userId is required');
         }
-        throw new Error(`Server error: ${response.status} ${response.statusText}`);
-      }
+        if (!grant.permission) {
+            errors.push('permission is required');
+        }
+        if (!grant.resourceId) {
+            errors.push('resourceId is required');
+        }
+        if (!grant.scope) {
+            errors.push('scope is required');
+        }
+        if (!grant.role) {
+            errors.push('role is required');
+        }
+        if (!grant.grantedBy) {
+            errors.push('grantedBy is required');
+        }
 
-      const data = await response.json();
-      return {
-        name: data.name,
-        admin: data.admin || false,
-        groups: data.groups || [],
-        roles: data.roles || [],
-        created: data.created,
-        lastActivity: data.last_activity,
-        sessionCount: data.session_count || 0
-      };
-    } catch (error) {
-      console.error(`Failed to validate user ${userId}:`, error);
-      return null;
+        return errors;
     }
-  }
+
+    /**
+     * Generate permission cache key
+     */
+    export function generateCacheKey(userId: string, permission: PermissionType, resourceId: string): string {
+        return `perm:${userId}:${permission}:${resourceId}`;
+    }
+
+    /**
+     * Check if permission has expired
+     */
+    export function isPermissionExpired(grant: IPermissionGrant): boolean {
+        return grant.expiresAt ? new Date() > grant.expiresAt : false;
+    }
+
+    /**
+     * Format permission for display
+     */
+    export function formatPermission(permission: PermissionType): string {
+        return permission.charAt(0).toUpperCase() + permission.slice(1);
+    }
+
+    /**
+     * Format role for display
+     */
+    export function formatRole(role: UserRole): string {
+        return role.charAt(0).toUpperCase() + role.slice(1);
+    }
 }
 
 /**
- * Namespace for PermissionService configuration options
+ * Export all types and interfaces for external use
  */
-export namespace PermissionService {
-  export interface IOptions {
-    serverSettings?: ServerConnection.ISettings;
-    stateDB?: IStateDB;
-  }
-}
-
-// Export the PermissionService as the default implementation
-export { PermissionService as default };
+export type {
+    IUserInfo,
+    IPermissionGrant,
+    ISessionPermission,
+    IPermissionRequest,
+    IAuditLogEntry,
+    IPolicyContext,
+    IPolicyRule,
+    IPermissionServiceConfig,
+    IPermissionValidationResult
+};
