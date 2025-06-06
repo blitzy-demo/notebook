@@ -45,6 +45,12 @@
     "watch:app": "lerna exec --stream --scope \"@jupyter-notebook/app\" jlpm watch",
     "watch:lib": "lerna exec --stream --scope @jupyter-notebook/metapackage jlpm watch"
   },
+  "dependencies": {
+    "yjs": "^13.5.40",
+    "y-websocket": "^1.5.0",
+    "y-protocols": "^1.0.5",
+    "yjs-history": "^1.0.0"
+  },
   "resolutions": {
     "@types/react": "^18.0.26",
     "react": "^18.2.0",
