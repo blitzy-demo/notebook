@@ -26,13 +26,26 @@ Documentation](notebook.md).
 
 ```
 
+## Quick Start
+
 - [Installation](https://jupyter.readthedocs.io/en/latest/install.html)
 - [Starting the Notebook](https://jupyter.readthedocs.io/en/latest/running.html)
+
+## Collaboration Features
+
+**Jupyter Notebook** v7 introduces powerful real-time collaborative editing capabilities that transform the traditional single-user notebook experience into a seamless multi-user environment. Work together with your team on the same notebook simultaneously, with real-time synchronization, presence awareness, and intelligent conflict resolution.
+
+- [Collaborative Editing Guide](collaboration.md) - Learn how to enable and use real-time collaboration features
+- [Administrator Setup](collaboration_admin.md) - Enterprise deployment and JupyterHub integration
+- [Developer API](collaboration_api.md) - Extension development and integration patterns
 
 ```{toctree}
 :maxdepth: 2
 
 user-documentation
+collaboration
+collaboration_admin
+collaboration_api
 configuration
 migrate_to_notebook7
 contributor
