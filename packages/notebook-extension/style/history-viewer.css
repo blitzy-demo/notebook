@@ -1,0 +1,575 @@
+/*-----------------------------------------------------------------------------
+| Copyright (c) Jupyter Development Team.
+|
+| Distributed under the terms of the Modified BSD License.
+|----------------------------------------------------------------------------*/
+
+@import './variables.css';
+
+/**
+ * History Viewer Panel Styles
+ * 
+ * This CSS module provides comprehensive styling for the revision history 
+ * interface, including timeline view, diff visualization, version details 
+ * panel, and change tracking controls as specified in Section 7.6.6.
+ */
+
+/* Main History Viewer Panel Container */
+.jp-HistoryViewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--jp-layout-color1);
+  border-left: var(--jp-border-width) solid var(--jp-border-color2);
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  color: var(--jp-ui-font-color1);
+  min-width: 300px;
+  overflow: hidden;
+}
+
+/* History Panel Header */
+.jp-HistoryViewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--jp-layout-color2);
+  border-bottom: var(--jp-border-width) solid var(--jp-border-color2);
+  min-height: 32px;
+  flex-shrink: 0;
+}
+
+.jp-HistoryViewer-title {
+  font-weight: 600;
+  font-size: var(--jp-ui-font-size1);
+  color: var(--jp-ui-font-color1);
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  flex: 1;
+  margin-right: 8px;
+}
+
+.jp-HistoryViewer-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.jp-HistoryViewer-controlButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--jp-ui-font-color2);
+  cursor: pointer;
+  border-radius: 2px;
+  transition: all 0.1s ease;
+}
+
+.jp-HistoryViewer-controlButton:hover {
+  background: var(--jp-layout-color3);
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-HistoryViewer-controlButton:active {
+  background: var(--jp-brand-color1);
+  color: var(--jp-ui-inverse-font-color1);
+}
+
+/* Main Content Area */
+.jp-HistoryViewer-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  flex: 1;
+}
+
+/* Upper Panel: Timeline and Details */
+.jp-HistoryViewer-upperPanel {
+  display: flex;
+  flex-direction: row;
+  min-height: 200px;
+  height: 40%;
+  border-bottom: var(--jp-border-width) solid var(--jp-border-color2);
+  overflow: hidden;
+}
+
+/* Timeline Section */
+.jp-HistoryViewer-timeline {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border-right: var(--jp-border-width) solid var(--jp-border-color2);
+  background: var(--jp-layout-color0);
+  overflow: hidden;
+}
+
+.jp-HistoryViewer-timelineHeader {
+  padding: 8px 12px;
+  background: var(--jp-layout-color2);
+  border-bottom: var(--jp-border-width) solid var(--jp-border-color2);
+  font-weight: 600;
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color1);
+  flex-shrink: 0;
+}
+
+.jp-HistoryViewer-timelineList {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0;
+}
+
+/* Timeline Item */
+.jp-HistoryViewer-timelineItem {
+  display: flex;
+  align-items: flex-start;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--jp-border-color3);
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+  position: relative;
+}
+
+.jp-HistoryViewer-timelineItem:hover {
+  background: var(--jp-layout-color2);
+}
+
+.jp-HistoryViewer-timelineItem.jp-mod-selected {
+  background: var(--jp-brand-color3);
+  border-left: 3px solid var(--jp-brand-color1);
+  padding-left: 9px;
+}
+
+.jp-HistoryViewer-timelineItem.jp-mod-current {
+  background: var(--jp-success-color3);
+  border-left: 3px solid var(--jp-success-color1);
+  padding-left: 9px;
+}
+
+/* Timeline Item Components */
+.jp-HistoryViewer-timelineMarker {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--jp-ui-font-color3);
+  border: 2px solid var(--jp-layout-color0);
+  margin-right: 12px;
+  margin-top: 2px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.jp-HistoryViewer-timelineItem.jp-mod-selected .jp-HistoryViewer-timelineMarker {
+  background: var(--jp-brand-color1);
+}
+
+.jp-HistoryViewer-timelineItem.jp-mod-current .jp-HistoryViewer-timelineMarker {
+  background: var(--jp-success-color1);
+}
+
+.jp-HistoryViewer-timelineContent {
+  flex: 1;
+  min-width: 0;
+}
+
+.jp-HistoryViewer-timelineDate {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+  margin-bottom: 2px;
+}
+
+.jp-HistoryViewer-timelineAuthor {
+  font-weight: 600;
+  color: var(--jp-ui-font-color1);
+  margin-bottom: 2px;
+}
+
+.jp-HistoryViewer-timelineSummary {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+  line-height: 1.3;
+  word-wrap: break-word;
+}
+
+/* Details Panel */
+.jp-HistoryViewer-details {
+  width: 140px;
+  display: flex;
+  flex-direction: column;
+  background: var(--jp-layout-color1);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.jp-HistoryViewer-detailsHeader {
+  padding: 8px 12px;
+  background: var(--jp-layout-color2);
+  border-bottom: var(--jp-border-width) solid var(--jp-border-color2);
+  font-weight: 600;
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color1);
+  flex-shrink: 0;
+}
+
+.jp-HistoryViewer-detailsContent {
+  padding: 12px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.jp-HistoryViewer-detailsItem {
+  margin-bottom: 12px;
+}
+
+.jp-HistoryViewer-detailsLabel {
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 600;
+  color: var(--jp-ui-font-color2);
+  margin-bottom: 4px;
+}
+
+.jp-HistoryViewer-detailsValue {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color1);
+  word-wrap: break-word;
+  line-height: 1.3;
+}
+
+/* Restore Button */
+.jp-HistoryViewer-restoreButton {
+  width: 100%;
+  padding: 6px 12px;
+  background: var(--jp-brand-color1);
+  color: var(--jp-ui-inverse-font-color1);
+  border: none;
+  border-radius: 3px;
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.1s ease;
+  margin-top: 8px;
+}
+
+.jp-HistoryViewer-restoreButton:hover {
+  background: var(--jp-brand-color0);
+}
+
+.jp-HistoryViewer-restoreButton:active {
+  background: var(--jp-brand-color2);
+}
+
+.jp-HistoryViewer-restoreButton:disabled {
+  background: var(--jp-ui-font-color3);
+  color: var(--jp-ui-font-color2);
+  cursor: not-allowed;
+}
+
+/* Diff View Section */
+.jp-HistoryViewer-diffView {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--jp-layout-color0);
+  overflow: hidden;
+}
+
+.jp-HistoryViewer-diffHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--jp-layout-color2);
+  border-bottom: var(--jp-border-width) solid var(--jp-border-color2);
+  flex-shrink: 0;
+}
+
+.jp-HistoryViewer-diffTitle {
+  font-weight: 600;
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-HistoryViewer-diffControls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.jp-HistoryViewer-diffToggle {
+  display: flex;
+  background: var(--jp-layout-color1);
+  border: var(--jp-border-width) solid var(--jp-border-color2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.jp-HistoryViewer-diffToggleButton {
+  padding: 4px 8px;
+  font-size: var(--jp-ui-font-size0);
+  background: transparent;
+  border: none;
+  color: var(--jp-ui-font-color2);
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.jp-HistoryViewer-diffToggleButton.jp-mod-active {
+  background: var(--jp-brand-color1);
+  color: var(--jp-ui-inverse-font-color1);
+}
+
+.jp-HistoryViewer-diffToggleButton:hover:not(.jp-mod-active) {
+  background: var(--jp-layout-color3);
+  color: var(--jp-ui-font-color1);
+}
+
+/* Diff Content */
+.jp-HistoryViewer-diffContent {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+  font-family: var(--jp-code-font-family);
+  font-size: var(--jp-code-font-size);
+  line-height: var(--jp-code-line-height);
+  background: var(--jp-layout-color0);
+}
+
+/* Unified Diff View */
+.jp-HistoryViewer-diffUnified {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.jp-HistoryViewer-diffLine {
+  display: block;
+  padding: 2px 8px;
+  margin: 0;
+  border-left: 3px solid transparent;
+}
+
+.jp-HistoryViewer-diffLine.jp-mod-added {
+  background: var(--jp-success-color3);
+  border-left-color: var(--jp-success-color1);
+}
+
+.jp-HistoryViewer-diffLine.jp-mod-removed {
+  background: var(--jp-error-color3);
+  border-left-color: var(--jp-error-color1);
+}
+
+.jp-HistoryViewer-diffLine.jp-mod-context {
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-HistoryViewer-diffLine.jp-mod-hunk {
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color2);
+  font-weight: 600;
+  border-left-color: var(--jp-border-color1);
+}
+
+/* Side-by-Side Diff View */
+.jp-HistoryViewer-diffSideBySide {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+
+.jp-HistoryViewer-diffColumn {
+  flex: 1;
+  overflow: auto;
+  border-right: var(--jp-border-width) solid var(--jp-border-color2);
+}
+
+.jp-HistoryViewer-diffColumn:last-child {
+  border-right: none;
+}
+
+.jp-HistoryViewer-diffColumnHeader {
+  background: var(--jp-layout-color2);
+  padding: 6px 12px;
+  font-weight: 600;
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color1);
+  border-bottom: var(--jp-border-width) solid var(--jp-border-color2);
+  text-align: center;
+}
+
+.jp-HistoryViewer-diffColumnContent {
+  padding: 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* Empty State */
+.jp-HistoryViewer-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-HistoryViewer-emptyIcon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.jp-HistoryViewer-emptyMessage {
+  font-size: var(--jp-ui-font-size1);
+  margin-bottom: 8px;
+}
+
+.jp-HistoryViewer-emptySubtext {
+  font-size: var(--jp-ui-font-size0);
+  opacity: 0.7;
+}
+
+/* Loading State */
+.jp-HistoryViewer-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-HistoryViewer-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--jp-border-color2);
+  border-top: 2px solid var(--jp-brand-color1);
+  border-radius: 50%;
+  animation: jp-HistoryViewer-spin 1s linear infinite;
+  margin-right: 8px;
+}
+
+@keyframes jp-HistoryViewer-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Scrollbar Styling */
+.jp-HistoryViewer-timelineList::-webkit-scrollbar,
+.jp-HistoryViewer-detailsContent::-webkit-scrollbar,
+.jp-HistoryViewer-diffContent::-webkit-scrollbar,
+.jp-HistoryViewer-diffColumn::-webkit-scrollbar {
+  width: 8px;
+}
+
+.jp-HistoryViewer-timelineList::-webkit-scrollbar-track,
+.jp-HistoryViewer-detailsContent::-webkit-scrollbar-track,
+.jp-HistoryViewer-diffContent::-webkit-scrollbar-track,
+.jp-HistoryViewer-diffColumn::-webkit-scrollbar-track {
+  background: var(--jp-layout-color1);
+}
+
+.jp-HistoryViewer-timelineList::-webkit-scrollbar-thumb,
+.jp-HistoryViewer-detailsContent::-webkit-scrollbar-thumb,
+.jp-HistoryViewer-diffContent::-webkit-scrollbar-thumb,
+.jp-HistoryViewer-diffColumn::-webkit-scrollbar-thumb {
+  background: var(--jp-scrollbar-thumb-color);
+  border-radius: 4px;
+}
+
+.jp-HistoryViewer-timelineList::-webkit-scrollbar-thumb:hover,
+.jp-HistoryViewer-detailsContent::-webkit-scrollbar-thumb:hover,
+.jp-HistoryViewer-diffContent::-webkit-scrollbar-thumb:hover,
+.jp-HistoryViewer-diffColumn::-webkit-scrollbar-thumb:hover {
+  background: var(--jp-scrollbar-thumb-hover-color);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .jp-HistoryViewer {
+    min-width: 250px;
+  }
+  
+  .jp-HistoryViewer-upperPanel {
+    flex-direction: column;
+    height: auto;
+    min-height: 150px;
+  }
+  
+  .jp-HistoryViewer-timeline {
+    border-right: none;
+    border-bottom: var(--jp-border-width) solid var(--jp-border-color2);
+    max-height: 200px;
+  }
+  
+  .jp-HistoryViewer-details {
+    width: auto;
+    max-height: 150px;
+  }
+  
+  .jp-HistoryViewer-diffSideBySide {
+    flex-direction: column;
+  }
+  
+  .jp-HistoryViewer-diffColumn {
+    border-right: none;
+    border-bottom: var(--jp-border-width) solid var(--jp-border-color2);
+    max-height: 200px;
+  }
+  
+  .jp-HistoryViewer-diffColumn:last-child {
+    border-bottom: none;
+  }
+}
+
+/* High Contrast Mode Support */
+@media (prefers-contrast: high) {
+  .jp-HistoryViewer-timelineItem.jp-mod-selected {
+    border-left-width: 4px;
+  }
+  
+  .jp-HistoryViewer-diffLine.jp-mod-added,
+  .jp-HistoryViewer-diffLine.jp-mod-removed {
+    border-left-width: 4px;
+  }
+  
+  .jp-HistoryViewer-timelineMarker {
+    border-width: 3px;
+  }
+}
+
+/* Focus Management */
+.jp-HistoryViewer-timelineItem:focus,
+.jp-HistoryViewer-controlButton:focus,
+.jp-HistoryViewer-diffToggleButton:focus,
+.jp-HistoryViewer-restoreButton:focus {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: -2px;
+}
+
+/* Print Styles */
+@media print {
+  .jp-HistoryViewer-controls,
+  .jp-HistoryViewer-restoreButton,
+  .jp-HistoryViewer-diffControls {
+    display: none;
+  }
+  
+  .jp-HistoryViewer-upperPanel {
+    height: auto;
+    page-break-inside: avoid;
+  }
+  
+  .jp-HistoryViewer-diffContent {
+    overflow: visible;
+  }
+}
