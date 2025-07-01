@@ -1,0 +1,779 @@
+/*-----------------------------------------------------------------------------
+| Copyright (c) Jupyter Development Team.
+|
+| Distributed under the terms of the Modified BSD License.
+|----------------------------------------------------------------------------*/
+
+@import './variables.css';
+
+/**
+ * Comprehensive styling for collaborative comment system including threaded 
+ * discussions, reply forms, resolution indicators, and comment anchors with 
+ * proper layering and responsive design for cell-level commenting functionality.
+ */
+
+/* =============================================================================
+   Comment System Root Container
+   ============================================================================= */
+
+.jp-notebook-comment-system {
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  line-height: var(--jp-ui-line-height);
+  color: var(--jp-ui-font-color1);
+  background: var(--jp-layout-color0);
+  z-index: var(--jp-z-index-tooltip);
+  position: relative;
+}
+
+/* =============================================================================
+   Comment Anchors and Cell-level Positioning
+   ============================================================================= */
+
+.jp-notebook-comment-anchor {
+  position: absolute;
+  top: 0;
+  right: -40px;
+  width: 32px;
+  height: 32px;
+  background: var(--jp-brand-color1);
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--jp-elevation-z2);
+  transition: all 0.2s ease-in-out;
+  z-index: calc(var(--jp-z-index-tooltip) + 1);
+}
+
+.jp-notebook-comment-anchor:hover {
+  background: var(--jp-brand-color0);
+  box-shadow: var(--jp-elevation-z4);
+  transform: scale(1.1);
+}
+
+.jp-notebook-comment-anchor:active {
+  transform: scale(0.95);
+}
+
+.jp-notebook-comment-anchor-icon {
+  width: 16px;
+  height: 16px;
+  fill: var(--jp-ui-inverse-font-color1);
+}
+
+.jp-notebook-comment-anchor-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: var(--jp-error-color1);
+  color: var(--jp-ui-inverse-font-color1);
+  border-radius: 50%;
+  min-width: 16px;
+  height: 16px;
+  font-size: var(--jp-ui-font-size0);
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--jp-layout-color0);
+}
+
+/* Comment anchor visual connection line to cell */
+.jp-notebook-comment-anchor::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  width: 8px;
+  height: 2px;
+  background: var(--jp-brand-color1);
+  transform: translateY(-50%);
+}
+
+/* =============================================================================
+   Comment Thread Container
+   ============================================================================= */
+
+.jp-notebook-comment-thread {
+  position: absolute;
+  top: 0;
+  right: -400px;
+  width: 360px;
+  max-height: 600px;
+  background: var(--jp-layout-color0);
+  border: 1px solid var(--jp-border-color2);
+  border-radius: var(--jp-border-radius);
+  box-shadow: var(--jp-elevation-z6);
+  overflow: hidden;
+  z-index: calc(var(--jp-z-index-tooltip) + 2);
+  animation: slideInRight 0.3s ease-out;
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.jp-notebook-comment-thread-header {
+  background: var(--jp-layout-color1);
+  border-bottom: 1px solid var(--jp-border-color2);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.jp-notebook-comment-thread-title {
+  font-weight: 600;
+  font-size: var(--jp-ui-font-size1);
+  color: var(--jp-ui-font-color0);
+  margin: 0;
+}
+
+.jp-notebook-comment-thread-close {
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  border-radius: var(--jp-border-radius);
+  color: var(--jp-ui-font-color2);
+  transition: all 0.2s ease-in-out;
+}
+
+.jp-notebook-comment-thread-close:hover {
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color0);
+}
+
+.jp-notebook-comment-thread-body {
+  max-height: 500px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0;
+}
+
+/* Custom scrollbar for comment threads */
+.jp-notebook-comment-thread-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.jp-notebook-comment-thread-body::-webkit-scrollbar-track {
+  background: var(--jp-layout-color1);
+}
+
+.jp-notebook-comment-thread-body::-webkit-scrollbar-thumb {
+  background: var(--jp-border-color2);
+  border-radius: 4px;
+}
+
+.jp-notebook-comment-thread-body::-webkit-scrollbar-thumb:hover {
+  background: var(--jp-border-color1);
+}
+
+/* =============================================================================
+   Individual Comment Styling with Nested Threading
+   ============================================================================= */
+
+.jp-notebook-comment {
+  border-bottom: 1px solid var(--jp-border-color3);
+  padding: 16px;
+  position: relative;
+  transition: background-color 0.2s ease-in-out;
+}
+
+.jp-notebook-comment:hover {
+  background: var(--jp-layout-color1);
+}
+
+.jp-notebook-comment:last-child {
+  border-bottom: none;
+}
+
+/* Threading indentation levels */
+.jp-notebook-comment[data-thread-level="1"] {
+  margin-left: 24px;
+  padding-left: 20px;
+  border-left: 3px solid var(--jp-brand-color2);
+}
+
+.jp-notebook-comment[data-thread-level="2"] {
+  margin-left: 48px;
+  padding-left: 20px;
+  border-left: 3px solid var(--jp-accent-color2);
+}
+
+.jp-notebook-comment[data-thread-level="3"] {
+  margin-left: 72px;
+  padding-left: 20px;
+  border-left: 3px solid var(--jp-warn-color2);
+}
+
+.jp-notebook-comment[data-thread-level="4"] {
+  margin-left: 96px;
+  padding-left: 20px;
+  border-left: 3px solid var(--jp-info-color2);
+}
+
+/* Maximum nesting level indicator */
+.jp-notebook-comment[data-thread-level="5"],
+.jp-notebook-comment[data-thread-level="6"],
+.jp-notebook-comment[data-thread-level="7"],
+.jp-notebook-comment[data-thread-level="8"],
+.jp-notebook-comment[data-thread-level="9"] {
+  margin-left: 120px;
+  padding-left: 20px;
+  border-left: 3px solid var(--jp-error-color2);
+}
+
+/* Comment header with user info and timestamp */
+.jp-notebook-comment-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+  gap: 8px;
+}
+
+.jp-notebook-comment-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--jp-brand-color1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--jp-ui-inverse-font-color1);
+  font-weight: bold;
+  font-size: var(--jp-ui-font-size0);
+  flex-shrink: 0;
+}
+
+.jp-notebook-comment-user-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.jp-notebook-comment-username {
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+  font-size: var(--jp-ui-font-size1);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jp-notebook-comment-timestamp {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+  margin: 0;
+}
+
+.jp-notebook-comment-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s ease-in-out;
+}
+
+.jp-notebook-comment:hover .jp-notebook-comment-actions {
+  opacity: 1;
+}
+
+.jp-notebook-comment-action-btn {
+  background: none;
+  border: none;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: var(--jp-border-radius);
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+  transition: all 0.2s ease-in-out;
+}
+
+.jp-notebook-comment-action-btn:hover {
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color0);
+}
+
+/* Comment content */
+.jp-notebook-comment-content {
+  margin: 8px 0;
+  line-height: 1.5;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.jp-notebook-comment-content p {
+  margin: 0 0 8px 0;
+}
+
+.jp-notebook-comment-content p:last-child {
+  margin-bottom: 0;
+}
+
+/* Code blocks in comments */
+.jp-notebook-comment-content code {
+  background: var(--jp-layout-color2);
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-family: var(--jp-code-font-family);
+  font-size: 0.9em;
+}
+
+.jp-notebook-comment-content pre {
+  background: var(--jp-layout-color2);
+  padding: 8px 12px;
+  border-radius: var(--jp-border-radius);
+  overflow-x: auto;
+  font-family: var(--jp-code-font-family);
+  font-size: var(--jp-code-font-size);
+  line-height: var(--jp-code-line-height);
+}
+
+/* =============================================================================
+   Resolution Status Indicators
+   ============================================================================= */
+
+.jp-notebook-comment-resolved {
+  position: relative;
+  opacity: 0.7;
+}
+
+.jp-notebook-comment-resolved::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 2px,
+    var(--jp-success-color3) 2px,
+    var(--jp-success-color3) 4px
+  );
+  opacity: 0.1;
+  pointer-events: none;
+}
+
+.jp-notebook-comment-resolution-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 500;
+  margin-left: 8px;
+}
+
+.jp-notebook-comment-resolution-status.resolved {
+  background: var(--jp-success-color3);
+  color: var(--jp-success-color0);
+}
+
+.jp-notebook-comment-resolution-status.unresolved {
+  background: var(--jp-warn-color3);
+  color: var(--jp-warn-color0);
+}
+
+.jp-notebook-comment-resolution-status.needs-review {
+  background: var(--jp-info-color3);
+  color: var(--jp-info-color0);
+}
+
+.jp-notebook-comment-resolution-icon {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
+/* Resolution action buttons */
+.jp-notebook-comment-resolve-btn {
+  background: var(--jp-success-color1);
+  color: var(--jp-ui-inverse-font-color1);
+  border: none;
+  padding: 6px 12px;
+  border-radius: var(--jp-border-radius);
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  margin-top: 8px;
+}
+
+.jp-notebook-comment-resolve-btn:hover {
+  background: var(--jp-success-color0);
+  transform: translateY(-1px);
+}
+
+.jp-notebook-comment-unresolve-btn {
+  background: var(--jp-warn-color1);
+  color: var(--jp-ui-inverse-font-color1);
+  border: none;
+  padding: 6px 12px;
+  border-radius: var(--jp-border-radius);
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  margin-top: 8px;
+}
+
+.jp-notebook-comment-unresolve-btn:hover {
+  background: var(--jp-warn-color0);
+  transform: translateY(-1px);
+}
+
+/* =============================================================================
+   Comment Reply Forms
+   ============================================================================= */
+
+.jp-notebook-comment-reply-form {
+  border-top: 1px solid var(--jp-border-color3);
+  padding: 16px;
+  background: var(--jp-layout-color1);
+}
+
+.jp-notebook-comment-reply-form.nested {
+  margin-left: 24px;
+  border-left: 3px solid var(--jp-brand-color2);
+  padding-left: 20px;
+}
+
+.jp-notebook-comment-reply-textarea {
+  width: 100%;
+  min-height: 80px;
+  max-height: 200px;
+  resize: vertical;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: var(--jp-border-radius);
+  padding: 12px;
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  line-height: 1.5;
+  background: var(--jp-layout-color0);
+  color: var(--jp-ui-font-color1);
+  transition: border-color 0.2s ease-in-out;
+  box-sizing: border-box;
+}
+
+.jp-notebook-comment-reply-textarea:focus {
+  outline: none;
+  border-color: var(--jp-brand-color1);
+  box-shadow: 0 0 0 1px var(--jp-brand-color1);
+}
+
+.jp-notebook-comment-reply-textarea::placeholder {
+  color: var(--jp-ui-font-color3);
+}
+
+.jp-notebook-comment-reply-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  gap: 8px;
+}
+
+.jp-notebook-comment-reply-actions-left {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.jp-notebook-comment-reply-actions-right {
+  display: flex;
+  gap: 8px;
+}
+
+.jp-notebook-comment-reply-btn {
+  background: var(--jp-brand-color1);
+  color: var(--jp-ui-inverse-font-color1);
+  border: none;
+  padding: 8px 16px;
+  border-radius: var(--jp-border-radius);
+  font-size: var(--jp-ui-font-size1);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.jp-notebook-comment-reply-btn:hover {
+  background: var(--jp-brand-color0);
+  transform: translateY(-1px);
+}
+
+.jp-notebook-comment-reply-btn:active {
+  transform: translateY(0);
+}
+
+.jp-notebook-comment-reply-btn:disabled {
+  background: var(--jp-layout-color3);
+  color: var(--jp-ui-font-color3);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.jp-notebook-comment-cancel-btn {
+  background: none;
+  color: var(--jp-ui-font-color2);
+  border: 1px solid var(--jp-border-color2);
+  padding: 8px 16px;
+  border-radius: var(--jp-border-radius);
+  font-size: var(--jp-ui-font-size1);
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+.jp-notebook-comment-cancel-btn:hover {
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color0);
+  border-color: var(--jp-border-color1);
+}
+
+/* Reply form formatting tools */
+.jp-notebook-comment-formatting-tools {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.jp-notebook-comment-format-btn {
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  cursor: pointer;
+  border-radius: 3px;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+  transition: all 0.2s ease-in-out;
+}
+
+.jp-notebook-comment-format-btn:hover {
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color0);
+}
+
+.jp-notebook-comment-format-btn.active {
+  background: var(--jp-brand-color1);
+  color: var(--jp-ui-inverse-font-color1);
+}
+
+/* Character count indicator */
+.jp-notebook-comment-char-count {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color3);
+  margin-left: auto;
+}
+
+.jp-notebook-comment-char-count.warning {
+  color: var(--jp-warn-color1);
+}
+
+.jp-notebook-comment-char-count.error {
+  color: var(--jp-error-color1);
+}
+
+/* =============================================================================
+   Mobile and Responsive Design
+   ============================================================================= */
+
+@media only screen and (max-width: 760px) {
+  .jp-notebook-comment-anchor {
+    right: -36px;
+    width: 28px;
+    height: 28px;
+  }
+  
+  .jp-notebook-comment-anchor-icon {
+    width: 14px;
+    height: 14px;
+  }
+  
+  .jp-notebook-comment-anchor-badge {
+    min-width: 14px;
+    height: 14px;
+    font-size: 10px;
+  }
+  
+  .jp-notebook-comment-thread {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-height: 100vh;
+    border-radius: 0;
+    z-index: calc(var(--jp-z-index-dialog) + 1);
+    animation: slideInUp 0.3s ease-out;
+  }
+  
+  @keyframes slideInUp {
+    from {
+      opacity: 0;
+      transform: translateY(100%);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  .jp-notebook-comment-thread-body {
+    max-height: calc(100vh - 60px);
+  }
+  
+  /* Reduce nested indentation on mobile */
+  .jp-notebook-comment[data-thread-level="1"] {
+    margin-left: 16px;
+    padding-left: 12px;
+  }
+  
+  .jp-notebook-comment[data-thread-level="2"] {
+    margin-left: 32px;
+    padding-left: 12px;
+  }
+  
+  .jp-notebook-comment[data-thread-level="3"],
+  .jp-notebook-comment[data-thread-level="4"],
+  .jp-notebook-comment[data-thread-level="5"],
+  .jp-notebook-comment[data-thread-level="6"],
+  .jp-notebook-comment[data-thread-level="7"],
+  .jp-notebook-comment[data-thread-level="8"],
+  .jp-notebook-comment[data-thread-level="9"] {
+    margin-left: 48px;
+    padding-left: 12px;
+  }
+  
+  .jp-notebook-comment-avatar {
+    width: 28px;
+    height: 28px;
+    font-size: 11px;
+  }
+  
+  .jp-notebook-comment-reply-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  
+  .jp-notebook-comment-reply-actions-left,
+  .jp-notebook-comment-reply-actions-right {
+    justify-content: center;
+  }
+  
+  .jp-notebook-comment-formatting-tools {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+}
+
+/* =============================================================================
+   Tablet and Medium Screen Adjustments
+   ============================================================================= */
+
+@media only screen and (max-width: 1024px) and (min-width: 761px) {
+  .jp-notebook-comment-thread {
+    right: -320px;
+    width: 300px;
+  }
+  
+  .jp-notebook-comment[data-thread-level="3"],
+  .jp-notebook-comment[data-thread-level="4"],
+  .jp-notebook-comment[data-thread-level="5"],
+  .jp-notebook-comment[data-thread-level="6"],
+  .jp-notebook-comment[data-thread-level="7"],
+  .jp-notebook-comment[data-thread-level="8"],
+  .jp-notebook-comment[data-thread-level="9"] {
+    margin-left: 72px;
+  }
+}
+
+/* =============================================================================
+   Print Styles
+   ============================================================================= */
+
+@media print {
+  .jp-notebook-comment-system,
+  .jp-notebook-comment-anchor,
+  .jp-notebook-comment-thread {
+    display: none !important;
+  }
+}
+
+/* =============================================================================
+   High Contrast Mode Support
+   ============================================================================= */
+
+@media (prefers-contrast: high) {
+  .jp-notebook-comment-anchor {
+    border: 2px solid var(--jp-ui-font-color0);
+  }
+  
+  .jp-notebook-comment-thread {
+    border: 2px solid var(--jp-ui-font-color0);
+  }
+  
+  .jp-notebook-comment {
+    border-bottom: 2px solid var(--jp-border-color1);
+  }
+  
+  .jp-notebook-comment-reply-textarea {
+    border: 2px solid var(--jp-border-color1);
+  }
+}
+
+/* =============================================================================
+   Reduced Motion Support
+   ============================================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  .jp-notebook-comment-anchor,
+  .jp-notebook-comment-reply-btn,
+  .jp-notebook-comment-action-btn,
+  .jp-notebook-comment-cancel-btn,
+  .jp-notebook-comment-format-btn,
+  .jp-notebook-comment-resolve-btn,
+  .jp-notebook-comment-unresolve-btn {
+    transition: none;
+  }
+  
+  .jp-notebook-comment-thread {
+    animation: none;
+  }
+  
+  .jp-notebook-comment-anchor:hover,
+  .jp-notebook-comment-reply-btn:hover {
+    transform: none;
+  }
+}
+
+/* =============================================================================
+   Dark Theme Adjustments
+   ============================================================================= */
+
+body[data-jp-theme-light="false"] .jp-notebook-comment-thread {
+  box-shadow: var(--jp-elevation-z8);
+}
+
+body[data-jp-theme-light="false"] .jp-notebook-comment-reply-textarea {
+  border-color: var(--jp-border-color1);
+}
+
+body[data-jp-theme-light="false"] .jp-notebook-comment-reply-textarea:focus {
+  box-shadow: 0 0 0 1px var(--jp-brand-color1), 0 0 0 3px var(--jp-brand-color3);
+}
