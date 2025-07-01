@@ -1,0 +1,613 @@
+{
+  "title": "Collaboration",
+  "description": "Settings for real-time collaboration features in Jupyter Notebook v7.",
+  "jupyter.lab.menus": {
+    "main": [
+      {
+        "id": "jp-mainmenu-collaboration",
+        "label": "Collaboration",
+        "rank": 80,
+        "items": [
+          {
+            "command": "collaboration:toggle-presence",
+            "rank": 10
+          },
+          {
+            "command": "collaboration:open-history",
+            "rank": 20
+          },
+          {
+            "type": "separator",
+            "rank": 25
+          },
+          {
+            "command": "collaboration:lock-cell",
+            "rank": 30
+          },
+          {
+            "command": "collaboration:unlock-cell",
+            "rank": 40
+          },
+          {
+            "command": "collaboration:toggle-auto-lock",
+            "rank": 50
+          },
+          {
+            "type": "separator",
+            "rank": 55
+          },
+          {
+            "command": "collaboration:add-comment",
+            "rank": 60
+          },
+          {
+            "command": "collaboration:toggle-comments",
+            "rank": 70
+          },
+          {
+            "type": "separator",
+            "rank": 75
+          },
+          {
+            "command": "collaboration:manage-permissions",
+            "rank": 80
+          },
+          {
+            "command": "collaboration:copy-share-link",
+            "rank": 90
+          }
+        ]
+      }
+    ]
+  },
+  "jupyter.lab.toolbars": {
+    "NotebookPanel": [
+      {
+        "name": "collaborationBar",
+        "rank": 5
+      }
+    ]
+  },
+  "properties": {
+    "enableCollaboration": {
+      "type": "boolean",
+      "title": "Enable collaboration",
+      "description": "Turn on real-time collaboration features for this notebook session",
+      "default": true
+    },
+    "presenceIndicators": {
+      "type": "object",
+      "title": "Presence indicators",
+      "description": "Configuration for user presence and awareness features",
+      "properties": {
+        "showPresenceBar": {
+          "type": "boolean",
+          "title": "Show collaboration bar",
+          "description": "Display the collaboration bar with user avatars and connection status",
+          "default": true
+        },
+        "showCursorPositions": {
+          "type": "boolean",
+          "title": "Show cursor positions",
+          "description": "Display real-time cursor positions and selections of collaborators",
+          "default": true
+        },
+        "showUserAvatars": {
+          "type": "boolean",
+          "title": "Show user avatars",
+          "description": "Display collaborator avatars in cells and presence indicators",
+          "default": true
+        },
+        "maxVisibleUsers": {
+          "type": "number",
+          "title": "Maximum visible users",
+          "description": "Maximum number of user avatars to show before collapsing into overflow indicator",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 5
+        },
+        "cursorUpdateInterval": {
+          "type": "number",
+          "title": "Cursor update interval (ms)",
+          "description": "How often cursor position updates are sent to collaborators",
+          "minimum": 50,
+          "maximum": 1000,
+          "default": 100
+        },
+        "presenceTimeout": {
+          "type": "number",
+          "title": "Presence timeout (seconds)",
+          "description": "How long before an inactive user is marked as away",
+          "minimum": 30,
+          "maximum": 600,
+          "default": 300
+        }
+      },
+      "additionalProperties": false
+    },
+    "cellLocking": {
+      "type": "object",
+      "title": "Cell locking settings",
+      "description": "Configuration for cell-level locking mechanism",
+      "properties": {
+        "defaultPolicy": {
+          "type": "string",
+          "title": "Default locking policy",
+          "description": "How cells should be locked during collaborative editing",
+          "enum": ["manual", "autoLock", "noLocking"],
+          "enumNames": ["Manual locking", "Auto-lock on edit", "No locking"],
+          "default": "autoLock"
+        },
+        "autoLockTimeout": {
+          "type": "number",
+          "title": "Auto-lock timeout (seconds)",
+          "description": "How long a cell remains locked after editing stops",
+          "minimum": 5,
+          "maximum": 300,
+          "default": 30
+        },
+        "showLockIndicators": {
+          "type": "boolean",
+          "title": "Show lock indicators",
+          "description": "Display visual indicators for locked cells",
+          "default": true
+        },
+        "allowLockOverride": {
+          "type": "boolean",
+          "title": "Allow lock override",
+          "description": "Allow users with sufficient permissions to override cell locks",
+          "default": false
+        },
+        "lockOnFocus": {
+          "type": "boolean",
+          "title": "Lock on focus",
+          "description": "Automatically lock cells when they gain focus in auto-lock mode",
+          "default": true
+        },
+        "releaseLocksOnDisconnect": {
+          "type": "boolean",
+          "title": "Release locks on disconnect",
+          "description": "Automatically release all user locks when they disconnect",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "historyRetention": {
+      "type": "object",
+      "title": "History retention settings",
+      "description": "Configuration for change history and versioning",
+      "properties": {
+        "enableHistory": {
+          "type": "boolean",
+          "title": "Enable version history",
+          "description": "Track and store document version history",
+          "default": true
+        },
+        "retentionDays": {
+          "type": "number",
+          "title": "Retention period (days)",
+          "description": "How long to keep version history data",
+          "minimum": 1,
+          "maximum": 365,
+          "default": 30
+        },
+        "maxVersions": {
+          "type": "number",
+          "title": "Maximum versions",
+          "description": "Maximum number of versions to retain per document",
+          "minimum": 5,
+          "maximum": 1000,
+          "default": 100
+        },
+        "snapshotInterval": {
+          "type": "number",
+          "title": "Snapshot interval (minutes)",
+          "description": "How often to create version snapshots",
+          "minimum": 1,
+          "maximum": 60,
+          "default": 5
+        },
+        "showHistoryPanel": {
+          "type": "boolean",
+          "title": "Show history panel",
+          "description": "Display the version history panel by default",
+          "default": false
+        },
+        "trackCellLevelChanges": {
+          "type": "boolean",
+          "title": "Track cell-level changes",
+          "description": "Record changes at the individual cell level for detailed history",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "permissions": {
+      "type": "object",
+      "title": "Permission settings",
+      "description": "Configuration for role-based access control",
+      "properties": {
+        "defaultRole": {
+          "type": "string",
+          "title": "Default role for new collaborators",
+          "description": "The role assigned to new collaborators when they join",
+          "enum": ["viewer", "commenter", "editor"],
+          "enumNames": ["Viewer", "Commenter", "Editor"],
+          "default": "commenter"
+        },
+        "allowSelfRoleChange": {
+          "type": "boolean",
+          "title": "Allow self role changes",
+          "description": "Allow users to change their own role (if they have permission)",
+          "default": false
+        },
+        "showPermissionDialog": {
+          "type": "boolean",
+          "title": "Show permission dialog",
+          "description": "Display permission management dialog in the UI",
+          "default": true
+        },
+        "enforceStrictPermissions": {
+          "type": "boolean",
+          "title": "Enforce strict permissions",
+          "description": "Strictly enforce permissions at the UI level",
+          "default": true
+        },
+        "roles": {
+          "type": "object",
+          "title": "Role definitions",
+          "description": "Configuration for permission roles and their capabilities",
+          "properties": {
+            "viewer": {
+              "type": "object",
+              "title": "Viewer role",
+              "properties": {
+                "canView": {
+                  "type": "boolean",
+                  "title": "Can view",
+                  "description": "Can view notebook content",
+                  "default": true
+                },
+                "canComment": {
+                  "type": "boolean",
+                  "title": "Can comment",
+                  "description": "Can add comments to cells",
+                  "default": false
+                },
+                "canEdit": {
+                  "type": "boolean",
+                  "title": "Can edit",
+                  "description": "Can edit notebook content",
+                  "default": false
+                },
+                "canExecute": {
+                  "type": "boolean",
+                  "title": "Can execute",
+                  "description": "Can execute code cells",
+                  "default": false
+                },
+                "canManagePermissions": {
+                  "type": "boolean",
+                  "title": "Can manage permissions",
+                  "description": "Can modify access permissions",
+                  "default": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "commenter": {
+              "type": "object",
+              "title": "Commenter role",
+              "properties": {
+                "canView": {
+                  "type": "boolean",
+                  "title": "Can view",
+                  "description": "Can view notebook content",
+                  "default": true
+                },
+                "canComment": {
+                  "type": "boolean",
+                  "title": "Can comment",
+                  "description": "Can add comments to cells",
+                  "default": true
+                },
+                "canEdit": {
+                  "type": "boolean",
+                  "title": "Can edit",
+                  "description": "Can edit notebook content",
+                  "default": false
+                },
+                "canExecute": {
+                  "type": "boolean",
+                  "title": "Can execute",
+                  "description": "Can execute code cells",
+                  "default": false
+                },
+                "canManagePermissions": {
+                  "type": "boolean",
+                  "title": "Can manage permissions",
+                  "description": "Can modify access permissions",
+                  "default": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "editor": {
+              "type": "object",
+              "title": "Editor role",
+              "properties": {
+                "canView": {
+                  "type": "boolean",
+                  "title": "Can view",
+                  "description": "Can view notebook content",
+                  "default": true
+                },
+                "canComment": {
+                  "type": "boolean",
+                  "title": "Can comment",
+                  "description": "Can add comments to cells",
+                  "default": true
+                },
+                "canEdit": {
+                  "type": "boolean",
+                  "title": "Can edit",
+                  "description": "Can edit notebook content",
+                  "default": true
+                },
+                "canExecute": {
+                  "type": "boolean",
+                  "title": "Can execute",
+                  "description": "Can execute code cells",
+                  "default": true
+                },
+                "canManagePermissions": {
+                  "type": "boolean",
+                  "title": "Can manage permissions",
+                  "description": "Can modify access permissions",
+                  "default": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "owner": {
+              "type": "object",
+              "title": "Owner role",
+              "properties": {
+                "canView": {
+                  "type": "boolean",
+                  "title": "Can view",
+                  "description": "Can view notebook content",
+                  "default": true
+                },
+                "canComment": {
+                  "type": "boolean",
+                  "title": "Can comment",
+                  "description": "Can add comments to cells",
+                  "default": true
+                },
+                "canEdit": {
+                  "type": "boolean",
+                  "title": "Can edit",
+                  "description": "Can edit notebook content",
+                  "default": true
+                },
+                "canExecute": {
+                  "type": "boolean",
+                  "title": "Can execute",
+                  "description": "Can execute code cells",
+                  "default": true
+                },
+                "canManagePermissions": {
+                  "type": "boolean",
+                  "title": "Can manage permissions",
+                  "description": "Can modify access permissions",
+                  "default": true
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "comments": {
+      "type": "object",
+      "title": "Comment system settings",
+      "description": "Configuration for the comment and review system",
+      "properties": {
+        "enableComments": {
+          "type": "boolean",
+          "title": "Enable comments",
+          "description": "Allow users to add comments to cells",
+          "default": true
+        },
+        "commentVisibility": {
+          "type": "string",
+          "title": "Comment visibility",
+          "description": "When to show comment indicators and threads",
+          "enum": ["always", "onHover", "onRequest"],
+          "enumNames": ["Always visible", "Show on hover", "Show on request"],
+          "default": "onHover"
+        },
+        "showCommentSidebar": {
+          "type": "boolean",
+          "title": "Show comment sidebar",
+          "description": "Display the comment sidebar panel by default",
+          "default": false
+        },
+        "allowAnonymousComments": {
+          "type": "boolean",
+          "title": "Allow anonymous comments",
+          "description": "Allow comments from non-authenticated users",
+          "default": false
+        },
+        "autoResolveTimeout": {
+          "type": "number",
+          "title": "Auto-resolve timeout (days)",
+          "description": "Automatically resolve inactive comment threads after this period",
+          "minimum": 0,
+          "maximum": 365,
+          "default": 0
+        },
+        "maxCommentLength": {
+          "type": "number",
+          "title": "Maximum comment length",
+          "description": "Maximum number of characters allowed in a comment",
+          "minimum": 100,
+          "maximum": 10000,
+          "default": 2000
+        },
+        "enableNotifications": {
+          "type": "boolean",
+          "title": "Enable notifications",
+          "description": "Show notifications for new comments and replies",
+          "default": true
+        },
+        "notificationSound": {
+          "type": "boolean",
+          "title": "Notification sound",
+          "description": "Play sound for comment notifications",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "connection": {
+      "type": "object",
+      "title": "Connection settings",
+      "description": "Configuration for collaborative connection behavior",
+      "properties": {
+        "autoReconnect": {
+          "type": "boolean",
+          "title": "Auto-reconnect",
+          "description": "Automatically reconnect when connection is lost",
+          "default": true
+        },
+        "reconnectInterval": {
+          "type": "number",
+          "title": "Reconnect interval (seconds)",
+          "description": "How long to wait between reconnection attempts",
+          "minimum": 1,
+          "maximum": 60,
+          "default": 5
+        },
+        "maxReconnectAttempts": {
+          "type": "number",
+          "title": "Maximum reconnect attempts",
+          "description": "Maximum number of reconnection attempts before giving up",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 10
+        },
+        "heartbeatInterval": {
+          "type": "number",
+          "title": "Heartbeat interval (seconds)",
+          "description": "How often to send keepalive messages",
+          "minimum": 10,
+          "maximum": 300,
+          "default": 30
+        },
+        "showConnectionStatus": {
+          "type": "boolean",
+          "title": "Show connection status",
+          "description": "Display connection status in the collaboration bar",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "performance": {
+      "type": "object",
+      "title": "Performance settings",
+      "description": "Configuration for collaboration performance optimization",
+      "properties": {
+        "batchUpdates": {
+          "type": "boolean",
+          "title": "Batch updates",
+          "description": "Batch multiple updates together for better performance",
+          "default": true
+        },
+        "batchInterval": {
+          "type": "number",
+          "title": "Batch interval (ms)",
+          "description": "How long to wait before sending batched updates",
+          "minimum": 10,
+          "maximum": 1000,
+          "default": 50
+        },
+        "compressionEnabled": {
+          "type": "boolean",
+          "title": "Enable compression",
+          "description": "Compress WebSocket messages for reduced bandwidth",
+          "default": true
+        },
+        "maxDocumentSize": {
+          "type": "number",
+          "title": "Maximum document size (MB)",
+          "description": "Maximum size limit for collaborative documents",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 10
+        },
+        "throttleUpdates": {
+          "type": "boolean",
+          "title": "Throttle updates",
+          "description": "Throttle rapid updates to prevent overwhelming the server",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "ui": {
+      "type": "object",
+      "title": "UI preferences",
+      "description": "User interface preferences for collaboration features",
+      "properties": {
+        "showWelcomeMessage": {
+          "type": "boolean",
+          "title": "Show welcome message",
+          "description": "Show welcome message when entering collaborative mode",
+          "default": true
+        },
+        "confirmOnLeave": {
+          "type": "boolean",
+          "title": "Confirm before leaving",
+          "description": "Ask for confirmation before leaving a collaborative session",
+          "default": true
+        },
+        "highlightChanges": {
+          "type": "boolean",
+          "title": "Highlight changes",
+          "description": "Highlight recent changes made by collaborators",
+          "default": true
+        },
+        "changeHighlightDuration": {
+          "type": "number",
+          "title": "Change highlight duration (seconds)",
+          "description": "How long to highlight recent changes",
+          "minimum": 1,
+          "maximum": 60,
+          "default": 3
+        },
+        "animatePresence": {
+          "type": "boolean",
+          "title": "Animate presence",
+          "description": "Use animations for presence indicators and cursors",
+          "default": true
+        },
+        "compactMode": {
+          "type": "boolean",
+          "title": "Compact mode",
+          "description": "Use compact display for collaboration UI elements",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "type": "object"
+}
