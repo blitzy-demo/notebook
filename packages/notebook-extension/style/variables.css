@@ -3,4 +3,136 @@
   --jp-notebook-padding-offset: 20px;
 
   --jp-kernel-status-padding: 5px;
+
+  /* Collaboration-specific spacing variables */
+  --jp-collab-toolbar-height: 40px;
+  --jp-collab-toolbar-padding: 8px 12px;
+  --jp-collab-toolbar-item-spacing: 8px;
+  --jp-collab-presence-indicator-size: 28px;
+  --jp-collab-presence-indicator-spacing: 4px;
+  --jp-collab-lock-indicator-size: 20px;
+  --jp-collab-lock-indicator-margin: 4px;
+  --jp-collab-comment-thread-spacing: 12px;
+  --jp-collab-comment-indent: 20px;
+  --jp-collab-comment-padding: 8px 12px;
+  --jp-collab-awareness-overlay-padding: 2px 4px;
+  --jp-collab-status-badge-padding: 2px 6px;
+  --jp-collab-cursor-width: 2px;
+  --jp-collab-selection-border-width: 1px;
+
+  /* Color variables for collaboration features */
+  /* User presence indicators - distinct colors for different users */
+  --jp-collab-user-color-1: #e74c3c;
+  --jp-collab-user-color-2: #3498db;
+  --jp-collab-user-color-3: #2ecc71;
+  --jp-collab-user-color-4: #f39c12;
+  --jp-collab-user-color-5: #9b59b6;
+  --jp-collab-user-color-6: #1abc9c;
+  --jp-collab-user-color-7: #e67e22;
+  --jp-collab-user-color-8: #34495e;
+  --jp-collab-user-color-9: #f1c40f;
+  --jp-collab-user-color-10: #95a5a6;
+
+  /* Collaboration status colors */
+  --jp-collab-status-connected: #27ae60;
+  --jp-collab-status-connecting: #f39c12;
+  --jp-collab-status-disconnected: #e74c3c;
+  --jp-collab-status-syncing: #3498db;
+  --jp-collab-status-offline: #95a5a6;
+
+  /* Lock indicator colors */
+  --jp-collab-lock-active: #e74c3c;
+  --jp-collab-lock-pending: #f39c12;
+  --jp-collab-lock-available: #27ae60;
+  --jp-collab-lock-timeout: #e67e22;
+
+  /* Comment system colors */
+  --jp-collab-comment-background: #f8f9fa;
+  --jp-collab-comment-border: #dee2e6;
+  --jp-collab-comment-resolved: #d4edda;
+  --jp-collab-comment-unresolved: #fff3cd;
+  --jp-collab-comment-highlight: #cce5f0;
+
+  /* Awareness overlay colors */
+  --jp-collab-awareness-background: rgba(0, 0, 0, 0.8);
+  --jp-collab-awareness-text: #ffffff;
+  --jp-collab-selection-background: rgba(74, 144, 226, 0.2);
+  --jp-collab-selection-border: #4a90e2;
+  --jp-collab-cursor-color: #4a90e2;
+
+  /* Permission-based colors */
+  --jp-collab-permission-view: #6c757d;
+  --jp-collab-permission-edit: #28a745;
+  --jp-collab-permission-admin: #dc3545;
+
+  /* Animation timing variables for smooth transitions */
+  --jp-collab-transition-fast: 150ms;
+  --jp-collab-transition-normal: 250ms;
+  --jp-collab-transition-slow: 400ms;
+  --jp-collab-transition-extra-slow: 600ms;
+
+  /* Animation easing functions */
+  --jp-collab-easing-in: cubic-bezier(0.4, 0, 1, 1);
+  --jp-collab-easing-out: cubic-bezier(0, 0, 0.2, 1);
+  --jp-collab-easing-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --jp-collab-easing-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+  /* Specific animation durations for different collaborative features */
+  --jp-collab-cursor-blink-duration: 1s;
+  --jp-collab-presence-fade-duration: var(--jp-collab-transition-normal);
+  --jp-collab-lock-transition-duration: var(--jp-collab-transition-fast);
+  --jp-collab-status-change-duration: var(--jp-collab-transition-normal);
+  --jp-collab-comment-expand-duration: var(--jp-collab-transition-normal);
+  --jp-collab-awareness-popup-duration: var(--jp-collab-transition-fast);
+
+  /* Typography variables for collaboration UI elements */
+  --jp-collab-font-family: var(--jp-ui-font-family);
+  --jp-collab-font-size-small: 11px;
+  --jp-collab-font-size-normal: 13px;
+  --jp-collab-font-size-medium: 14px;
+  --jp-collab-font-size-large: 16px;
+
+  /* Specific typography for different collaboration elements */
+  --jp-collab-user-name-font-size: var(--jp-collab-font-size-small);
+  --jp-collab-user-name-font-weight: 500;
+  --jp-collab-status-font-size: var(--jp-collab-font-size-small);
+  --jp-collab-status-font-weight: 400;
+  --jp-collab-comment-font-size: var(--jp-collab-font-size-normal);
+  --jp-collab-comment-author-font-weight: 600;
+  --jp-collab-comment-timestamp-font-size: var(--jp-collab-font-size-small);
+  --jp-collab-awareness-tooltip-font-size: var(--jp-collab-font-size-small);
+  --jp-collab-lock-indicator-font-size: var(--jp-collab-font-size-small);
+
+  /* Z-index variables for proper layering of collaboration components */
+  --jp-collab-z-index-base: 100;
+  --jp-collab-z-index-toolbar: var(--jp-collab-z-index-base);
+  --jp-collab-z-index-presence-indicator: calc(var(--jp-collab-z-index-base) + 10);
+  --jp-collab-z-index-lock-indicator: calc(var(--jp-collab-z-index-base) + 20);
+  --jp-collab-z-index-selection-overlay: calc(var(--jp-collab-z-index-base) + 30);
+  --jp-collab-z-index-cursor: calc(var(--jp-collab-z-index-base) + 40);
+  --jp-collab-z-index-awareness-tooltip: calc(var(--jp-collab-z-index-base) + 50);
+  --jp-collab-z-index-comment-thread: calc(var(--jp-collab-z-index-base) + 60);
+  --jp-collab-z-index-comment-popup: calc(var(--jp-collab-z-index-base) + 70);
+  --jp-collab-z-index-permission-dialog: calc(var(--jp-collab-z-index-base) + 80);
+  --jp-collab-z-index-status-overlay: calc(var(--jp-collab-z-index-base) + 90);
+
+  /* Responsive breakpoint variables for collaboration feature responsive design */
+  --jp-collab-breakpoint-xs: 320px;
+  --jp-collab-breakpoint-sm: 576px;
+  --jp-collab-breakpoint-md: 768px;
+  --jp-collab-breakpoint-lg: 992px;
+  --jp-collab-breakpoint-xl: 1200px;
+  --jp-collab-breakpoint-xxl: 1400px;
+
+  /* Responsive spacing adjustments */
+  --jp-collab-toolbar-height-mobile: 36px;
+  --jp-collab-presence-indicator-size-mobile: 24px;
+  --jp-collab-comment-padding-mobile: 6px 8px;
+  --jp-collab-toolbar-padding-mobile: 6px 8px;
+
+  /* Responsive font size adjustments */
+  --jp-collab-font-size-small-mobile: 10px;
+  --jp-collab-font-size-normal-mobile: 12px;
+  --jp-collab-user-name-font-size-mobile: var(--jp-collab-font-size-small-mobile);
+  --jp-collab-status-font-size-mobile: var(--jp-collab-font-size-small-mobile);
 }
