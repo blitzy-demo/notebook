@@ -32,10 +32,20 @@ from jupyterlab_server.config import (  # type:ignore[attr-defined]
 from jupyterlab_server.handlers import _camelCase, is_url
 from notebook_shim.shim import NotebookConfigShimMixin  # type:ignore[import-untyped]
 from tornado import web
-from traitlets import Bool, Unicode, default
+from traitlets import Bool, Int, Unicode, default
 from traitlets.config.loader import Config
 
 from ._version import __version__
+
+# Collaboration imports - with graceful degradation
+try:
+    from .collab import YjsWebSocketHandler, CollabPermissionManager
+    COLLABORATION_AVAILABLE = True
+except ImportError:
+    # Graceful degradation when collaboration dependencies are not available
+    YjsWebSocketHandler = None
+    CollabPermissionManager = None
+    COLLABORATION_AVAILABLE = False
 
 HERE = Path(__file__).parent.resolve()
 
@@ -69,6 +79,12 @@ class NotebookBaseHandler(ExtensionHandlerJinjaMixin, ExtensionHandlerMixin, Jup
             "fullStaticUrl": ujoin(self.base_url, "static", self.name),
             "frontendUrl": ujoin(self.base_url, "/"),
             "exposeAppInBrowser": app.expose_app_in_browser,
+            # Collaboration configuration
+            "collaborative": app.collaborative and COLLABORATION_AVAILABLE,
+            "collaborationLockTimeout": app.collaboration_lock_timeout,
+            "collaborationMaxUsers": app.collaboration_max_users,
+            "collaborationHeartbeatInterval": app.collaboration_heartbeat_interval,
+            "collaborationWebSocketUrl": ujoin(base_url, "api", "collaboration") if (app.collaborative and COLLABORATION_AVAILABLE) else "",
         }
 
         server_root = self.settings.get("server_root_dir", "")
@@ -241,6 +257,14 @@ class CustomCssHandler(NotebookBaseHandler):
 
 aliases = dict(base_aliases)
 
+# Add collaboration-specific aliases
+aliases.update({
+    "collaboration-lock-timeout": "JupyterNotebookApp.collaboration_lock_timeout",
+    "collaboration-max-users": "JupyterNotebookApp.collaboration_max_users",
+    "collaboration-heartbeat-interval": "JupyterNotebookApp.collaboration_heartbeat_interval",
+    "collaboration-retention-days": "JupyterNotebookApp.collaboration_document_retention_days",
+})
+
 
 class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[misc]
     """The notebook server extension app."""
@@ -257,6 +281,9 @@ class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[
     app_dir = app_dir
     subcommands: dict[str, t.Any] = {}
 
+    # Collaboration permission manager instance
+    collaboration_permission_manager: t.Optional[t.Any] = None
+
     expose_app_in_browser = Bool(
         False,
         config=True,
@@ -271,6 +298,53 @@ class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[
         """,
     )
 
+    # Collaboration configuration settings
+    collaborative = Bool(
+        False,
+        config=True,
+        help="""Enable collaborative editing features.
+        When enabled, notebooks can be edited by multiple users simultaneously
+        with real-time synchronization. Requires Yjs dependencies to be installed.
+        Defaults to False.
+        """,
+    )
+
+    collaboration_lock_timeout = Int(
+        300,  # 5 minutes
+        config=True,
+        help="""Timeout in seconds for cell-level locks in collaborative editing.
+        After this timeout, locks are automatically released to prevent deadlocks.
+        Defaults to 300 seconds (5 minutes).
+        """,
+    )
+
+    collaboration_max_users = Int(
+        50,
+        config=True,
+        help="""Maximum number of concurrent users allowed per collaborative notebook.
+        This helps control server resource usage and maintain performance.
+        Defaults to 50 users.
+        """,
+    )
+
+    collaboration_document_retention_days = Int(
+        30,
+        config=True,
+        help="""Number of days to retain collaboration history and metadata.
+        After this period, old collaboration data is cleaned up to manage storage.
+        Defaults to 30 days.
+        """,
+    )
+
+    collaboration_heartbeat_interval = Int(
+        30,
+        config=True,
+        help="""Interval in seconds for WebSocket heartbeat messages.
+        Used to detect disconnected clients and maintain presence awareness.
+        Defaults to 30 seconds.
+        """,
+    )
+
     flags: Flags = flags  # type:ignore[assignment]
     flags["expose-app-in-browser"] = (
         {"JupyterNotebookApp": {"expose_app_in_browser": True}},
@@ -280,6 +354,16 @@ class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[
     flags["custom-css"] = (
         {"JupyterNotebookApp": {"custom_css": True}},
         "Load custom CSS in template html files. Default is True",
+    )
+
+    flags["collaborative"] = (
+        {"JupyterNotebookApp": {"collaborative": True}},
+        "Enable collaborative editing features for multi-user real-time editing",
+    )
+
+    flags["no-collaborative"] = (
+        {"JupyterNotebookApp": {"collaborative": False}},
+        "Disable collaborative editing features (single-user mode only)",
     )
 
     @default("static_dir")
@@ -326,12 +410,88 @@ class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[
             extension_enabled = False
         return extension_enabled
 
+    def _validate_collaboration_config(self) -> bool:
+        """Validate collaboration configuration and dependencies."""
+        if not self.collaborative:
+            return True
+            
+        if not COLLABORATION_AVAILABLE:
+            self.log.warning(
+                "Collaboration features are enabled but required dependencies are missing. "
+                "Install with: pip install 'notebook[collaboration]' to enable collaborative editing. "
+                "Falling back to single-user mode."
+            )
+            return False
+            
+        # Validate configuration values
+        if self.collaboration_lock_timeout < 10:
+            self.log.warning("Collaboration lock timeout is too low, setting to minimum of 10 seconds")
+            self.collaboration_lock_timeout = 10
+            
+        if self.collaboration_max_users < 1:
+            self.log.warning("Collaboration max users must be at least 1, setting to default of 50")
+            self.collaboration_max_users = 50
+            
+        if self.collaboration_heartbeat_interval < 5:
+            self.log.warning("Collaboration heartbeat interval is too low, setting to minimum of 5 seconds")
+            self.collaboration_heartbeat_interval = 5
+            
+        if self.collaboration_document_retention_days < 1:
+            self.log.warning("Collaboration document retention must be at least 1 day, setting to default of 30 days")
+            self.collaboration_document_retention_days = 30
+            
+        return True
+
+    def _get_jupyterhub_user_info(self) -> dict[str, t.Any]:
+        """Get JupyterHub user information if available."""
+        user_info = {}
+        
+        if self.serverapp and "hub_prefix" in self.serverapp.tornado_settings:
+            tornado_settings = self.serverapp.tornado_settings
+            user_info.update({
+                "hub_prefix": tornado_settings.get("hub_prefix", ""),
+                "hub_host": tornado_settings.get("hub_host", ""),
+                "hub_user": tornado_settings.get("user", ""),
+                "hub_server_name": getattr(self.serverapp, "server_name", ""),
+                "is_jupyterhub": True,
+            })
+        else:
+            user_info.update({
+                "hub_prefix": "",
+                "hub_host": "",
+                "hub_user": "",
+                "hub_server_name": "",
+                "is_jupyterhub": False,
+            })
+            
+        return user_info
+
     def initialize_handlers(self) -> None:
         """Initialize handlers."""
         assert self.serverapp is not None  # noqa: S101
         page_config = self.serverapp.web_app.settings.setdefault("page_config_data", {})
         nbclassic_enabled = self.server_extension_is_enabled("nbclassic")
         page_config["nbclassic_enabled"] = nbclassic_enabled
+
+        # Validate collaboration configuration
+        if not self._validate_collaboration_config():
+            self.collaborative = False
+
+        # Initialize collaboration permission manager
+        if self.collaborative and COLLABORATION_AVAILABLE:
+            try:
+                jupyterhub_info = self._get_jupyterhub_user_info()
+                self.collaboration_permission_manager = CollabPermissionManager(
+                    log=self.log,
+                    jupyter_app=self,
+                    jupyterhub_info=jupyterhub_info
+                )
+                self.log.info("Collaboration permission manager initialized successfully")
+                if jupyterhub_info["is_jupyterhub"]:
+                    self.log.info(f"Collaboration integrated with JupyterHub for user: {jupyterhub_info['hub_user']}")
+            except Exception as e:
+                self.log.warning(f"Failed to initialize collaboration permission manager: {e}")
+                self.collaborative = False
 
         # If running under JupyterHub, add more metadata.
         if "hub_prefix" in self.serverapp.tornado_settings:
@@ -350,17 +510,79 @@ class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[
             # if the serverapp set one
             page_config["token"] = ""
 
+        # Register standard handlers
         self.handlers.append(("/tree(.*)", TreeHandler))
         self.handlers.append(("/notebooks(.*)", NotebookHandler))
         self.handlers.append(("/edit(.*)", FileHandler))
         self.handlers.append(("/consoles/(.*)", ConsoleHandler))
         self.handlers.append(("/terminals/(.*)", TerminalHandler))
         self.handlers.append(("/custom/custom.css", CustomCssHandler))
+
+        # Register collaboration WebSocket handler if enabled
+        if self.collaborative and COLLABORATION_AVAILABLE and YjsWebSocketHandler:
+            try:
+                # Create handler class with collaboration configuration
+                class ConfiguredYjsWebSocketHandler(YjsWebSocketHandler):
+                    def __init__(self, *args, **kwargs):
+                        super().__init__(*args, **kwargs)
+                        # Pass configuration from the app to the handler
+                        self.lock_timeout = self.settings.get("collaboration_lock_timeout", 300)
+                        self.max_users = self.settings.get("collaboration_max_users", 50)
+                        self.heartbeat_interval = self.settings.get("collaboration_heartbeat_interval", 30)
+                        self.permission_manager = getattr(self.application.settings.get("notebook_app"), "collaboration_permission_manager", None)
+
+                # Register the collaboration WebSocket endpoint
+                self.handlers.append((r"/api/collaboration/([a-zA-Z0-9_\-\.\/]+)", ConfiguredYjsWebSocketHandler))
+                self.log.info("Collaboration WebSocket handler registered at /api/collaboration/{doc_id}")
+                
+                # Add collaboration settings to tornado application settings
+                self.serverapp.web_app.settings.update({
+                    "collaboration_lock_timeout": self.collaboration_lock_timeout,
+                    "collaboration_max_users": self.collaboration_max_users, 
+                    "collaboration_heartbeat_interval": self.collaboration_heartbeat_interval,
+                    "collaboration_document_retention_days": self.collaboration_document_retention_days,
+                    "notebook_app": self,
+                })
+                
+                # Log collaboration configuration
+                self.log.info(f"Collaboration configuration:")
+                self.log.info(f"  - Lock timeout: {self.collaboration_lock_timeout}s")
+                self.log.info(f"  - Max users per notebook: {self.collaboration_max_users}")
+                self.log.info(f"  - Heartbeat interval: {self.collaboration_heartbeat_interval}s")
+                self.log.info(f"  - Document retention: {self.collaboration_document_retention_days} days")
+                
+            except Exception as e:
+                self.log.error(f"Failed to register collaboration WebSocket handler: {e}")
+                self.log.exception("Collaboration handler registration error details:")
+                self.collaborative = False
+        
         super().initialize_handlers()
 
     def initialize(self, argv: list[str] | None = None) -> None:  # noqa: ARG002
         """Subclass because the ExtensionApp.initialize() method does not take arguments"""
+        # Log collaboration status during startup
+        if self.collaborative:
+            if COLLABORATION_AVAILABLE:
+                self.log.info("Jupyter Notebook collaboration features are ENABLED")
+            else:
+                self.log.warning("Jupyter Notebook collaboration features are DISABLED (dependencies missing)")
+        else:
+            self.log.info("Jupyter Notebook running in single-user mode")
+            
         super().initialize()
+
+    def stop(self) -> None:
+        """Stop the application and clean up collaboration resources."""
+        if self.collaborative and self.collaboration_permission_manager:
+            try:
+                self.log.info("Shutting down collaboration services...")
+                # The permission manager might have cleanup methods
+                if hasattr(self.collaboration_permission_manager, 'cleanup'):
+                    self.collaboration_permission_manager.cleanup()
+            except Exception as e:
+                self.log.warning(f"Error during collaboration cleanup: {e}")
+        
+        super().stop()
 
 
 main = launch_new_instance = JupyterNotebookApp.launch_instance
