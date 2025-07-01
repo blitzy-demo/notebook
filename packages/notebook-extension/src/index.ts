@@ -11,7 +11,10 @@ import {
   DOMUtils,
   IToolbarWidgetRegistry,
   ICommandPalette,
+  ReactWidget,
 } from '@jupyterlab/apputils';
+
+import { Token } from '@lumino/coreutils';
 
 import { Cell, CodeCell } from '@jupyterlab/cells';
 
@@ -38,6 +41,181 @@ import { Poll } from '@lumino/polling';
 import { Widget } from '@lumino/widgets';
 
 import { TrustedComponent } from './trusted';
+
+/**
+ * Collaboration Service Tokens
+ * These tokens define the interfaces for real-time collaboration features
+ */
+
+/**
+ * The token for the collaboration provider service.
+ * Provides YjsNotebookProvider for real-time document synchronization.
+ */
+export const ICollaborationProvider = new Token<ICollaborationProvider>(
+  '@jupyter-notebook/notebook-extension:ICollaborationProvider',
+  'A service that provides collaborative document editing capabilities using Yjs CRDT framework.'
+);
+
+/**
+ * The token for the awareness service.
+ * Manages user presence tracking and cursor position synchronization.
+ */
+export const IAwarenessService = new Token<IAwarenessService>(
+  '@jupyter-notebook/notebook-extension:IAwarenessService',
+  'A service that tracks user presence and cursor positions in collaborative sessions.'
+);
+
+/**
+ * The token for the locking service.
+ * Provides cell-level locking mechanism to prevent simultaneous edit conflicts.
+ */
+export const ILockService = new Token<ILockService>(
+  '@jupyter-notebook/notebook-extension:ILockService',
+  'A service that manages cell-level locks to prevent editing conflicts.'
+);
+
+/**
+ * The token for the history service.
+ * Manages document version history tracking and restoration capabilities.
+ */
+export const IHistoryService = new Token<IHistoryService>(
+  '@jupyter-notebook/notebook-extension:IHistoryService',
+  'A service that provides document version history and restoration capabilities.'
+);
+
+/**
+ * The token for the permissions service.
+ * Handles role-based access control (viewer, commenter, editor, owner).
+ */
+export const IPermissionsService = new Token<IPermissionsService>(
+  '@jupyter-notebook/notebook-extension:IPermissionsService',
+  'A service that manages role-based access control for collaborative sessions.'
+);
+
+/**
+ * The token for the comment service.
+ * Provides cell-level comment and discussion threading functionality.
+ */
+export const ICommentService = new Token<ICommentService>(
+  '@jupyter-notebook/notebook-extension:ICommentService',
+  'A service that manages cell-level comments and discussion threads.'
+);
+
+/**
+ * Collaboration Service Interfaces
+ */
+
+export interface ICollaborationProvider {
+  /**
+   * Whether collaboration is currently active
+   */
+  readonly isCollaborating: boolean;
+
+  /**
+   * Enable collaboration for a notebook
+   */
+  enableCollaboration(notebook: NotebookPanel): Promise<void>;
+
+  /**
+   * Disable collaboration for a notebook
+   */
+  disableCollaboration(notebook: NotebookPanel): Promise<void>;
+
+  /**
+   * Get the collaboration provider for a notebook
+   */
+  getProvider(notebook: NotebookPanel): any; // YjsNotebookProvider type
+}
+
+export interface IAwarenessService {
+  /**
+   * Get active users in the current session
+   */
+  readonly activeUsers: any[]; // User type array
+
+  /**
+   * Track user awareness for a notebook
+   */
+  trackAwareness(notebook: NotebookPanel): void;
+
+  /**
+   * Stop tracking awareness for a notebook
+   */
+  stopTracking(notebook: NotebookPanel): void;
+}
+
+export interface ILockService {
+  /**
+   * Acquire a lock on a cell
+   */
+  acquireLock(cellId: string): Promise<boolean>;
+
+  /**
+   * Release a lock on a cell
+   */
+  releaseLock(cellId: string): Promise<void>;
+
+  /**
+   * Check if a cell is locked
+   */
+  isLocked(cellId: string): boolean;
+
+  /**
+   * Get the owner of a cell lock
+   */
+  getLockOwner(cellId: string): string | null;
+}
+
+export interface IHistoryService {
+  /**
+   * Get version history for a notebook
+   */
+  getHistory(notebook: NotebookPanel): any[]; // Version type array
+
+  /**
+   * Restore a specific version
+   */
+  restoreVersion(notebook: NotebookPanel, versionId: string): Promise<void>;
+
+  /**
+   * Create a snapshot of the current state
+   */
+  createSnapshot(notebook: NotebookPanel): Promise<string>;
+}
+
+export interface IPermissionsService {
+  /**
+   * Get user permissions for a notebook
+   */
+  getPermissions(notebook: NotebookPanel): any; // Permissions type
+
+  /**
+   * Set user permissions for a notebook
+   */
+  setPermissions(notebook: NotebookPanel, permissions: any): Promise<void>;
+
+  /**
+   * Check if user has specific permission
+   */
+  hasPermission(notebook: NotebookPanel, permission: string): boolean;
+}
+
+export interface ICommentService {
+  /**
+   * Get comments for a cell
+   */
+  getComments(cellId: string): any[]; // Comment type array
+
+  /**
+   * Add a comment to a cell
+   */
+  addComment(cellId: string, content: string): Promise<string>;
+
+  /**
+   * Resolve a comment thread
+   */
+  resolveComment(commentId: string): Promise<void>;
+}
 
 /**
  * The class for kernel status errors.
@@ -678,6 +856,910 @@ const editNotebookMetadata: JupyterFrontEndPlugin<void> = {
 };
 
 /**
+ * A plugin for the collaboration provider.
+ * Provides YjsNotebookProvider for real-time document synchronization.
+ */
+const collaborationProvider: JupyterFrontEndPlugin<ICollaborationProvider> = {
+  id: '@jupyter-notebook/notebook-extension:collaboration-provider',
+  description: 'A plugin that provides collaborative document editing capabilities.',
+  autoStart: true,
+  requires: [INotebookTracker],
+  optional: [ITranslator],
+  provides: ICollaborationProvider,
+  activate: async (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    translator: ITranslator | null
+  ): Promise<ICollaborationProvider> => {
+    translator = translator ?? nullTranslator;
+
+    // Implement lazy loading strategy for collaboration modules
+    let YjsNotebookProvider: any = null;
+    
+    const loadCollaborationProvider = async () => {
+      if (!YjsNotebookProvider) {
+        try {
+          // Dynamic import to reduce initial bundle size
+          const module = await import('../../../notebook/src/collab/provider');
+          YjsNotebookProvider = module.YjsNotebookProvider;
+        } catch (error) {
+          console.warn('Collaboration provider not available:', error);
+          // Graceful fallback - return null to indicate collaboration is unavailable
+          return null;
+        }
+      }
+      return YjsNotebookProvider;
+    };
+
+    // Track active collaboration sessions
+    const collaborationSessions = new Map<string, any>();
+
+    const service: ICollaborationProvider = {
+      get isCollaborating(): boolean {
+        return collaborationSessions.size > 0;
+      },
+
+      async enableCollaboration(notebook: NotebookPanel): Promise<void> {
+        const Provider = await loadCollaborationProvider();
+        if (!Provider) {
+          console.warn('Collaboration features not available - falling back to single-user mode');
+          return;
+        }
+
+        try {
+          const sessionId = notebook.id;
+          if (!collaborationSessions.has(sessionId)) {
+            const provider = new Provider(notebook);
+            await provider.initialize();
+            collaborationSessions.set(sessionId, provider);
+            
+            // Clean up on notebook disposal
+            notebook.disposed.connect(() => {
+              this.disableCollaboration(notebook);
+            });
+          }
+        } catch (error) {
+          console.error('Failed to enable collaboration:', error);
+          // Graceful fallback - continue in single-user mode
+        }
+      },
+
+      async disableCollaboration(notebook: NotebookPanel): Promise<void> {
+        const sessionId = notebook.id;
+        const provider = collaborationSessions.get(sessionId);
+        if (provider) {
+          try {
+            await provider.dispose();
+          } catch (error) {
+            console.warn('Error disposing collaboration provider:', error);
+          }
+          collaborationSessions.delete(sessionId);
+        }
+      },
+
+      getProvider(notebook: NotebookPanel): any {
+        return collaborationSessions.get(notebook.id) || null;
+      }
+    };
+
+    return service;
+  }
+};
+
+/**
+ * A plugin for the awareness service.
+ * Manages user presence tracking and cursor position synchronization.
+ */
+const awarenessService: JupyterFrontEndPlugin<IAwarenessService> = {
+  id: '@jupyter-notebook/notebook-extension:awareness-service',
+  description: 'A plugin that provides user presence tracking for collaborative sessions.',
+  autoStart: true,
+  requires: [ICollaborationProvider],
+  optional: [ITranslator],
+  provides: IAwarenessService,
+  activate: async (
+    app: JupyterFrontEnd,
+    collaborationProvider: ICollaborationProvider,
+    translator: ITranslator | null
+  ): Promise<IAwarenessService> => {
+    translator = translator ?? nullTranslator;
+
+    let AwarenessManager: any = null;
+
+    const loadAwarenessManager = async () => {
+      if (!AwarenessManager) {
+        try {
+          const module = await import('../../../notebook/src/collab/awareness');
+          AwarenessManager = module.AwarenessManager;
+        } catch (error) {
+          console.warn('Awareness service not available:', error);
+          return null;
+        }
+      }
+      return AwarenessManager;
+    };
+
+    const trackedNotebooks = new Set<NotebookPanel>();
+    let currentUsers: any[] = [];
+
+    const service: IAwarenessService = {
+      get activeUsers(): any[] {
+        return [...currentUsers];
+      },
+
+      async trackAwareness(notebook: NotebookPanel): Promise<void> {
+        const Manager = await loadAwarenessManager();
+        if (!Manager || !collaborationProvider.isCollaborating) {
+          return;
+        }
+
+        try {
+          const provider = collaborationProvider.getProvider(notebook);
+          if (provider && !trackedNotebooks.has(notebook)) {
+            const awareness = new Manager(provider);
+            awareness.initialize();
+            trackedNotebooks.add(notebook);
+
+            // Update active users when awareness changes
+            awareness.usersChanged.connect(() => {
+              currentUsers = awareness.getActiveUsers();
+            });
+
+            notebook.disposed.connect(() => {
+              this.stopTracking(notebook);
+            });
+          }
+        } catch (error) {
+          console.warn('Failed to initialize awareness tracking:', error);
+        }
+      },
+
+      stopTracking(notebook: NotebookPanel): void {
+        trackedNotebooks.delete(notebook);
+      }
+    };
+
+    return service;
+  }
+};
+
+/**
+ * A plugin for the locking service.
+ * Provides cell-level locking mechanism to prevent simultaneous edit conflicts.
+ */
+const lockService: JupyterFrontEndPlugin<ILockService> = {
+  id: '@jupyter-notebook/notebook-extension:lock-service',
+  description: 'A plugin that provides cell-level locking for collaborative editing.',
+  autoStart: true,
+  requires: [ICollaborationProvider],
+  optional: [ITranslator],
+  provides: ILockService,
+  activate: async (
+    app: JupyterFrontEnd,
+    collaborationProvider: ICollaborationProvider,
+    translator: ITranslator | null
+  ): Promise<ILockService> => {
+    translator = translator ?? nullTranslator;
+
+    let LockManager: any = null;
+
+    const loadLockManager = async () => {
+      if (!LockManager) {
+        try {
+          const module = await import('../../../notebook/src/collab/locks');
+          LockManager = module.CellLockManager;
+        } catch (error) {
+          console.warn('Lock service not available:', error);
+          return null;
+        }
+      }
+      return LockManager;
+    };
+
+    let lockManager: any = null;
+
+    const service: ILockService = {
+      async acquireLock(cellId: string): Promise<boolean> {
+        if (!lockManager) {
+          const Manager = await loadLockManager();
+          if (!Manager || !collaborationProvider.isCollaborating) {
+            return true; // In single-user mode, always allow editing
+          }
+          lockManager = new Manager();
+        }
+
+        try {
+          return await lockManager.acquireLock(cellId);
+        } catch (error) {
+          console.warn('Failed to acquire lock:', error);
+          return false;
+        }
+      },
+
+      async releaseLock(cellId: string): Promise<void> {
+        if (lockManager) {
+          try {
+            await lockManager.releaseLock(cellId);
+          } catch (error) {
+            console.warn('Failed to release lock:', error);
+          }
+        }
+      },
+
+      isLocked(cellId: string): boolean {
+        return lockManager ? lockManager.isLocked(cellId) : false;
+      },
+
+      getLockOwner(cellId: string): string | null {
+        return lockManager ? lockManager.getLockOwner(cellId) : null;
+      }
+    };
+
+    return service;
+  }
+};
+
+/**
+ * A plugin for the history service.
+ * Manages document version history tracking and restoration capabilities.
+ */
+const historyService: JupyterFrontEndPlugin<IHistoryService> = {
+  id: '@jupyter-notebook/notebook-extension:history-service',
+  description: 'A plugin that provides document version history and restoration.',
+  autoStart: true,
+  requires: [ICollaborationProvider],
+  optional: [ITranslator],
+  provides: IHistoryService,
+  activate: async (
+    app: JupyterFrontEnd,
+    collaborationProvider: ICollaborationProvider,
+    translator: ITranslator | null
+  ): Promise<IHistoryService> => {
+    translator = translator ?? nullTranslator;
+
+    let HistoryTracker: any = null;
+
+    const loadHistoryTracker = async () => {
+      if (!HistoryTracker) {
+        try {
+          const module = await import('../../../notebook/src/collab/history');
+          HistoryTracker = module.ChangeHistoryTracker;
+        } catch (error) {
+          console.warn('History service not available:', error);
+          return null;
+        }
+      }
+      return HistoryTracker;
+    };
+
+    const service: IHistoryService = {
+      async getHistory(notebook: NotebookPanel): Promise<any[]> {
+        const Tracker = await loadHistoryTracker();
+        if (!Tracker || !collaborationProvider.isCollaborating) {
+          return []; // No history in single-user mode
+        }
+
+        try {
+          const provider = collaborationProvider.getProvider(notebook);
+          if (provider) {
+            const tracker = new Tracker(provider);
+            return tracker.getHistory();
+          }
+        } catch (error) {
+          console.warn('Failed to retrieve history:', error);
+        }
+        return [];
+      },
+
+      async restoreVersion(notebook: NotebookPanel, versionId: string): Promise<void> {
+        const Tracker = await loadHistoryTracker();
+        if (!Tracker || !collaborationProvider.isCollaborating) {
+          return;
+        }
+
+        try {
+          const provider = collaborationProvider.getProvider(notebook);
+          if (provider) {
+            const tracker = new Tracker(provider);
+            await tracker.restoreVersion(versionId);
+          }
+        } catch (error) {
+          console.error('Failed to restore version:', error);
+        }
+      },
+
+      async createSnapshot(notebook: NotebookPanel): Promise<string> {
+        const Tracker = await loadHistoryTracker();
+        if (!Tracker || !collaborationProvider.isCollaborating) {
+          return '';
+        }
+
+        try {
+          const provider = collaborationProvider.getProvider(notebook);
+          if (provider) {
+            const tracker = new Tracker(provider);
+            return await tracker.createSnapshot();
+          }
+        } catch (error) {
+          console.error('Failed to create snapshot:', error);
+        }
+        return '';
+      }
+    };
+
+    return service;
+  }
+};
+
+/**
+ * A plugin for the permissions service.
+ * Handles role-based access control (viewer, commenter, editor, owner).
+ */
+const permissionsService: JupyterFrontEndPlugin<IPermissionsService> = {
+  id: '@jupyter-notebook/notebook-extension:permissions-service',
+  description: 'A plugin that provides role-based access control for collaborative sessions.',
+  autoStart: true,
+  requires: [ICollaborationProvider],
+  optional: [ITranslator],
+  provides: IPermissionsService,
+  activate: async (
+    app: JupyterFrontEnd,
+    collaborationProvider: ICollaborationProvider,
+    translator: ITranslator | null
+  ): Promise<IPermissionsService> => {
+    translator = translator ?? nullTranslator;
+
+    let PermissionsManager: any = null;
+
+    const loadPermissionsManager = async () => {
+      if (!PermissionsManager) {
+        try {
+          const module = await import('../../../notebook/src/collab/permissions');
+          PermissionsManager = module.PermissionsManager;
+        } catch (error) {
+          console.warn('Permissions service not available:', error);
+          return null;
+        }
+      }
+      return PermissionsManager;
+    };
+
+    const service: IPermissionsService = {
+      async getPermissions(notebook: NotebookPanel): Promise<any> {
+        const Manager = await loadPermissionsManager();
+        if (!Manager || !collaborationProvider.isCollaborating) {
+          // In single-user mode, user has all permissions
+          return { view: true, comment: true, edit: true, manage: true };
+        }
+
+        try {
+          const provider = collaborationProvider.getProvider(notebook);
+          if (provider) {
+            const manager = new Manager(provider);
+            return manager.getPermissions();
+          }
+        } catch (error) {
+          console.warn('Failed to retrieve permissions:', error);
+        }
+        return { view: true, comment: false, edit: false, manage: false };
+      },
+
+      async setPermissions(notebook: NotebookPanel, permissions: any): Promise<void> {
+        const Manager = await loadPermissionsManager();
+        if (!Manager || !collaborationProvider.isCollaborating) {
+          return;
+        }
+
+        try {
+          const provider = collaborationProvider.getProvider(notebook);
+          if (provider) {
+            const manager = new Manager(provider);
+            await manager.setPermissions(permissions);
+          }
+        } catch (error) {
+          console.error('Failed to set permissions:', error);
+        }
+      },
+
+      async hasPermission(notebook: NotebookPanel, permission: string): Promise<boolean> {
+        const permissions = await this.getPermissions(notebook);
+        return permissions[permission] || false;
+      }
+    };
+
+    return service;
+  }
+};
+
+/**
+ * A plugin for the comment service.
+ * Provides cell-level comment and discussion threading functionality.
+ */
+const commentService: JupyterFrontEndPlugin<ICommentService> = {
+  id: '@jupyter-notebook/notebook-extension:comment-service',
+  description: 'A plugin that provides cell-level comments and discussion threads.',
+  autoStart: true,
+  requires: [ICollaborationProvider],
+  optional: [ITranslator],
+  provides: ICommentService,
+  activate: async (
+    app: JupyterFrontEnd,
+    collaborationProvider: ICollaborationProvider,
+    translator: ITranslator | null
+  ): Promise<ICommentService> => {
+    translator = translator ?? nullTranslator;
+
+    let CommentManager: any = null;
+
+    const loadCommentManager = async () => {
+      if (!CommentManager) {
+        try {
+          const module = await import('../../../notebook/src/collab/comments');
+          CommentManager = module.CommentManager;
+        } catch (error) {
+          console.warn('Comment service not available:', error);
+          return null;
+        }
+      }
+      return CommentManager;
+    };
+
+    let commentManager: any = null;
+
+    const service: ICommentService = {
+      async getComments(cellId: string): Promise<any[]> {
+        if (!commentManager) {
+          const Manager = await loadCommentManager();
+          if (!Manager || !collaborationProvider.isCollaborating) {
+            return []; // No comments in single-user mode
+          }
+          commentManager = new Manager();
+        }
+
+        try {
+          return commentManager.getComments(cellId);
+        } catch (error) {
+          console.warn('Failed to retrieve comments:', error);
+          return [];
+        }
+      },
+
+      async addComment(cellId: string, content: string): Promise<string> {
+        if (!commentManager) {
+          const Manager = await loadCommentManager();
+          if (!Manager || !collaborationProvider.isCollaborating) {
+            return ''; // No commenting in single-user mode
+          }
+          commentManager = new Manager();
+        }
+
+        try {
+          return await commentManager.addComment(cellId, content);
+        } catch (error) {
+          console.error('Failed to add comment:', error);
+          return '';
+        }
+      },
+
+      async resolveComment(commentId: string): Promise<void> {
+        if (commentManager) {
+          try {
+            await commentManager.resolveComment(commentId);
+          } catch (error) {
+            console.error('Failed to resolve comment:', error);
+          }
+        }
+      }
+    };
+
+    return service;
+  }
+};
+
+/**
+ * A plugin for the collaboration UI components.
+ * Integrates collaboration UI components with conditional rendering based on service availability.
+ */
+const collaborationUI: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:collaboration-ui',
+  description: 'A plugin that provides collaborative editing UI components.',
+  autoStart: true,
+  requires: [INotebookTracker, INotebookShell],
+  optional: [
+    ICollaborationProvider,
+    IAwarenessService,
+    ILockService,
+    IHistoryService,
+    IPermissionsService,
+    ICommentService,
+    ITranslator,
+    IToolbarWidgetRegistry
+  ],
+  activate: async (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    shell: INotebookShell,
+    collaborationProvider?: ICollaborationProvider,
+    awarenessService?: IAwarenessService,
+    lockService?: ILockService,
+    historyService?: IHistoryService,
+    permissionsService?: IPermissionsService,
+    commentService?: ICommentService,
+    translator?: ITranslator,
+    toolbarRegistry?: IToolbarWidgetRegistry
+  ): Promise<void> => {
+    translator = translator ?? nullTranslator;
+    const trans = translator.load('notebook');
+
+    // Lazy load UI components
+    let CollaborationBar: any = null;
+    let UserPresence: any = null;
+    let CellLockIndicator: any = null;
+    let HistoryViewer: any = null;
+    let PermissionsDialog: any = null;
+    let CommentSystem: any = null;
+
+    const loadUIComponents = async () => {
+      try {
+        const [
+          collaborationBarModule,
+          userPresenceModule,
+          cellLockModule,
+          historyModule,
+          permissionsModule,
+          commentModule
+        ] = await Promise.all([
+          import('./components/collaborationBar'),
+          import('./components/userPresence'),
+          import('./components/cellLockIndicator'),
+          import('./components/historyViewer'),
+          import('./components/permissionsDialog'),
+          import('./components/commentSystem')
+        ]);
+
+        CollaborationBar = collaborationBarModule.CollaborationBar;
+        UserPresence = userPresenceModule.UserPresence;
+        CellLockIndicator = cellLockModule.CellLockIndicator;
+        HistoryViewer = historyModule.HistoryViewer;
+        PermissionsDialog = permissionsModule.PermissionsDialog;
+        CommentSystem = commentModule.CommentSystem;
+
+        return true;
+      } catch (error) {
+        console.warn('Collaboration UI components not available:', error);
+        return false;
+      }
+    };
+
+    // Track when collaboration is active
+    const activeCollaborationSessions = new Set<NotebookPanel>();
+
+    const setupCollaborationUI = async (notebook: NotebookPanel) => {
+      // Only setup UI if collaboration services are available
+      if (!collaborationProvider || !collaborationProvider.isCollaborating) {
+        return;
+      }
+
+      const componentsLoaded = await loadUIComponents();
+      if (!componentsLoaded) {
+        return;
+      }
+
+      try {
+        // Enable collaboration for this notebook
+        await collaborationProvider.enableCollaboration(notebook);
+        activeCollaborationSessions.add(notebook);
+
+        // Setup awareness tracking
+        if (awarenessService) {
+          await awarenessService.trackAwareness(notebook);
+        }
+
+        // Add collaboration bar to toolbar if available
+        if (toolbarRegistry && CollaborationBar) {
+          toolbarRegistry.addFactory('TopBar', 'collaboration', (toolbar) => {
+            const widget = ReactWidget.create(
+              CollaborationBar({
+                notebook,
+                collaborationProvider,
+                awarenessService,
+                lockService,
+                permissionsService,
+                translator
+              })
+            );
+            widget.id = DOMUtils.createDomID();
+            widget.addClass('jp-CollaborationBar');
+            return widget;
+          });
+        }
+
+        // Add user presence indicators
+        if (UserPresence) {
+          const presenceWidget = ReactWidget.create(
+            UserPresence({
+              notebook,
+              awarenessService,
+              translator
+            })
+          );
+          presenceWidget.addClass('jp-UserPresence');
+          shell.add(presenceWidget, 'top', { rank: 1000 });
+        }
+
+        // Setup cell lock indicators
+        if (CellLockIndicator && lockService) {
+          notebook.content.widgets.forEach((cell, index) => {
+            const lockIndicator = ReactWidget.create(
+              CellLockIndicator({
+                cellId: cell.model.id,
+                lockService,
+                translator
+              })
+            );
+            lockIndicator.addClass('jp-CellLockIndicator');
+            // Add to cell toolbar if available
+          });
+        }
+
+        // Add history viewer panel
+        if (HistoryViewer && historyService) {
+          const historyWidget = ReactWidget.create(
+            HistoryViewer({
+              notebook,
+              historyService,
+              translator
+            })
+          );
+          historyWidget.title.label = trans.__('History');
+          historyWidget.title.iconClass = 'jp-Icon jp-Icon-16 jp-HistoryIcon';
+          historyWidget.addClass('jp-HistoryViewer');
+          // Add to right sidebar
+          shell.add(historyWidget, 'right', { type: 'History Viewer' });
+        }
+
+        // Add comment system
+        if (CommentSystem && commentService) {
+          const commentWidget = ReactWidget.create(
+            CommentSystem({
+              notebook,
+              commentService,
+              translator
+            })
+          );
+          commentWidget.title.label = trans.__('Comments');
+          commentWidget.title.iconClass = 'jp-Icon jp-Icon-16 jp-CommentIcon';
+          commentWidget.addClass('jp-CommentSystem');
+          // Add to right sidebar
+          shell.add(commentWidget, 'right', { type: 'Comments' });
+        }
+
+        // Setup permissions dialog command
+        if (PermissionsDialog && permissionsService) {
+          const commandId = 'collaboration:open-permissions';
+          
+          if (!app.commands.hasCommand(commandId)) {
+            app.commands.addCommand(commandId, {
+              label: trans.__('Manage Permissions'),
+              execute: () => {
+                const dialog = ReactWidget.create(
+                  PermissionsDialog({
+                    notebook,
+                    permissionsService,
+                    translator
+                  })
+                );
+                dialog.addClass('jp-PermissionsDialog');
+                // Show dialog
+              },
+              isEnabled: () => {
+                const current = tracker.currentWidget;
+                return current === notebook && activeCollaborationSessions.has(notebook);
+              }
+            });
+          }
+        }
+
+        // Clean up on notebook disposal
+        notebook.disposed.connect(() => {
+          activeCollaborationSessions.delete(notebook);
+          if (awarenessService) {
+            awarenessService.stopTracking(notebook);
+          }
+          if (collaborationProvider) {
+            collaborationProvider.disableCollaboration(notebook);
+          }
+        });
+
+      } catch (error) {
+        console.error('Failed to setup collaboration UI:', error);
+        // Graceful fallback - continue without collaboration UI
+      }
+    };
+
+    // Setup collaboration when notebooks are opened
+    tracker.widgetAdded.connect(async (sender, notebook) => {
+      await notebook.context.ready;
+      
+      // Check if collaboration should be enabled (could be based on URL params, settings, etc.)
+      const shouldEnableCollaboration = checkCollaborationSettings();
+      
+      if (shouldEnableCollaboration && collaborationProvider) {
+        await setupCollaborationUI(notebook);
+      }
+    });
+
+    // Handle existing notebooks
+    tracker.forEach(async (notebook) => {
+      if (notebook.context.isReady) {
+        const shouldEnableCollaboration = checkCollaborationSettings();
+        if (shouldEnableCollaboration && collaborationProvider) {
+          await setupCollaborationUI(notebook);
+        }
+      }
+    });
+
+    /**
+     * Check if collaboration should be enabled based on settings or URL parameters.
+     * This provides a way to control when collaboration features are activated.
+     */
+    function checkCollaborationSettings(): boolean {
+      // Check URL parameters
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.has('collaborate')) {
+        return urlParams.get('collaborate') === 'true';
+      }
+
+      // Check if collaboration backend is available
+      // This could include pinging a collaboration endpoint
+      try {
+        // Simple check - if collaboration services are available, enable collaboration
+        return Boolean(collaborationProvider && awarenessService);
+      } catch (error) {
+        return false;
+      }
+    }
+  }
+};
+
+/**
+ * A plugin for collaboration activation lifecycle management.
+ * Provides commands and UI for enabling/disabling collaboration features.
+ */
+const collaborationLifecycle: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:collaboration-lifecycle',
+  description: 'A plugin that manages collaboration activation lifecycle with graceful fallbacks.',
+  autoStart: true,
+  requires: [INotebookTracker],
+  optional: [ICollaborationProvider, ICommandPalette, IMainMenu, ITranslator],
+  activate: (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    collaborationProvider?: ICollaborationProvider,
+    palette?: ICommandPalette,
+    mainMenu?: IMainMenu,
+    translator?: ITranslator
+  ): void => {
+    translator = translator ?? nullTranslator;
+    const trans = translator.load('notebook');
+
+    // Add collaboration commands
+    const enableCollaborationCommand = 'collaboration:enable';
+    const disableCollaborationCommand = 'collaboration:disable';
+    const toggleCollaborationCommand = 'collaboration:toggle';
+
+    app.commands.addCommand(enableCollaborationCommand, {
+      label: trans.__('Enable Collaboration'),
+      execute: async () => {
+        const current = tracker.currentWidget;
+        if (current && collaborationProvider) {
+          try {
+            await collaborationProvider.enableCollaboration(current);
+            console.log('Collaboration enabled successfully');
+          } catch (error) {
+            console.error('Failed to enable collaboration:', error);
+            // Show user-friendly error message
+          }
+        }
+      },
+      isEnabled: () => {
+        const current = tracker.currentWidget;
+        return Boolean(
+          current && 
+          collaborationProvider && 
+          !collaborationProvider.isCollaborating
+        );
+      }
+    });
+
+    app.commands.addCommand(disableCollaborationCommand, {
+      label: trans.__('Disable Collaboration'),
+      execute: async () => {
+        const current = tracker.currentWidget;
+        if (current && collaborationProvider) {
+          try {
+            await collaborationProvider.disableCollaboration(current);
+            console.log('Collaboration disabled successfully');
+          } catch (error) {
+            console.error('Failed to disable collaboration:', error);
+          }
+        }
+      },
+      isEnabled: () => {
+        const current = tracker.currentWidget;
+        return Boolean(
+          current && 
+          collaborationProvider && 
+          collaborationProvider.isCollaborating
+        );
+      }
+    });
+
+    app.commands.addCommand(toggleCollaborationCommand, {
+      label: trans.__('Toggle Collaboration'),
+      execute: async () => {
+        if (collaborationProvider?.isCollaborating) {
+          await app.commands.execute(disableCollaborationCommand);
+        } else {
+          await app.commands.execute(enableCollaborationCommand);
+        }
+      },
+      isEnabled: () => {
+        const current = tracker.currentWidget;
+        return Boolean(current && collaborationProvider);
+      },
+      isToggled: () => {
+        return Boolean(collaborationProvider?.isCollaborating);
+      }
+    });
+
+    // Add to command palette
+    if (palette) {
+      palette.addItem({
+        command: enableCollaborationCommand,
+        category: 'Collaboration',
+      });
+      palette.addItem({
+        command: disableCollaborationCommand,
+        category: 'Collaboration',
+      });
+      palette.addItem({
+        command: toggleCollaborationCommand,
+        category: 'Collaboration',
+      });
+    }
+
+    // Add to main menu if available
+    if (mainMenu) {
+      mainMenu.fileMenu.newMenu.addGroup([
+        { command: toggleCollaborationCommand }
+      ], 1000);
+    }
+
+    // Monitor connection status and provide fallbacks
+    if (collaborationProvider) {
+      // Set up periodic health checks
+      const healthCheckInterval = setInterval(async () => {
+        try {
+          // This would check if the collaboration backend is still available
+          // For now, we'll assume it's always available if the provider exists
+        } catch (error) {
+          console.warn('Collaboration backend health check failed:', error);
+          // Could trigger fallback to offline mode here
+        }
+      }, 30000); // Check every 30 seconds
+
+      // Clean up interval on app disposal
+      app.restored.then(() => {
+        window.addEventListener('beforeunload', () => {
+          clearInterval(healthCheckInterval);
+        });
+      });
+    }
+  }
+};
+
+/**
  * Export the plugins as default.
  */
 const plugins: JupyterFrontEndPlugin<any>[] = [
@@ -692,6 +1774,15 @@ const plugins: JupyterFrontEndPlugin<any>[] = [
   scrollOutput,
   tabIcon,
   trusted,
+  // Collaboration plugins with lazy loading and graceful fallbacks
+  collaborationProvider,
+  awarenessService,
+  lockService,
+  historyService,
+  permissionsService,
+  commentService,
+  collaborationUI,
+  collaborationLifecycle,
 ];
 
 export default plugins;
