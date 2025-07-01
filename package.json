@@ -48,7 +48,10 @@
   "resolutions": {
     "@types/react": "^18.0.26",
     "react": "^18.2.0",
-    "yjs": "^13.5.40"
+    "yjs": "^13.6.1",
+    "y-websocket": "^1.4.5",
+    "y-protocols": "^1.0.5",
+    "y-codemirror.next": "^0.3.2"
   },
   "devDependencies": {
     "@jupyterlab/buildutils": "~4.5.0-alpha.0",
