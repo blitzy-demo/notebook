@@ -1,1 +1,10 @@
 @import url('./base.css');
+
+/* Collaboration Module Imports */
+/* Import order ensures collaboration styles cascade properly after base styles */
+@import url('./collaboration-bar.css');
+@import url('./presence-avatars.css');
+@import url('./lock-overlays.css');
+@import url('./history-viewer.css');
+@import url('./comment-sidebar.css');
+@import url('./permissions-dialog.css');
