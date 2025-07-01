@@ -1,0 +1,528 @@
+/*-----------------------------------------------------------------------------
+| Copyright (c) Jupyter Development Team.
+|
+| Distributed under the terms of the Modified BSD License.
+|----------------------------------------------------------------------------*/
+
+@import './variables.css';
+
+/**
+ * Cell Locking UI Components
+ * 
+ * This module provides CSS styling for collaborative editing cell locking features:
+ * - Cell-level lock icons positioned in cell gutter
+ * - Lock state visual indicators with smooth animations
+ * - Accessibility features for lock controls
+ * - Flash animations for state transitions
+ * - Proper z-index layering for UI overlays
+ * 
+ * Per Section 7.6.1, 7.8.2, 7.8.3, and 7.8.4 of the technical specification.
+ */
+
+/* ============================================================================
+   CSS Variables for Collaboration Lock Features
+   ============================================================================ */
+
+:root {
+  /* Lock icon and state colors per Section 7.8.2 */
+  --jp-collab-lock-icon-color: #f39c12;
+  --jp-collab-lock-self-color: #2ecc71;
+  --jp-collab-lock-other-color: #e74c3c;
+  --jp-collab-lock-unlocked-color: #95a5a6;
+  
+  /* Lock overlay dimensions and positioning */
+  --jp-collab-lock-icon-size: 16px;
+  --jp-collab-lock-gutter-width: 32px;
+  --jp-collab-lock-overlay-z-index: 100;
+  
+  /* Animation durations per Section 7.8.4 */
+  --jp-collab-lock-transition-duration: 300ms;
+  --jp-collab-lock-flash-duration: 200ms;
+}
+
+/* ============================================================================
+   Base Lock Overlay Positioning
+   ============================================================================ */
+
+/**
+ * Lock overlay container positioned in cell gutter
+ * Positioned absolutely to overlay on the cell gutter area
+ */
+body[data-notebook='notebooks'] .jp-collab-lock-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--jp-collab-lock-gutter-width);
+  height: 100%;
+  z-index: var(--jp-collab-lock-overlay-z-index);
+  pointer-events: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 8px;
+}
+
+/**
+ * Lock button/icon container
+ * Enables pointer events for interaction while maintaining overlay positioning
+ */
+body[data-notebook='notebooks'] .jp-collab-lock-button {
+  position: relative;
+  width: var(--jp-collab-lock-icon-size);
+  height: var(--jp-collab-lock-icon-size);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--jp-collab-lock-transition-duration) ease-in-out;
+  outline: none;
+}
+
+/**
+ * Lock icon styling
+ * Uses CSS mask for scalable vector icons with theme color support
+ */
+body[data-notebook='notebooks'] .jp-collab-lock-icon {
+  width: var(--jp-collab-lock-icon-size);
+  height: var(--jp-collab-lock-icon-size);
+  background-color: var(--jp-collab-lock-icon-color);
+  transition: all var(--jp-collab-lock-transition-duration) ease-in-out;
+  opacity: 0;
+  transform: scale(0.8);
+}
+
+/* ============================================================================
+   Lock State Visual Indicators
+   ============================================================================ */
+
+/**
+ * Unlocked state - subtle, low opacity
+ * Shows lock is available but not currently active
+ */
+body[data-notebook='notebooks'] .jp-collab-lock-overlay.jp-mod-unlocked .jp-collab-lock-icon {
+  background-color: var(--jp-collab-lock-unlocked-color);
+  opacity: 0.3;
+  transform: scale(0.8);
+}
+
+body[data-notebook='notebooks'] .jp-collab-lock-overlay.jp-mod-unlocked:hover .jp-collab-lock-icon {
+  opacity: 0.6;
+  transform: scale(1);
+}
+
+/**
+ * Locked by current user - green, full opacity
+ * Indicates user has exclusive editing access to this cell
+ */
+body[data-notebook='notebooks'] .jp-collab-lock-overlay.jp-mod-locked-self .jp-collab-lock-icon {
+  background-color: var(--jp-collab-lock-self-color);
+  opacity: 1;
+  transform: scale(1);
+}
+
+body[data-notebook='notebooks'] .jp-collab-lock-overlay.jp-mod-locked-self:hover .jp-collab-lock-icon {
+  transform: scale(1.1);
+}
+
+/**
+ * Locked by another user - red, full opacity with distinct styling
+ * Indicates another user has exclusive access, current user cannot edit
+ */
+body[data-notebook='notebooks'] .jp-collab-lock-overlay.jp-mod-locked-other .jp-collab-lock-icon {
+  background-color: var(--jp-collab-lock-other-color);
+  opacity: 1;
+  transform: scale(1);
+  box-shadow: 0 0 4px rgba(231, 76, 60, 0.3);
+}
+
+body[data-notebook='notebooks'] .jp-collab-lock-overlay.jp-mod-locked-other .jp-collab-lock-button {
+  cursor: not-allowed;
+}
+
+/* ============================================================================
+   Fade-in/Fade-out Animations per Section 7.8.4
+   ============================================================================ */
+
+/**
+ * Lock state transitions with 300ms duration
+ * Smooth fade-in when lock becomes active, fade-out when released
+ */
+@keyframes jp-collab-lock-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes jp-collab-lock-fade-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+}
+
+/**
+ * Apply fade animations to lock state transitions
+ */
+body[data-notebook='notebooks'] .jp-collab-lock-overlay.jp-mod-fade-in .jp-collab-lock-icon {
+  animation: jp-collab-lock-fade-in var(--jp-collab-lock-transition-duration) ease-out forwards;
+}
+
+body[data-notebook='notebooks'] .jp-collab-lock-overlay.jp-mod-fade-out .jp-collab-lock-icon {
+  animation: jp-collab-lock-fade-out var(--jp-collab-lock-transition-duration) ease-out forwards;
+}
+
+/* ============================================================================
+   Flash Animation for State Changes per Section 7.8.4
+   ============================================================================ */
+
+/**
+ * Flash effect when cell lock state changes
+ * Brief highlight to draw attention to state transitions
+ */
+@keyframes jp-collab-lock-flash {
+  0% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+  50% {
+    background-color: var(--jp-collab-lock-icon-color);
+    box-shadow: 0 0 8px var(--jp-collab-lock-icon-color);
+    border-radius: 50%;
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}
+
+/**
+ * Apply flash animation when lock state changes
+ */
+body[data-notebook='notebooks'] .jp-collab-lock-overlay.jp-mod-flash .jp-collab-lock-button {
+  animation: jp-collab-lock-flash var(--jp-collab-lock-flash-duration) ease-in-out;
+}
+
+/**
+ * Flash animation for successful lock acquisition
+ */
+@keyframes jp-collab-lock-flash-success {
+  0% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: var(--jp-collab-lock-self-color);
+    box-shadow: 0 0 8px var(--jp-collab-lock-self-color);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+body[data-notebook='notebooks'] .jp-collab-lock-overlay.jp-mod-flash-success .jp-collab-lock-button {
+  animation: jp-collab-lock-flash-success var(--jp-collab-lock-flash-duration) ease-in-out;
+}
+
+/**
+ * Flash animation for lock conflict or error
+ */
+@keyframes jp-collab-lock-flash-error {
+  0% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: var(--jp-collab-lock-other-color);
+    box-shadow: 0 0 8px var(--jp-collab-lock-other-color);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+body[data-notebook='notebooks'] .jp-collab-lock-overlay.jp-mod-flash-error .jp-collab-lock-button {
+  animation: jp-collab-lock-flash-error var(--jp-collab-lock-flash-duration) ease-in-out;
+}
+
+/* ============================================================================
+   Accessibility Features per Section 7.8.3
+   ============================================================================ */
+
+/**
+ * Focus indicators for keyboard navigation
+ * High contrast focus ring for better visibility
+ */
+body[data-notebook='notebooks'] .jp-collab-lock-button:focus {
+  outline: 2px solid var(--jp-accept-color1);
+  outline-offset: 2px;
+  background-color: var(--jp-layout-color2);
+}
+
+body[data-notebook='notebooks'] .jp-collab-lock-button:focus:not(:focus-visible) {
+  outline: none;
+  background-color: transparent;
+}
+
+body[data-notebook='notebooks'] .jp-collab-lock-button:focus-visible {
+  outline: 2px solid var(--jp-accept-color1);
+  outline-offset: 2px;
+  background-color: var(--jp-layout-color2);
+}
+
+/**
+ * Pressed state styling for buttons with aria-pressed
+ * Visual feedback for toggle state accessibility
+ */
+body[data-notebook='notebooks'] .jp-collab-lock-button[aria-pressed="true"] {
+  background-color: var(--jp-layout-color3);
+}
+
+body[data-notebook='notebooks'] .jp-collab-lock-button[aria-pressed="true"] .jp-collab-lock-icon {
+  transform: scale(1.05);
+}
+
+/**
+ * High contrast mode support
+ * Ensure lock indicators remain visible in high contrast environments
+ */
+@media (prefers-contrast: high) {
+  body[data-notebook='notebooks'] .jp-collab-lock-icon {
+    border: 1px solid currentColor;
+  }
+  
+  body[data-notebook='notebooks'] .jp-collab-lock-overlay.jp-mod-unlocked .jp-collab-lock-icon {
+    opacity: 0.8;
+  }
+  
+  body[data-notebook='notebooks'] .jp-collab-lock-button:focus {
+    outline-width: 3px;
+  }
+}
+
+/* ============================================================================
+   Lock Status Overlay Tooltips
+   ============================================================================ */
+
+/**
+ * Tooltip container for lock status information
+ * Provides additional context about lock state and owner
+ */
+body[data-notebook='notebooks'] .jp-collab-lock-tooltip {
+  position: absolute;
+  top: -8px;
+  left: 100%;
+  margin-left: 8px;
+  background: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: var(--jp-ui-font-size0);
+  font-family: var(--jp-ui-font-family);
+  white-space: nowrap;
+  z-index: calc(var(--jp-collab-lock-overlay-z-index) + 1);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 200ms ease-in-out, visibility 200ms ease-in-out;
+  pointer-events: none;
+}
+
+/**
+ * Tooltip arrow
+ */
+body[data-notebook='notebooks'] .jp-collab-lock-tooltip::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -4px;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-right: 4px solid var(--jp-border-color2);
+}
+
+body[data-notebook='notebooks'] .jp-collab-lock-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -3px;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-right: 4px solid var(--jp-layout-color1);
+}
+
+/**
+ * Show tooltip on hover and focus
+ */
+body[data-notebook='notebooks'] .jp-collab-lock-button:hover .jp-collab-lock-tooltip,
+body[data-notebook='notebooks'] .jp-collab-lock-button:focus .jp-collab-lock-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* ============================================================================
+   Cell Integration and Z-Index Layering
+   ============================================================================ */
+
+/**
+ * Ensure lock overlays appear above cell content but below modals
+ * Proper z-index stacking context for collaborative UI elements
+ */
+body[data-notebook='notebooks'] .jp-Cell {
+  position: relative;
+}
+
+body[data-notebook='notebooks'] .jp-Cell .jp-collab-lock-overlay {
+  z-index: var(--jp-collab-lock-overlay-z-index);
+}
+
+/**
+ * Lock overlay positioning adjustments for different cell types
+ */
+body[data-notebook='notebooks'] .jp-CodeCell .jp-collab-lock-overlay {
+  top: 0;
+  left: -var(--jp-collab-lock-gutter-width);
+}
+
+body[data-notebook='notebooks'] .jp-MarkdownCell .jp-collab-lock-overlay {
+  top: 0;
+  left: -var(--jp-collab-lock-gutter-width);
+}
+
+body[data-notebook='notebooks'] .jp-RawCell .jp-collab-lock-overlay {
+  top: 0;
+  left: -var(--jp-collab-lock-gutter-width);
+}
+
+/* ============================================================================
+   Mobile and Responsive Design
+   ============================================================================ */
+
+/**
+ * Mobile adaptations for lock controls per Section 7.8.1
+ * Larger touch targets and adjusted positioning for mobile devices
+ */
+@media only screen and (max-width: 760px) {
+  :root {
+    --jp-collab-lock-icon-size: 20px;
+    --jp-collab-lock-gutter-width: 36px;
+  }
+  
+  /* Larger touch targets for mobile accessibility */
+  body[data-notebook='notebooks'] .jp-collab-lock-button {
+    width: 24px;
+    height: 24px;
+    padding: 2px;
+  }
+  
+  /* Adjust tooltip positioning for mobile */
+  body[data-notebook='notebooks'] .jp-collab-lock-tooltip {
+    top: -32px;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-left: 0;
+  }
+  
+  body[data-notebook='notebooks'] .jp-collab-lock-tooltip::before,
+  body[data-notebook='notebooks'] .jp-collab-lock-tooltip::after {
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 4px solid var(--jp-border-color2);
+    border-bottom: none;
+  }
+  
+  body[data-notebook='notebooks'] .jp-collab-lock-tooltip::after {
+    top: calc(100% - 1px);
+    border-top-color: var(--jp-layout-color1);
+  }
+}
+
+/**
+ * Touch device optimizations
+ * Enhanced touch targets and hover state alternatives
+ */
+@media (hover: none) and (pointer: coarse) {
+  /* Remove hover effects on touch devices */
+  body[data-notebook='notebooks'] .jp-collab-lock-overlay.jp-mod-unlocked:hover .jp-collab-lock-icon,
+  body[data-notebook='notebooks'] .jp-collab-lock-overlay.jp-mod-locked-self:hover .jp-collab-lock-icon {
+    transform: none;
+  }
+  
+  /* Use active state instead of hover on touch devices */
+  body[data-notebook='notebooks'] .jp-collab-lock-button:active {
+    background-color: var(--jp-layout-color2);
+  }
+  
+  body[data-notebook='notebooks'] .jp-collab-lock-button:active .jp-collab-lock-icon {
+    transform: scale(1.1);
+  }
+}
+
+/* ============================================================================
+   Print Styles
+   ============================================================================ */
+
+/**
+ * Hide collaborative UI elements in print media
+ * Lock overlays are interactive elements not relevant for printed notebooks
+ */
+@media print {
+  body[data-notebook='notebooks'] .jp-collab-lock-overlay {
+    display: none !important;
+  }
+}
+
+/* ============================================================================
+   Dark Theme Adjustments
+   ============================================================================ */
+
+/**
+ * Dark theme specific adjustments for better contrast
+ * Ensure lock indicators remain visible in dark mode
+ */
+body[data-jp-theme-light='false'] .jp-collab-lock-tooltip {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+body[data-jp-theme-light='false'] .jp-collab-lock-overlay.jp-mod-locked-other .jp-collab-lock-icon {
+  box-shadow: 0 0 4px rgba(231, 76, 60, 0.5);
+}
+
+/**
+ * Reduced motion preferences
+ * Respect user's motion preferences for accessibility
+ */
+@media (prefers-reduced-motion: reduce) {
+  body[data-notebook='notebooks'] .jp-collab-lock-icon,
+  body[data-notebook='notebooks'] .jp-collab-lock-button,
+  body[data-notebook='notebooks'] .jp-collab-lock-tooltip {
+    transition: none;
+  }
+  
+  body[data-notebook='notebooks'] .jp-collab-lock-overlay.jp-mod-fade-in .jp-collab-lock-icon,
+  body[data-notebook='notebooks'] .jp-collab-lock-overlay.jp-mod-fade-out .jp-collab-lock-icon,
+  body[data-notebook='notebooks'] .jp-collab-lock-overlay.jp-mod-flash .jp-collab-lock-button,
+  body[data-notebook='notebooks'] .jp-collab-lock-overlay.jp-mod-flash-success .jp-collab-lock-button,
+  body[data-notebook='notebooks'] .jp-collab-lock-overlay.jp-mod-flash-error .jp-collab-lock-button {
+    animation: none;
+  }
+}
