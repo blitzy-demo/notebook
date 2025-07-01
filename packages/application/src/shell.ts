@@ -9,6 +9,11 @@ import { find } from '@lumino/algorithm';
 import { JSONExt, PromiseDelegate, Token } from '@lumino/coreutils';
 import { ISignal, Signal } from '@lumino/signaling';
 
+import { 
+  ICollaborationStatusManager, 
+  ICollaborationAwareness 
+} from './tokens';
+
 import {
   BoxLayout,
   FocusTracker,
@@ -30,7 +35,42 @@ export const INotebookShell = new Token<INotebookShell>(
 /**
  * The Jupyter Notebook application shell interface.
  */
-export interface INotebookShell extends NotebookShell {}
+export interface INotebookShell extends NotebookShell {
+  /**
+   * Add a collaboration status bar widget to the shell.
+   */
+  addCollaborationStatusBar(widget: Widget, options?: DocumentRegistry.IOpenOptions): void;
+
+  /**
+   * Update the collaboration status information.
+   */
+  updateCollaborationStatus(status: INotebookShell.ICollaborationStatus): void;
+
+  /**
+   * Show collaboration disconnected state.
+   */
+  showCollaborationDisconnected(): void;
+
+  /**
+   * Add a user presence panel widget to the shell.
+   */
+  addPresencePanel(widget: Widget, options?: DocumentRegistry.IOpenOptions): void;
+
+  /**
+   * Update the presence indicators with current users.
+   */
+  updatePresenceIndicators(users: ReadonlyArray<ICollaborationAwareness.IUser>): void;
+
+  /**
+   * Show active users in the presence panel.
+   */
+  showActiveUsers(users: ReadonlyArray<ICollaborationAwareness.IUser>): void;
+
+  /**
+   * Check if collaboration features are enabled.
+   */
+  readonly isCollaborationEnabled: boolean;
+}
 
 /**
  * The namespace for INotebookShell type information.
@@ -39,7 +79,7 @@ export namespace INotebookShell {
   /**
    * The areas of the application shell where widgets can reside.
    */
-  export type Area = 'main' | 'top' | 'menu' | 'left' | 'right' | 'down';
+  export type Area = 'main' | 'top' | 'menu' | 'left' | 'right' | 'down' | 'collab-status' | 'collab-presence';
 
   /**
    * Widget position
@@ -64,6 +104,31 @@ export namespace INotebookShell {
      */
     [k: string]: IWidgetPosition;
   }
+
+  /**
+   * Collaboration status information interface.
+   */
+  export interface ICollaborationStatus {
+    /**
+     * Whether collaboration is enabled.
+     */
+    enabled: boolean;
+
+    /**
+     * Current connection status.
+     */
+    connectionStatus: ICollaborationStatusManager.ConnectionStatus;
+
+    /**
+     * Current user role.
+     */
+    userRole: ICollaborationStatusManager.UserRole;
+
+    /**
+     * Number of active users.
+     */
+    activeUserCount: number;
+  }
 }
 
 /**
@@ -85,6 +150,17 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     this._leftHandler = new SidePanelHandler('left');
     this._rightHandler = new SidePanelHandler('right');
     this._main = new Panel();
+
+    // Initialize collaboration components
+    this._collaborationStatusHandler = new PanelHandler();
+    this._collaborationPresenceHandler = new PanelHandler();
+    this._isCollaborationEnabled = this._checkCollaborationFeatureFlag();
+    this._collaborationStatus = {
+      enabled: this._isCollaborationEnabled,
+      connectionStatus: ICollaborationStatusManager.ConnectionStatus.Disconnected,
+      userRole: ICollaborationStatusManager.UserRole.Viewer,
+      activeUserCount: 0
+    };
     const topWrapper = (this._topWrapper = new Panel());
     const menuWrapper = (this._menuWrapper = new Panel());
 
@@ -95,6 +171,21 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     this._main.id = 'main-panel';
     this._main.node.setAttribute('role', 'main');
 
+    // Setup collaboration panels
+    this._collaborationStatusHandler.panel.id = 'collab-status-panel';
+    this._collaborationStatusHandler.panel.node.setAttribute('role', 'status');
+    this._collaborationStatusHandler.panel.addClass('jp-notebook-collaboration-status');
+    
+    this._collaborationPresenceHandler.panel.id = 'collab-presence-panel';
+    this._collaborationPresenceHandler.panel.node.setAttribute('role', 'complementary');
+    this._collaborationPresenceHandler.panel.addClass('jp-notebook-collaboration-presence');
+
+    // Hide collaboration panels initially if collaboration is disabled
+    if (!this._isCollaborationEnabled) {
+      this._collaborationStatusHandler.panel.hide();
+      this._collaborationPresenceHandler.panel.hide();
+    }
+
     this._spacer_top = new Widget();
     this._spacer_top.id = 'spacer-widget-top';
     this._spacer_bottom = new Widget();
@@ -103,6 +194,11 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     // create wrappers around the top and menu areas
     topWrapper.id = 'top-panel-wrapper';
     topWrapper.addWidget(this._topHandler.panel);
+    
+    // Add collaboration status bar to top wrapper if enabled
+    if (this._isCollaborationEnabled) {
+      topWrapper.addWidget(this._collaborationStatusHandler.panel);
+    }
 
     menuWrapper.id = 'menu-panel-wrapper';
     menuWrapper.addWidget(this._menuHandler.panel);
@@ -115,6 +211,11 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     leftHandler.panel.node.setAttribute('role', 'complementary');
     rightHandler.panel.id = 'jp-right-stack';
     rightHandler.panel.node.setAttribute('role', 'complementary');
+
+    // Add collaboration presence panel to right side if enabled
+    if (this._isCollaborationEnabled) {
+      rightHandler.addWidget(this._collaborationPresenceHandler.panel, 100);
+    }
 
     // Hide the side panels by default.
     leftHandler.hide();
@@ -290,11 +391,18 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
   }
 
   /**
+   * Check if collaboration features are enabled.
+   */
+  get isCollaborationEnabled(): boolean {
+    return this._isCollaborationEnabled;
+  }
+
+  /**
    * Activate a widget in its area.
    */
   activateById(id: string): void {
     // Search all areas that can have widgets for this widget, starting with main.
-    for (const area of ['main', 'top', 'left', 'right', 'menu', 'down']) {
+    for (const area of ['main', 'top', 'left', 'right', 'menu', 'down', 'collab-status', 'collab-presence']) {
       const widget = find(
         this.widgets(area as INotebookShell.Area),
         (w) => w.id === id
@@ -306,6 +414,9 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
           this.expandRight(id);
         } else if (area === 'down') {
           this._downPanel.show();
+          widget.activate();
+        } else if (area === 'collab-status' || area === 'collab-presence') {
+          // Collaboration widgets are always visible when enabled
           widget.activate();
         } else {
           widget.activate();
@@ -374,6 +485,20 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
         return this._rightHandler.addWidget(widget, rank);
       case 'down':
         return this._downPanel.addWidget(widget);
+      case 'collab-status':
+        if (this._isCollaborationEnabled) {
+          return this._collaborationStatusHandler.addWidget(widget, rank);
+        } else {
+          console.warn('Collaboration is not enabled');
+          return;
+        }
+      case 'collab-presence':
+        if (this._isCollaborationEnabled) {
+          return this._collaborationPresenceHandler.addWidget(widget, rank);
+        } else {
+          console.warn('Collaboration is not enabled');
+          return;
+        }
       default:
         console.warn(`Cannot add widget to area: ${area}`);
     }
@@ -419,6 +544,12 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
         return;
       case 'down':
         yield* this._downPanel.widgets;
+        return;
+      case 'collab-status':
+        yield* this._collaborationStatusHandler.panel.widgets;
+        return;
+      case 'collab-presence':
+        yield* this._collaborationPresenceHandler.panel.widgets;
         return;
       default:
         console.error(`This shell has no area called "${area}"`);
@@ -468,11 +599,247 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
   }
 
   /**
+   * Add a collaboration status bar widget to the shell.
+   */
+  addCollaborationStatusBar(widget: Widget, options?: DocumentRegistry.IOpenOptions): void {
+    if (!this._isCollaborationEnabled) {
+      console.warn('Cannot add collaboration status bar: collaboration is not enabled');
+      return;
+    }
+    
+    const rank = options?.rank ?? DEFAULT_RANK;
+    this._collaborationStatusHandler.addWidget(widget, rank);
+    
+    // Show the collaboration status handler panel if it was hidden
+    this._collaborationStatusHandler.panel.show();
+  }
+
+  /**
+   * Update the collaboration status information.
+   */
+  updateCollaborationStatus(status: INotebookShell.ICollaborationStatus): void {
+    if (!this._isCollaborationEnabled) {
+      return;
+    }
+
+    const previousStatus = { ...this._collaborationStatus };
+    this._collaborationStatus = { ...status };
+
+    // Update UI elements based on status changes
+    if (previousStatus.connectionStatus !== status.connectionStatus) {
+      this._updateConnectionStatusIndicators(status.connectionStatus);
+    }
+
+    if (previousStatus.userRole !== status.userRole) {
+      this._updateUserRoleIndicators(status.userRole);
+    }
+
+    if (previousStatus.activeUserCount !== status.activeUserCount) {
+      this._updateActiveUserCountIndicators(status.activeUserCount);
+    }
+  }
+
+  /**
+   * Show collaboration disconnected state.
+   */
+  showCollaborationDisconnected(): void {
+    if (!this._isCollaborationEnabled) {
+      return;
+    }
+
+    this.updateCollaborationStatus({
+      enabled: true,
+      connectionStatus: ICollaborationStatusManager.ConnectionStatus.Disconnected,
+      userRole: this._collaborationStatus.userRole,
+      activeUserCount: 0
+    });
+
+    // Add visual indicators for disconnected state
+    this._collaborationStatusHandler.panel.addClass('jp-collaboration-disconnected');
+    this._collaborationPresenceHandler.panel.addClass('jp-collaboration-disconnected');
+  }
+
+  /**
+   * Add a user presence panel widget to the shell.
+   */
+  addPresencePanel(widget: Widget, options?: DocumentRegistry.IOpenOptions): void {
+    if (!this._isCollaborationEnabled) {
+      console.warn('Cannot add presence panel: collaboration is not enabled');
+      return;
+    }
+
+    const rank = options?.rank ?? DEFAULT_RANK;
+    this._collaborationPresenceHandler.addWidget(widget, rank);
+    
+    // Show the collaboration presence handler panel if it was hidden
+    this._collaborationPresenceHandler.panel.show();
+  }
+
+  /**
+   * Update the presence indicators with current users.
+   */
+  updatePresenceIndicators(users: ReadonlyArray<ICollaborationAwareness.IUser>): void {
+    if (!this._isCollaborationEnabled) {
+      return;
+    }
+
+    this._activeUsers = [...users];
+    
+    // Update the active user count in collaboration status
+    this.updateCollaborationStatus({
+      ...this._collaborationStatus,
+      activeUserCount: users.length
+    });
+
+    // Notify widgets in the presence panel about user changes
+    for (const widget of this._collaborationPresenceHandler.panel.widgets) {
+      if (widget && 'updateUsers' in widget && typeof widget.updateUsers === 'function') {
+        (widget as any).updateUsers(users);
+      }
+    }
+  }
+
+  /**
+   * Show active users in the presence panel.
+   */
+  showActiveUsers(users: ReadonlyArray<ICollaborationAwareness.IUser>): void {
+    if (!this._isCollaborationEnabled) {
+      return;
+    }
+
+    this.updatePresenceIndicators(users);
+    
+    // Ensure presence panel is visible
+    this._collaborationPresenceHandler.panel.show();
+    this._collaborationPresenceHandler.panel.removeClass('jp-collaboration-disconnected');
+  }
+
+  /**
    * Handle a change on the down panel widgets
    */
   private _onTabPanelChanged(): void {
     if (this._downPanel.stackedPanel.widgets.length === 0) {
       this._downPanel.hide();
+    }
+  }
+
+  /**
+   * Check if collaboration feature flag is enabled.
+   */
+  private _checkCollaborationFeatureFlag(): boolean {
+    // Check for collaboration feature flag in various ways
+    // 1. Environment variable
+    if (typeof process !== 'undefined' && process.env?.JUPYTER_COLLABORATION_ENABLED === 'true') {
+      return true;
+    }
+
+    // 2. URL parameter
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('collaboration') === 'true') {
+        return true;
+      }
+    }
+
+    // 3. Local storage setting
+    if (typeof localStorage !== 'undefined') {
+      const storedSetting = localStorage.getItem('jupyter-notebook-collaboration-enabled');
+      if (storedSetting === 'true') {
+        return true;
+      }
+    }
+
+    // 4. Check if collaboration CSS class is present on body (set by server)
+    if (typeof document !== 'undefined') {
+      const body = document.body;
+      if (body && body.classList.contains('jp-collaboration-enabled')) {
+        return true;
+      }
+    }
+
+    // 5. Check for presence of collaboration server endpoint
+    if (typeof fetch !== 'undefined') {
+      // This will be checked asynchronously in real implementation
+      // For now, return false as default
+    }
+
+    return false;
+  }
+
+  /**
+   * Update connection status indicators in the UI.
+   */
+  private _updateConnectionStatusIndicators(status: ICollaborationStatusManager.ConnectionStatus): void {
+    const statusPanel = this._collaborationStatusHandler.panel;
+    const presencePanel = this._collaborationPresenceHandler.panel;
+
+    // Remove all connection status classes
+    statusPanel.removeClass('jp-collaboration-connecting');
+    statusPanel.removeClass('jp-collaboration-connected');
+    statusPanel.removeClass('jp-collaboration-disconnected');
+    statusPanel.removeClass('jp-collaboration-error');
+
+    presencePanel.removeClass('jp-collaboration-connecting');
+    presencePanel.removeClass('jp-collaboration-connected');
+    presencePanel.removeClass('jp-collaboration-disconnected');
+    presencePanel.removeClass('jp-collaboration-error');
+
+    // Add appropriate status class
+    const statusClass = `jp-collaboration-${status}`;
+    statusPanel.addClass(statusClass);
+    presencePanel.addClass(statusClass);
+
+    // Update status widgets
+    for (const widget of statusPanel.widgets) {
+      if (widget && 'updateConnectionStatus' in widget && typeof widget.updateConnectionStatus === 'function') {
+        (widget as any).updateConnectionStatus(status);
+      }
+    }
+  }
+
+  /**
+   * Update user role indicators in the UI.
+   */
+  private _updateUserRoleIndicators(role: ICollaborationStatusManager.UserRole): void {
+    const statusPanel = this._collaborationStatusHandler.panel;
+
+    // Remove all role classes
+    statusPanel.removeClass('jp-collaboration-viewer');
+    statusPanel.removeClass('jp-collaboration-editor');
+    statusPanel.removeClass('jp-collaboration-admin');
+
+    // Add appropriate role class
+    const roleClass = `jp-collaboration-${role}`;
+    statusPanel.addClass(roleClass);
+
+    // Update status widgets
+    for (const widget of statusPanel.widgets) {
+      if (widget && 'updateUserRole' in widget && typeof widget.updateUserRole === 'function') {
+        (widget as any).updateUserRole(role);
+      }
+    }
+  }
+
+  /**
+   * Update active user count indicators in the UI.
+   */
+  private _updateActiveUserCountIndicators(count: number): void {
+    // Update presence panel with user count
+    const presencePanel = this._collaborationPresenceHandler.panel;
+    presencePanel.dataset.userCount = count.toString();
+
+    // Update presence widgets
+    for (const widget of presencePanel.widgets) {
+      if (widget && 'updateUserCount' in widget && typeof widget.updateUserCount === 'function') {
+        (widget as any).updateUserCount(count);
+      }
+    }
+
+    // Update status widgets
+    for (const widget of this._collaborationStatusHandler.panel.widgets) {
+      if (widget && 'updateActiveUserCount' in widget && typeof widget.updateActiveUserCount === 'function') {
+        (widget as any).updateActiveUserCount(count);
+      }
     }
   }
 
@@ -493,6 +860,13 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
   );
   private _mainWidgetLoaded = new PromiseDelegate<void>();
   private _userLayout: INotebookShell.IUserLayout;
+
+  // Collaboration-related properties
+  private _collaborationStatusHandler: PanelHandler;
+  private _collaborationPresenceHandler: PanelHandler;
+  private _isCollaborationEnabled: boolean;
+  private _collaborationStatus: INotebookShell.ICollaborationStatus;
+  private _activeUsers: ReadonlyArray<ICollaborationAwareness.IUser> = [];
 }
 
 export namespace Private {

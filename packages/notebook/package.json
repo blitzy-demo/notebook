@@ -1,7 +1,7 @@
 {
-  "name": "@jupyter-notebook/notebook-extension",
+  "name": "@jupyter-notebook/notebook",
   "version": "7.5.0-alpha.0",
-  "description": "Jupyter Notebook - Notebook Extension",
+  "description": "Jupyter Notebook - Core Notebook Model and Collaboration Infrastructure",
   "homepage": "https://github.com/jupyter/notebook",
   "bugs": {
     "url": "https://github.com/jupyter/notebook/issues"
@@ -12,15 +12,9 @@
   },
   "license": "BSD-3-Clause",
   "author": "Project Jupyter",
-  "sideEffects": [
-    "style/**/*.css",
-    "style/index.js",
-    "style/collab/**/*.css",
-    "lib/collab/**/*.js"
-  ],
+  "sideEffects": false,
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
-  "style": "style/index.css",
   "directories": {
     "lib": "lib/"
   },
@@ -28,13 +22,9 @@
     "lib/*.d.ts",
     "lib/*.js.map",
     "lib/*.js",
-    "lib/collab/**/*.d.ts",
-    "lib/collab/**/*.js.map",
-    "lib/collab/**/*.js",
-    "schema/*.json",
-    "schema/collab/*.json",
-    "style/**/*.css",
-    "style/index.js"
+    "lib/**/*.d.ts",
+    "lib/**/*.js.map",
+    "lib/**/*.js"
   ],
   "scripts": {
     "build": "tsc -b",
@@ -48,19 +38,21 @@
     "@jupyterlab/application": "~4.5.0-alpha.0",
     "@jupyterlab/apputils": "~4.6.0-alpha.0",
     "@jupyterlab/cells": "~4.5.0-alpha.0",
-    "@jupyterlab/collaboration": "^4.5.0",
     "@jupyterlab/docmanager": "~4.5.0-alpha.0",
     "@jupyterlab/notebook": "~4.5.0-alpha.0",
+    "@jupyterlab/services": "~7.5.0-alpha.0",
     "@jupyterlab/settingregistry": "~4.5.0-alpha.0",
     "@jupyterlab/translation": "~4.5.0-alpha.0",
+    "@lumino/algorithm": "^2.0.2",
+    "@lumino/coreutils": "^2.2.0",
+    "@lumino/disposable": "^2.1.3",
     "@lumino/polling": "^2.1.4",
+    "@lumino/signaling": "^2.1.3",
     "@lumino/widgets": "^2.7.1",
-    "lib0": "^0.2.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "y-protocols": "^1.0.5",
+    "yjs": "^13.5.40",
     "y-websocket": "^1.4.0",
-    "yjs": "^13.5.40"
+    "y-protocols": "^1.0.5",
+    "lib0": "^0.2.0"
   },
   "devDependencies": {
     "rimraf": "^3.0.2",
@@ -68,10 +60,5 @@
   },
   "publishConfig": {
     "access": "public"
-  },
-  "jupyterlab": {
-    "extension": true,
-    "schemaDir": "schema"
-  },
-  "styleModule": "style/index.js"
+  }
 }

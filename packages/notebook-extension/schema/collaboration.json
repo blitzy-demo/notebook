@@ -1,0 +1,329 @@
+{
+  "jupyter.lab.setting-icon": "notebook-ui-components:jupyter",
+  "jupyter.lab.setting-icon-label": "Jupyter Notebook Collaboration",
+  "title": "Jupyter Notebook Collaboration",
+  "description": "Real-time collaborative editing settings for Jupyter Notebook v7",
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Enable Collaboration",
+      "description": "Enable real-time collaborative editing for notebooks. When enabled, multiple users can edit the same notebook simultaneously with sub-100ms synchronization latency.",
+      "default": false
+    },
+    "awareness": {
+      "type": "object",
+      "title": "User Presence and Awareness",
+      "description": "Settings for displaying collaborative user presence indicators",
+      "properties": {
+        "showPresenceAvatars": {
+          "type": "boolean",
+          "title": "Show User Avatars",
+          "description": "Display avatar icons for active collaborative users with unique colors and identifiers",
+          "default": true
+        },
+        "showRemoteCursors": {
+          "type": "boolean",
+          "title": "Show Remote Cursors",
+          "description": "Display real-time cursor positions and text selections from other users",
+          "default": true
+        },
+        "showActiveCellHighlight": {
+          "type": "boolean",
+          "title": "Show Active Cell Highlighting",
+          "description": "Highlight cells that are currently being edited by other users",
+          "default": true
+        },
+        "presenceUpdateLatency": {
+          "type": "number",
+          "title": "Presence Update Latency (ms)",
+          "description": "Maximum latency for updating presence indicators when user state changes",
+          "default": 100,
+          "minimum": 50,
+          "maximum": 1000
+        },
+        "avatarDisplayLimit": {
+          "type": "number",
+          "title": "Avatar Display Limit",
+          "description": "Maximum number of user avatars to display simultaneously",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 50
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
+    "locking": {
+      "type": "object",
+      "title": "Cell-level Locking Mechanism",
+      "description": "Settings for cell-level locking to prevent editing conflicts",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable Cell Locking",
+          "description": "Prevent concurrent edits to cells when locked by another user",
+          "default": true
+        },
+        "showLockIndicators": {
+          "type": "boolean",
+          "title": "Show Lock Indicators",
+          "description": "Display visual lock indicators showing which user is currently editing each cell",
+          "default": true
+        },
+        "lockTimeout": {
+          "type": "number",
+          "title": "Lock Timeout (minutes)",
+          "description": "Automatically release cell locks after this period of inactivity",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 60
+        },
+        "lockAcquisitionLatency": {
+          "type": "number",
+          "title": "Lock Acquisition Latency (ms)",
+          "description": "Maximum time to acquire a cell lock",
+          "default": 100,
+          "minimum": 50,
+          "maximum": 500
+        },
+        "respectLocksForExecution": {
+          "type": "boolean",
+          "title": "Respect Locks for Execution",
+          "description": "Prevent execution of cells that are locked by other users",
+          "default": true
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
+    "connection": {
+      "type": "object",
+      "title": "Collaboration Connection Settings",
+      "description": "WebSocket and server connection configuration for real-time collaboration",
+      "properties": {
+        "serverUrl": {
+          "type": "string",
+          "title": "Collaboration Server URL",
+          "description": "URL of the collaboration server endpoint for Yjs document synchronization. Leave empty to use default server.",
+          "default": "",
+          "format": "uri"
+        },
+        "reconnectionAttempts": {
+          "type": "number",
+          "title": "Reconnection Attempts",
+          "description": "Number of automatic reconnection attempts when WebSocket connection is lost",
+          "default": 5,
+          "minimum": 0,
+          "maximum": 20
+        },
+        "reconnectionDelay": {
+          "type": "number",
+          "title": "Reconnection Delay (ms)",
+          "description": "Initial delay between reconnection attempts",
+          "default": 1000,
+          "minimum": 100,
+          "maximum": 10000
+        },
+        "heartbeatInterval": {
+          "type": "number",
+          "title": "Heartbeat Interval (ms)",
+          "description": "Interval for sending heartbeat messages to maintain connection",
+          "default": 30000,
+          "minimum": 5000,
+          "maximum": 300000
+        },
+        "syncLatencyThreshold": {
+          "type": "number",
+          "title": "Sync Latency Threshold (ms)",
+          "description": "Warning threshold for document synchronization latency",
+          "default": 100,
+          "minimum": 50,
+          "maximum": 1000
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
+    "permissions": {
+      "type": "object",
+      "title": "Permissions and Access Control",
+      "description": "Role-based access control settings for collaborative notebooks",
+      "properties": {
+        "enforceServerSideValidation": {
+          "type": "boolean",
+          "title": "Enforce Server-side Validation",
+          "description": "Validate user permissions server-side for all collaboration operations",
+          "default": true
+        },
+        "adaptUIBasedOnRole": {
+          "type": "boolean",
+          "title": "Adapt UI Based on Role",
+          "description": "Hide or disable UI elements based on user access level (view-only, editor, admin)",
+          "default": true
+        },
+        "realTimePermissionUpdates": {
+          "type": "boolean",
+          "title": "Real-time Permission Updates",
+          "description": "Apply permission changes immediately without requiring session restart",
+          "default": true
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
+    "comments": {
+      "type": "object",
+      "title": "Comment and Review System",
+      "description": "Settings for collaborative commenting and review features",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable Comments",
+          "description": "Enable threaded commenting on notebook cells",
+          "default": false
+        },
+        "realTimeSync": {
+          "type": "boolean",
+          "title": "Real-time Comment Sync",
+          "description": "Synchronize comments in real-time across all collaborative users",
+          "default": true
+        },
+        "notificationsEnabled": {
+          "type": "boolean",
+          "title": "Comment Notifications",
+          "description": "Show notifications for new comments, replies, and resolutions",
+          "default": true
+        },
+        "maxCommentsPerCell": {
+          "type": "number",
+          "title": "Max Comments per Cell",
+          "description": "Maximum number of comment threads allowed per cell",
+          "default": 100,
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "autoResolveTimeout": {
+          "type": "number",
+          "title": "Auto-resolve Timeout (days)",
+          "description": "Automatically resolve comment threads after this period of inactivity (0 to disable)",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 365
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
+    "history": {
+      "type": "object",
+      "title": "Collaboration Change History",
+      "description": "Settings for tracking and managing collaborative change history",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable Change History",
+          "description": "Record comprehensive per-user change log with attribution",
+          "default": true
+        },
+        "retentionPeriod": {
+          "type": "number",
+          "title": "History Retention Period (days)",
+          "description": "Number of days to retain change history data",
+          "default": 30,
+          "minimum": 1,
+          "maximum": 365
+        },
+        "enableVersionComparison": {
+          "type": "boolean",
+          "title": "Enable Version Comparison",
+          "description": "Allow users to browse and compare different document versions",
+          "default": true
+        },
+        "maxHistoryEntries": {
+          "type": "number",
+          "title": "Max History Entries",
+          "description": "Maximum number of change history entries to maintain",
+          "default": 10000,
+          "minimum": 100,
+          "maximum": 100000
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
+    "performance": {
+      "type": "object",
+      "title": "Performance Settings",
+      "description": "Performance optimization settings for collaborative editing",
+      "properties": {
+        "maxConcurrentUsers": {
+          "type": "number",
+          "title": "Max Concurrent Users",
+          "description": "Maximum number of users allowed in a collaborative session",
+          "default": 50,
+          "minimum": 2,
+          "maximum": 100
+        },
+        "memoryOverheadLimit": {
+          "type": "number",
+          "title": "Memory Overhead Limit (%)",
+          "description": "Maximum memory overhead allowed for collaboration features as percentage of base usage",
+          "default": 20,
+          "minimum": 5,
+          "maximum": 100
+        },
+        "enableLowBandwidthMode": {
+          "type": "boolean",
+          "title": "Enable Low Bandwidth Mode",
+          "description": "Optimize for low-bandwidth connections by reducing update frequency",
+          "default": false
+        },
+        "batchUpdateInterval": {
+          "type": "number",
+          "title": "Batch Update Interval (ms)",
+          "description": "Interval for batching Yjs updates to optimize bandwidth usage",
+          "default": 100,
+          "minimum": 50,
+          "maximum": 1000
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
+    "gracefulDegradation": {
+      "type": "object",
+      "title": "Graceful Degradation",
+      "description": "Settings for fallback behavior when collaboration services are unavailable",
+      "properties": {
+        "enableOfflineMode": {
+          "type": "boolean",
+          "title": "Enable Offline Mode",
+          "description": "Continue notebook functionality when collaboration server is unavailable",
+          "default": true
+        },
+        "showConnectionStatus": {
+          "type": "boolean",
+          "title": "Show Connection Status",
+          "description": "Display collaboration server connection status in the UI",
+          "default": true
+        },
+        "autoRetryConnection": {
+          "type": "boolean",
+          "title": "Auto-retry Connection",
+          "description": "Automatically attempt to reconnect to collaboration server when connection is lost",
+          "default": true
+        },
+        "offlineModeWarning": {
+          "type": "boolean",
+          "title": "Show Offline Mode Warning",
+          "description": "Display warning message when operating in offline mode",
+          "default": true
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    }
+  },
+  "additionalProperties": false,
+  "type": "object"
+}
