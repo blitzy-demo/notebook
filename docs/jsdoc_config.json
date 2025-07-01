@@ -4,13 +4,32 @@
   },
   "plugins": ["plugins/markdown", "jsdoc_plugin.js"],
   "source": {
-    "include": ["../notebook/static/notebook/js/notebook.js"]
+    "include": [
+      "../notebook/static/notebook/js/notebook.js",
+      "../packages/notebook/src/collab/",
+      "../packages/notebook-extension/src/toolbar.tsx",
+      "../packages/notebook-extension/src/comments/",
+      "../packages/notebook-extension/src/permissions.tsx",
+      "../packages/application/src/tokens.ts",
+      "../notebook/handlers.py",
+      "../notebook/collab/"
+    ],
+    "includePattern": "\\.(js|ts|tsx|py)$",
+    "excludePattern": "node_modules/|__pycache__/|\\.d\\.ts$"
+  },
+  "opts": {
+    "recurse": true,
+    "readme": "../README.md"
   },
   "tags": {
-    "allowUnknownTags": true
+    "allowUnknownTags": true,
+    "dictionaries": ["jsdoc", "closure"]
   },
   "templates": {
     "cleverLinks": false,
     "monospaceLinks": false
+  },
+  "typescript": {
+    "moduleRoot": "../packages/"
   }
 }
