@@ -276,3 +276,435 @@ body[data-notebook='notebooks']
   text-decoration: underline;
   color: var(--jp-content-link-color);
 }
+
+/* ==========================================================================
+   Collaboration Styles
+   ========================================================================== */
+
+/**
+ * Base collaboration styling patterns for consistent integration
+ * with existing notebook themes and UI components
+ */
+
+/* Collaboration connection and sync status indicators */
+.jp-collaboration-status {
+  display: flex;
+  align-items: center;
+  font-size: var(--jp-ui-font-size1);
+  font-family: var(--jp-ui-font-family);
+  line-height: var(--jp-private-title-panel-height);
+  padding: 0 8px;
+  border-radius: 3px;
+  transition: all 0.2s ease;
+}
+
+.jp-collaboration-status-connected {
+  background-color: var(--jp-success-color3);
+  color: var(--jp-ui-inverse-font-color1);
+}
+
+.jp-collaboration-status-connecting {
+  background-color: var(--jp-warn-color3);
+  color: var(--jp-ui-inverse-font-color1);
+  animation: jp-collaboration-pulse 2s infinite;
+}
+
+.jp-collaboration-status-disconnected {
+  background-color: var(--jp-error-color3);
+  color: var(--jp-ui-inverse-font-color1);
+}
+
+.jp-collaboration-status-fallback {
+  background-color: var(--jp-layout-color3);
+  color: var(--jp-ui-font-color1);
+  border: 1px solid var(--jp-border-color2);
+}
+
+@keyframes jp-collaboration-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* YjsNotebookProvider integration styles */
+.jp-yjs-provider-indicator {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-right: 4px;
+}
+
+.jp-yjs-provider-indicator::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  transition: background-color 0.3s ease;
+}
+
+.jp-yjs-provider-synced::before {
+  background-color: var(--jp-success-color1);
+}
+
+.jp-yjs-provider-syncing::before {
+  background-color: var(--jp-warn-color1);
+  animation: jp-collaboration-pulse 1.5s infinite;
+}
+
+.jp-yjs-provider-error::before {
+  background-color: var(--jp-error-color1);
+}
+
+/* Collaboration toolbar styles */
+.jp-collaboration-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  background: var(--jp-layout-color1);
+  border-bottom: 1px solid var(--jp-border-color2);
+  min-height: 32px;
+}
+
+.jp-collaboration-user-list {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 200px;
+  overflow: hidden;
+}
+
+.jp-collaboration-user-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  font-size: 10px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  text-transform: uppercase;
+  position: relative;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.jp-collaboration-user-avatar:hover {
+  transform: scale(1.1);
+}
+
+.jp-collaboration-user-avatar.jp-collaboration-user-active::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  background-color: var(--jp-success-color1);
+  border: 2px solid var(--jp-layout-color1);
+  border-radius: 50%;
+}
+
+/* User avatar color variations */
+.jp-collaboration-user-avatar.jp-collaboration-user-color-0 { background-color: #FF6B6B; }
+.jp-collaboration-user-avatar.jp-collaboration-user-color-1 { background-color: #4ECDC4; }
+.jp-collaboration-user-avatar.jp-collaboration-user-color-2 { background-color: #45B7D1; }
+.jp-collaboration-user-avatar.jp-collaboration-user-color-3 { background-color: #96CEB4; }
+.jp-collaboration-user-avatar.jp-collaboration-user-color-4 { background-color: #FFEAA7; }
+.jp-collaboration-user-avatar.jp-collaboration-user-color-5 { background-color: #DDA0DD; }
+.jp-collaboration-user-avatar.jp-collaboration-user-color-6 { background-color: #98D8C8; }
+.jp-collaboration-user-avatar.jp-collaboration-user-color-7 { background-color: #F7DC6F; }
+
+/* AwarenessLayer component styles for remote user presence */
+.jp-awareness-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 1000;
+}
+
+.jp-awareness-cursor {
+  position: absolute;
+  width: 2px;
+  height: 20px;
+  pointer-events: none;
+  z-index: 1001;
+  transition: all 0.1s ease;
+}
+
+.jp-awareness-cursor::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -3px;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-bottom: 6px solid currentColor;
+}
+
+.jp-awareness-cursor-label {
+  position: absolute;
+  top: -24px;
+  left: -8px;
+  background: currentColor;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  white-space: nowrap;
+  font-weight: 500;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: all 0.2s ease;
+}
+
+.jp-awareness-cursor:hover .jp-awareness-cursor-label {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.jp-awareness-selection {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 2px;
+  opacity: 0.3;
+  z-index: 999;
+}
+
+/* Cell-level locking mechanism styles */
+.jp-cell-lock-indicator {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: var(--jp-layout-color2);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--jp-ui-font-color1);
+  z-index: 100;
+  opacity: 0;
+  transform: translateX(10px);
+  transition: all 0.2s ease;
+}
+
+.jp-cell-locked .jp-cell-lock-indicator {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.jp-cell-lock-indicator-icon {
+  width: 12px;
+  height: 12px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.jp-cell-lock-indicator-locked .jp-cell-lock-indicator-icon {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%23666' d='M4 4a4 4 0 118 0v2h1a1 1 0 011 1v6a1 1 0 01-1 1H3a1 1 0 01-1-1V7a1 1 0 011-1h1V4zm6 2V4a2 2 0 10-4 0v2h4z'/%3E%3C/svg%3E");
+}
+
+.jp-cell-lock-indicator-editing .jp-cell-lock-indicator-icon {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%23007acc' d='M11.013 1.427a1.75 1.75 0 012.474 0l1.086 1.086a1.75 1.75 0 010 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 01-.927-.928l.929-3.25a1.75 1.75 0 01.445-.758l8.61-8.61zm1.414 1.06a.25.25 0 00-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 000-.354l-1.086-1.086zM11.189 6.25L9.75 4.81l-6.286 6.287a.25.25 0 00-.064.108l-.558 1.953 1.953-.558a.249.249 0 00.108-.064l6.286-6.286z'/%3E%3C/svg%3E");
+}
+
+.jp-cell-lock-indicator-user {
+  color: var(--jp-ui-font-color2);
+  font-size: 10px;
+}
+
+/* Real-time editing visual feedback styles */
+.jp-cell-typing-indicator {
+  position: absolute;
+  bottom: 4px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: var(--jp-brand-color3);
+  color: white;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: all 0.2s ease;
+  z-index: 101;
+}
+
+.jp-cell-being-typed .jp-cell-typing-indicator {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.jp-cell-typing-dots {
+  display: flex;
+  gap: 2px;
+}
+
+.jp-cell-typing-dot {
+  width: 3px;
+  height: 3px;
+  background: currentColor;
+  border-radius: 50%;
+  animation: jp-typing-bounce 1.4s infinite both;
+}
+
+.jp-cell-typing-dot:nth-child(1) { animation-delay: -0.32s; }
+.jp-cell-typing-dot:nth-child(2) { animation-delay: -0.16s; }
+.jp-cell-typing-dot:nth-child(3) { animation-delay: 0s; }
+
+@keyframes jp-typing-bounce {
+  0%, 80%, 100% {
+    transform: scale(0.8);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Active cell highlighting for collaborative sessions */
+.jp-cell-collaborative-active {
+  position: relative;
+}
+
+.jp-cell-collaborative-active::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  border: 2px solid var(--jp-brand-color1);
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 1;
+  animation: jp-collaborative-glow 2s infinite;
+}
+
+@keyframes jp-collaborative-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 rgba(var(--jp-brand-color1-rgb), 0.2);
+  }
+  50% {
+    box-shadow: 0 0 8px rgba(var(--jp-brand-color1-rgb), 0.4);
+  }
+}
+
+/* Comment system integration styles */
+.jp-cell-comment-indicator {
+  position: absolute;
+  top: 4px;
+  left: 8px;
+  width: 16px;
+  height: 16px;
+  background: var(--jp-warn-color1);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 10px;
+  font-weight: bold;
+  cursor: pointer;
+  z-index: 102;
+  transition: all 0.2s ease;
+}
+
+.jp-cell-comment-indicator:hover {
+  transform: scale(1.1);
+  background: var(--jp-warn-color0);
+}
+
+.jp-cell-comment-thread {
+  position: absolute;
+  right: -300px;
+  top: 0;
+  width: 280px;
+  background: var(--jp-layout-color0);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 6px;
+  box-shadow: var(--jp-elevation-z6);
+  z-index: 1000;
+  opacity: 0;
+  transform: translateX(20px);
+  transition: all 0.3s ease;
+  pointer-events: none;
+}
+
+.jp-cell-comment-active .jp-cell-comment-thread {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+/* Collaboration permission indicators */
+.jp-collaboration-permission-indicator {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.jp-collaboration-permission-admin {
+  background: var(--jp-error-color3);
+  color: white;
+}
+
+.jp-collaboration-permission-edit {
+  background: var(--jp-success-color3);
+  color: white;
+}
+
+.jp-collaboration-permission-view {
+  background: var(--jp-layout-color3);
+  color: var(--jp-ui-font-color1);
+  border: 1px solid var(--jp-border-color2);
+}
+
+/* Responsive design for mobile collaboration */
+@media only screen and (max-width: 760px) {
+  .jp-collaboration-toolbar {
+    padding: 0 8px;
+    min-height: 28px;
+  }
+  
+  .jp-collaboration-user-list {
+    max-width: 120px;
+  }
+  
+  .jp-collaboration-user-avatar {
+    width: 20px;
+    height: 20px;
+    font-size: 8px;
+  }
+  
+  .jp-cell-comment-thread {
+    right: -280px;
+    width: 260px;
+  }
+  
+  .jp-cell-lock-indicator {
+    font-size: 10px;
+    padding: 1px 4px;
+  }
+}
