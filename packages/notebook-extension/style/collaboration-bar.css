@@ -1,0 +1,598 @@
+/*-----------------------------------------------------------------------------
+| Copyright (c) Jupyter Development Team.
+|
+| Distributed under the terms of the Modified BSD License.
+|----------------------------------------------------------------------------*/
+
+@import './variables.css';
+
+/**
+ * Collaboration Bar Component Styles
+ * 
+ * Provides styling for the collaboration bar component that displays in the
+ * notebook header, including user presence avatars, connection status indicators,
+ * and collaboration controls.
+ */
+
+/* =============================================================================
+   Collaboration Bar Container
+   ============================================================================= */
+
+.jp-collab-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: var(--jp-layout-color1);
+  border-bottom: 1px solid var(--jp-border-color2);
+  min-height: 48px;
+  position: relative;
+  transition: all var(--jp-collab-transition-duration) ease-in-out;
+}
+
+.jp-collab-bar--hidden {
+  display: none;
+}
+
+.jp-collab-bar--collapsed {
+  justify-content: flex-end;
+}
+
+/* =============================================================================
+   User Presence Section
+   ============================================================================= */
+
+.jp-collab-presence {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0; /* Allow flex shrinking */
+}
+
+.jp-collab-presence__label {
+  font-size: var(--jp-ui-font-size1);
+  color: var(--jp-ui-font-color2);
+  margin-right: 8px;
+  white-space: nowrap;
+}
+
+.jp-collab-presence__avatars {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.jp-collab-presence__avatar {
+  position: relative;
+  width: var(--jp-collab-avatar-size);
+  height: var(--jp-collab-avatar-size);
+  border-radius: 50%;
+  border: 2px solid var(--jp-collab-presence-color-default);
+  background: var(--jp-collab-presence-color-default);
+  color: var(--jp-layout-color0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--jp-collab-transition-duration) ease-in-out;
+  overflow: hidden;
+}
+
+.jp-collab-presence__avatar:hover {
+  transform: scale(1.1);
+  z-index: 10;
+}
+
+.jp-collab-presence__avatar--self {
+  border-color: var(--jp-accent-color1);
+  background: var(--jp-accent-color1);
+}
+
+.jp-collab-presence__avatar--active {
+  animation: jp-collab-pulse 2s infinite;
+}
+
+.jp-collab-presence__avatar--joining {
+  animation: jp-collab-avatar-join var(--jp-collab-transition-duration) ease-out;
+}
+
+.jp-collab-presence__avatar--leaving {
+  animation: jp-collab-avatar-leave var(--jp-collab-transition-duration) ease-in forwards;
+}
+
+.jp-collab-presence__avatar-image {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.jp-collab-presence__avatar-initials {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.jp-collab-presence__status {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--jp-layout-color1);
+  background: var(--jp-success-color1);
+}
+
+.jp-collab-presence__status--idle {
+  background: var(--jp-warn-color1);
+}
+
+.jp-collab-presence__status--away {
+  background: var(--jp-ui-font-color3);
+}
+
+.jp-collab-presence__tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--jp-layout-color3);
+  color: var(--jp-ui-font-color0);
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: var(--jp-ui-font-size0);
+  white-space: nowrap;
+  z-index: 1000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--jp-collab-transition-duration) ease-in-out;
+}
+
+.jp-collab-presence__avatar:hover .jp-collab-presence__tooltip {
+  opacity: 1;
+}
+
+.jp-collab-presence__more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--jp-collab-avatar-size);
+  height: var(--jp-collab-avatar-size);
+  border-radius: 50%;
+  background: var(--jp-layout-color2);
+  border: 2px solid var(--jp-border-color1);
+  color: var(--jp-ui-font-color1);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--jp-collab-transition-duration) ease-in-out;
+}
+
+.jp-collab-presence__more:hover {
+  background: var(--jp-layout-color3);
+  transform: scale(1.05);
+}
+
+/* =============================================================================
+   Connection Status Section
+   ============================================================================= */
+
+.jp-collab-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 16px;
+}
+
+.jp-collab-status__indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 500;
+  transition: all var(--jp-collab-transition-duration) ease-in-out;
+}
+
+.jp-collab-status__indicator--connected {
+  background: rgba(46, 204, 113, 0.1);
+  color: var(--jp-success-color1);
+  border: 1px solid rgba(46, 204, 113, 0.3);
+}
+
+.jp-collab-status__indicator--synchronized {
+  background: rgba(52, 152, 219, 0.1);
+  color: var(--jp-info-color1);
+  border: 1px solid rgba(52, 152, 219, 0.3);
+}
+
+.jp-collab-status__indicator--offline {
+  background: rgba(231, 76, 60, 0.1);
+  color: var(--jp-error-color1);
+  border: 1px solid rgba(231, 76, 60, 0.3);
+}
+
+.jp-collab-status__indicator--connecting {
+  background: rgba(243, 156, 18, 0.1);
+  color: var(--jp-warn-color1);
+  border: 1px solid rgba(243, 156, 18, 0.3);
+}
+
+.jp-collab-status__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.jp-collab-status__dot--pulsing {
+  animation: jp-collab-pulse 1.5s infinite;
+}
+
+.jp-collab-status__text {
+  line-height: 1;
+}
+
+/* =============================================================================
+   Lock Toggle Section
+   ============================================================================= */
+
+.jp-collab-lock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.jp-collab-lock__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 6px;
+  background: var(--jp-layout-color0);
+  color: var(--jp-ui-font-color1);
+  font-size: var(--jp-ui-font-size1);
+  cursor: pointer;
+  transition: all var(--jp-collab-transition-duration) ease-in-out;
+  outline: none;
+}
+
+.jp-collab-lock__toggle:hover {
+  background: var(--jp-layout-color2);
+  border-color: var(--jp-border-color2);
+}
+
+.jp-collab-lock__toggle:focus {
+  border-color: var(--jp-brand-color1);
+  box-shadow: 0 0 0 2px rgba(var(--jp-brand-color1-rgb), 0.2);
+}
+
+.jp-collab-lock__toggle--active {
+  background: rgba(243, 156, 18, 0.1);
+  border-color: var(--jp-collab-lock-icon-color);
+  color: var(--jp-collab-lock-icon-color);
+}
+
+.jp-collab-lock__toggle--active:hover {
+  background: rgba(243, 156, 18, 0.2);
+}
+
+.jp-collab-lock__icon {
+  width: 16px;
+  height: 16px;
+  transition: transform var(--jp-collab-transition-duration) ease-in-out;
+}
+
+.jp-collab-lock__toggle--active .jp-collab-lock__icon {
+  transform: rotate(-15deg);
+}
+
+.jp-collab-lock__text {
+  line-height: 1;
+  font-weight: 500;
+}
+
+/* =============================================================================
+   Dropdown Menu (Mobile)
+   ============================================================================= */
+
+.jp-collab-dropdown {
+  position: relative;
+  display: none;
+}
+
+.jp-collab-dropdown__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 6px;
+  background: var(--jp-layout-color0);
+  color: var(--jp-ui-font-color1);
+  font-size: var(--jp-ui-font-size1);
+  cursor: pointer;
+  transition: all var(--jp-collab-transition-duration) ease-in-out;
+  outline: none;
+}
+
+.jp-collab-dropdown__toggle:hover {
+  background: var(--jp-layout-color2);
+  border-color: var(--jp-border-color2);
+}
+
+.jp-collab-dropdown__toggle:focus {
+  border-color: var(--jp-brand-color1);
+  box-shadow: 0 0 0 2px rgba(var(--jp-brand-color1-rgb), 0.2);
+}
+
+.jp-collab-dropdown__icon {
+  width: 16px;
+  height: 16px;
+  transition: transform var(--jp-collab-transition-duration) ease-in-out;
+}
+
+.jp-collab-dropdown--open .jp-collab-dropdown__icon {
+  transform: rotate(180deg);
+}
+
+.jp-collab-dropdown__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 280px;
+  background: var(--jp-layout-color0);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 8px;
+  box-shadow: var(--jp-elevation-z6);
+  padding: 8px 0;
+  z-index: 1000;
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+  transition: all var(--jp-collab-transition-duration) ease-in-out;
+}
+
+.jp-collab-dropdown--open .jp-collab-dropdown__menu {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.jp-collab-dropdown__section {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.jp-collab-dropdown__section:last-child {
+  border-bottom: none;
+}
+
+.jp-collab-dropdown__section-title {
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 600;
+  color: var(--jp-ui-font-color2);
+  margin-bottom: 8px;
+}
+
+.jp-collab-dropdown__avatars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.jp-collab-dropdown__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.jp-collab-dropdown__lock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* =============================================================================
+   Animations
+   ============================================================================= */
+
+@keyframes jp-collab-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(52, 152, 219, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(52, 152, 219, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(52, 152, 219, 0);
+  }
+}
+
+@keyframes jp-collab-avatar-join {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes jp-collab-avatar-leave {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+}
+
+@keyframes jp-collab-status-change {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* =============================================================================
+   Responsive Design
+   ============================================================================= */
+
+/* Tablet adjustments */
+@media only screen and (max-width: 768px) {
+  .jp-collab-bar {
+    padding: 6px 12px;
+    min-height: 44px;
+  }
+  
+  .jp-collab-presence__label {
+    display: none;
+  }
+  
+  .jp-collab-presence__avatars {
+    gap: 2px;
+  }
+  
+  .jp-collab-status {
+    margin: 0 8px;
+  }
+  
+  .jp-collab-status__text {
+    display: none;
+  }
+}
+
+/* Mobile collapse - narrow screens */
+@media only screen and (max-width: 600px) {
+  .jp-collab-bar {
+    justify-content: flex-end;
+    padding: 8px 12px;
+  }
+  
+  .jp-collab-presence,
+  .jp-collab-status,
+  .jp-collab-lock {
+    display: none;
+  }
+  
+  .jp-collab-dropdown {
+    display: block;
+  }
+  
+  /* Ensure touch targets are at least 44x44px */
+  .jp-collab-dropdown__toggle {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  .jp-collab-presence__avatar {
+    min-height: 36px;
+    min-width: 36px;
+  }
+  
+  .jp-collab-lock__toggle {
+    min-height: 44px;
+    padding: 8px 16px;
+  }
+}
+
+/* Very narrow screens */
+@media only screen and (max-width: 480px) {
+  .jp-collab-bar {
+    padding: 6px 8px;
+  }
+  
+  .jp-collab-dropdown__menu {
+    right: -8px;
+    left: 8px;
+    min-width: unset;
+  }
+}
+
+/* =============================================================================
+   High Contrast Mode Support
+   ============================================================================= */
+
+@media (prefers-contrast: high) {
+  .jp-collab-presence__avatar {
+    border-width: 3px;
+  }
+  
+  .jp-collab-status__indicator {
+    border-width: 2px;
+  }
+  
+  .jp-collab-lock__toggle {
+    border-width: 2px;
+  }
+  
+  .jp-collab-dropdown__toggle {
+    border-width: 2px;
+  }
+}
+
+/* =============================================================================
+   Reduced Motion Support
+   ============================================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  .jp-collab-presence__avatar,
+  .jp-collab-status__indicator,
+  .jp-collab-lock__toggle,
+  .jp-collab-dropdown__toggle,
+  .jp-collab-dropdown__menu,
+  .jp-collab-lock__icon,
+  .jp-collab-dropdown__icon {
+    transition: none;
+  }
+  
+  .jp-collab-presence__avatar--active,
+  .jp-collab-status__dot--pulsing {
+    animation: none;
+  }
+  
+  .jp-collab-presence__avatar--joining,
+  .jp-collab-presence__avatar--leaving {
+    animation: none;
+  }
+}
+
+/* =============================================================================
+   Dark Theme Adjustments
+   ============================================================================= */
+
+[data-jp-theme-light="false"] .jp-collab-bar {
+  background: var(--jp-layout-color2);
+}
+
+[data-jp-theme-light="false"] .jp-collab-dropdown__menu {
+  background: var(--jp-layout-color1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+[data-jp-theme-light="false"] .jp-collab-presence__tooltip {
+  background: var(--jp-layout-color0);
+  border: 1px solid var(--jp-border-color1);
+}

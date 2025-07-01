@@ -1,0 +1,630 @@
+/*-----------------------------------------------------------------------------
+| Copyright (c) Jupyter Development Team.
+|
+| Distributed under the terms of the Modified BSD License.
+|----------------------------------------------------------------------------*/
+
+@import './variables.css';
+
+/**
+ * Permissions Dialog CSS Module
+ * 
+ * Provides styling for the permissions management dialog as specified in
+ * Section 7.6.7 of the technical specification. This modal overlay enables
+ * role-based access control for collaborative notebook sessions.
+ * 
+ * Key features:
+ * - Modal overlay with backdrop dimming
+ * - Collaborator management interface
+ * - Role assignment controls
+ * - Permissions capability matrix
+ * - Scope selection (notebook vs cell-level)
+ * - Accessibility compliance with ARIA support
+ * - Responsive design for mobile and desktop
+ */
+
+/* Modal Overlay and Backdrop - Section 7.6.7 */
+.jp-collab-permissions-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--jp-collab-transition-duration) ease-in-out,
+              visibility var(--jp-collab-transition-duration) ease-in-out;
+}
+
+.jp-collab-permissions-overlay.jp-mod-active {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Main Dialog Container */
+.jp-collab-permissions-dialog {
+  background: var(--jp-layout-color0);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 8px;
+  box-shadow: var(--jp-elevation-z16);
+  max-width: 800px;
+  width: 90%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  transform: scale(0.9);
+  transition: transform var(--jp-collab-transition-duration) ease-out;
+}
+
+.jp-collab-permissions-overlay.jp-mod-active .jp-collab-permissions-dialog {
+  transform: scale(1);
+}
+
+/* Dialog Header */
+.jp-collab-permissions-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--jp-border-color2);
+  background: var(--jp-layout-color1);
+  border-radius: 8px 8px 0 0;
+}
+
+.jp-collab-permissions-dialog__title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+  margin: 0;
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-collab-permissions-dialog__close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  color: var(--jp-ui-font-color1);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  transition: background-color 0.2s ease;
+}
+
+.jp-collab-permissions-dialog__close:hover {
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color0);
+}
+
+.jp-collab-permissions-dialog__close:focus {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 2px;
+}
+
+/* Dialog Content */
+.jp-collab-permissions-dialog__content {
+  padding: 20px;
+  overflow-y: auto;
+  flex-grow: 1;
+}
+
+.jp-collab-permissions-dialog__section {
+  margin-bottom: 24px;
+}
+
+.jp-collab-permissions-dialog__section:last-child {
+  margin-bottom: 0;
+}
+
+/* Scope Selection - Section 7.6.7 */
+.jp-collab-permissions-scope {
+  background: var(--jp-layout-color1);
+  padding: 16px;
+  border-radius: 6px;
+  border: 1px solid var(--jp-border-color2);
+}
+
+.jp-collab-permissions-scope__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+  margin: 0 0 12px 0;
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-collab-permissions-scope__options {
+  display: flex;
+  gap: 16px;
+}
+
+.jp-collab-permissions-scope__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.jp-collab-permissions-scope__radio {
+  margin: 0;
+}
+
+.jp-collab-permissions-scope__label {
+  font-size: 13px;
+  color: var(--jp-ui-font-color1);
+  cursor: pointer;
+  font-family: var(--jp-ui-font-family);
+}
+
+/* Collaborators Management Table */
+.jp-collab-permissions-collaborators {
+  background: var(--jp-layout-color0);
+}
+
+.jp-collab-permissions-collaborators__title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+  margin: 0 0 16px 0;
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-collab-permissions-collaborators__table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.jp-collab-permissions-collaborators__header {
+  background: var(--jp-layout-color2);
+}
+
+.jp-collab-permissions-collaborators__header-cell {
+  padding: 12px 16px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+  border-bottom: 1px solid var(--jp-border-color2);
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-collab-permissions-collaborators__row {
+  border-bottom: 1px solid var(--jp-border-color2);
+  transition: background-color 0.15s ease;
+}
+
+.jp-collab-permissions-collaborators__row:hover {
+  background-color: var(--jp-layout-color1);
+}
+
+.jp-collab-permissions-collaborators__row:last-child {
+  border-bottom: none;
+}
+
+.jp-collab-permissions-collaborators__cell {
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--jp-ui-font-color1);
+  vertical-align: middle;
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-collab-permissions-collaborators__name {
+  font-weight: 500;
+  color: var(--jp-ui-font-color0);
+}
+
+.jp-collab-permissions-collaborators__email {
+  color: var(--jp-ui-font-color2);
+  font-size: 12px;
+}
+
+.jp-collab-permissions-collaborators__role-select {
+  background: var(--jp-layout-color0);
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 13px;
+  color: var(--jp-ui-font-color1);
+  cursor: pointer;
+  min-width: 100px;
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-collab-permissions-collaborators__role-select:focus {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 1px;
+}
+
+.jp-collab-permissions-collaborators__owner-badge {
+  background: var(--jp-brand-color1);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Add Collaborator Section */
+.jp-collab-permissions-add-collaborator {
+  margin-top: 16px;
+  padding: 16px;
+  background: var(--jp-layout-color1);
+  border-radius: 6px;
+  border: 1px solid var(--jp-border-color2);
+}
+
+.jp-collab-permissions-add-collaborator__form {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.jp-collab-permissions-add-collaborator__field {
+  flex: 1;
+}
+
+.jp-collab-permissions-add-collaborator__label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--jp-ui-font-color0);
+  margin-bottom: 6px;
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-collab-permissions-add-collaborator__input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--jp-ui-font-color1);
+  background: var(--jp-layout-color0);
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-collab-permissions-add-collaborator__input:focus {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 1px;
+  border-color: var(--jp-brand-color1);
+}
+
+.jp-collab-permissions-add-collaborator__select {
+  padding: 8px 12px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--jp-ui-font-color1);
+  background: var(--jp-layout-color0);
+  cursor: pointer;
+  min-width: 120px;
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-collab-permissions-add-collaborator__select:focus {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 1px;
+  border-color: var(--jp-brand-color1);
+}
+
+.jp-collab-permissions-add-collaborator__button {
+  background: var(--jp-brand-color1);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  white-space: nowrap;
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-collab-permissions-add-collaborator__button:hover {
+  background: var(--jp-brand-color2);
+}
+
+.jp-collab-permissions-add-collaborator__button:focus {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 2px;
+}
+
+.jp-collab-permissions-add-collaborator__button:disabled {
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color2);
+  cursor: not-allowed;
+}
+
+/* Role Permissions Matrix - Section 7.6.7 */
+.jp-collab-permissions-roles {
+  background: var(--jp-layout-color0);
+}
+
+.jp-collab-permissions-roles__title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+  margin: 0 0 16px 0;
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-collab-permissions-roles__table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.jp-collab-permissions-roles__header {
+  background: var(--jp-layout-color2);
+}
+
+.jp-collab-permissions-roles__header-cell {
+  padding: 12px 16px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+  border-bottom: 1px solid var(--jp-border-color2);
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-collab-permissions-roles__header-cell:first-child {
+  text-align: left;
+}
+
+.jp-collab-permissions-roles__row {
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.jp-collab-permissions-roles__row:last-child {
+  border-bottom: none;
+}
+
+.jp-collab-permissions-roles__cell {
+  padding: 12px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--jp-ui-font-color1);
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-collab-permissions-roles__cell:first-child {
+  text-align: left;
+  font-weight: 500;
+  color: var(--jp-ui-font-color0);
+}
+
+.jp-collab-permissions-roles__permission {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.jp-collab-permissions-roles__permission--allowed {
+  background: var(--jp-success-color1);
+  color: white;
+}
+
+.jp-collab-permissions-roles__permission--denied {
+  background: var(--jp-error-color1);
+  color: white;
+}
+
+/* Dialog Actions */
+.jp-collab-permissions-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--jp-border-color2);
+  background: var(--jp-layout-color1);
+  border-radius: 0 0 8px 8px;
+}
+
+.jp-collab-permissions-dialog__action {
+  padding: 8px 20px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-collab-permissions-dialog__action:focus {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 2px;
+}
+
+.jp-collab-permissions-dialog__action--cancel {
+  background: var(--jp-layout-color0);
+  color: var(--jp-ui-font-color1);
+  border-color: var(--jp-border-color2);
+}
+
+.jp-collab-permissions-dialog__action--cancel:hover {
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color0);
+}
+
+.jp-collab-permissions-dialog__action--primary {
+  background: var(--jp-brand-color1);
+  color: white;
+}
+
+.jp-collab-permissions-dialog__action--primary:hover {
+  background: var(--jp-brand-color2);
+}
+
+.jp-collab-permissions-dialog__action--primary:disabled {
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color2);
+  cursor: not-allowed;
+}
+
+/* Responsive Design - Section 7.8.1 */
+@media only screen and (max-width: 768px) {
+  .jp-collab-permissions-dialog {
+    width: 95%;
+    max-height: 95vh;
+    margin: 2.5vh auto;
+  }
+
+  .jp-collab-permissions-dialog__content {
+    padding: 16px;
+  }
+
+  .jp-collab-permissions-collaborators__table,
+  .jp-collab-permissions-roles__table {
+    font-size: 12px;
+  }
+
+  .jp-collab-permissions-collaborators__cell,
+  .jp-collab-permissions-roles__cell {
+    padding: 8px 12px;
+  }
+
+  .jp-collab-permissions-add-collaborator__form {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .jp-collab-permissions-add-collaborator__form .jp-collab-permissions-add-collaborator__field {
+    flex: none;
+  }
+
+  .jp-collab-permissions-dialog__actions {
+    flex-direction: column-reverse;
+  }
+
+  .jp-collab-permissions-dialog__action {
+    width: 100%;
+    text-align: center;
+  }
+}
+
+@media only screen and (max-width: 480px) {
+  .jp-collab-permissions-scope__options {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .jp-collab-permissions-collaborators__table,
+  .jp-collab-permissions-roles__table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .jp-collab-permissions-dialog__header {
+    padding: 12px 16px;
+  }
+
+  .jp-collab-permissions-dialog__title {
+    font-size: 16px;
+  }
+}
+
+/* Focus Management and Keyboard Navigation - Section 7.8.3 */
+.jp-collab-permissions-dialog__content:focus {
+  outline: none;
+}
+
+.jp-collab-permissions-dialog[role="dialog"] {
+  /* Ensures proper ARIA dialog semantics */
+}
+
+/* High Contrast Mode Support - Section 7.8.3 */
+@media (prefers-high-contrast: active) {
+  .jp-collab-permissions-overlay {
+    background-color: rgba(0, 0, 0, 0.8);
+  }
+
+  .jp-collab-permissions-dialog {
+    border-width: 2px;
+  }
+
+  .jp-collab-permissions-roles__permission--allowed,
+  .jp-collab-permissions-roles__permission--denied {
+    border: 1px solid;
+  }
+}
+
+/* Reduced Motion Support - Section 7.8.4 */
+@media (prefers-reduced-motion: reduce) {
+  .jp-collab-permissions-overlay,
+  .jp-collab-permissions-dialog,
+  .jp-collab-permissions-dialog__action {
+    transition: none;
+  }
+}
+
+/* Loading States */
+.jp-collab-permissions-dialog--loading {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.jp-collab-permissions-dialog--loading::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  margin: -12px 0 0 -12px;
+  border: 2px solid var(--jp-border-color2);
+  border-top-color: var(--jp-brand-color1);
+  border-radius: 50%;
+  animation: jp-collab-permissions-spinner 1s linear infinite;
+}
+
+@keyframes jp-collab-permissions-spinner {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Error States */
+.jp-collab-permissions-dialog__error {
+  background: var(--jp-error-color3);
+  color: var(--jp-error-color0);
+  padding: 12px 16px;
+  border-radius: 4px;
+  margin-bottom: 16px;
+  border: 1px solid var(--jp-error-color1);
+  font-size: 13px;
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-collab-permissions-dialog__error-icon {
+  display: inline-block;
+  margin-right: 8px;
+  font-weight: bold;
+}

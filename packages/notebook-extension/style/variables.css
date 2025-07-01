@@ -1,6 +1,15 @@
 :root {
+  /* Existing notebook-specific variables for backward compatibility */
   --jp-notebook-toolbar-margin-bottom: 20px;
   --jp-notebook-padding-offset: 20px;
-
   --jp-kernel-status-padding: 5px;
+
+  /* Collaboration theming variables per Section 7.8.2 */
+  --jp-collab-avatar-size: 32px;
+  --jp-collab-presence-color-default: #3498db;
+  --jp-collab-lock-icon-color: #f39c12;
+  --jp-collab-comment-pin-color: #2ecc71;
+
+  /* Animation timing variables for collaboration transitions per Section 7.8.4 */
+  --jp-collab-transition-duration: 300ms;
 }
