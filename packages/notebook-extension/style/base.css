@@ -6,6 +6,38 @@
 
 @import './variables.css';
 
+/* Collaboration CSS Variables */
+:root {
+  /* Avatar and presence theming */
+  --jp-collab-avatar-size: 32px;
+  --jp-collab-avatar-size-mobile: 24px;
+  --jp-collab-presence-color-default: #3498db;
+  --jp-collab-presence-opacity: 0.7;
+  
+  /* Lock system theming */
+  --jp-collab-lock-icon-color: #f39c12;
+  --jp-collab-lock-highlight-color: rgba(243, 156, 18, 0.1);
+  --jp-collab-unlock-icon-color: var(--jp-ui-font-color1);
+  
+  /* Comment system theming */
+  --jp-collab-comment-pin-color: #2ecc71;
+  --jp-collab-comment-highlight-color: rgba(46, 204, 113, 0.1);
+  --jp-collab-comment-thread-background: var(--jp-layout-color1);
+  
+  /* Collaboration highlight effects */
+  --jp-collab-cell-highlight-opacity: 0.05;
+  --jp-collab-cell-border-width: 2px;
+  --jp-collab-cursor-highlight-opacity: 0.3;
+  
+  /* Animation timings */
+  --jp-collab-transition-fast: 150ms;
+  --jp-collab-transition-normal: 300ms;
+  --jp-collab-transition-slow: 500ms;
+  
+  /* Touch targets for mobile */
+  --jp-collab-touch-target-min: 44px;
+}
+
 /**
   Document oriented look for the notebook.
   This includes changes to the look and feel of the JupyterLab Notebook
@@ -111,6 +143,84 @@ body[data-notebook='notebooks']
   body[data-notebook='notebooks'] .jp-MarkdownCell .jp-cell-toolbar,
   body[data-notebook='notebooks'] .jp-RawCell .jp-cell-toolbar {
     top: calc(0.5 * var(--jp-notebook-padding));
+  }
+
+  /* Collaboration mobile adaptations */
+  .jp-collab-bar {
+    padding: 0 4px;
+    min-height: 32px;
+  }
+
+  .jp-collab-bar__section {
+    gap: 2px;
+  }
+
+  .jp-collab-presence__avatar {
+    width: var(--jp-collab-avatar-size-mobile);
+    height: var(--jp-collab-avatar-size-mobile);
+    font-size: 10px;
+  }
+
+  .jp-collab-presence__list {
+    max-width: 120px;
+  }
+
+  .jp-collab-lock-indicator,
+  .jp-collab-comment-pin {
+    /* Enlarge touch targets for mobile */
+    min-width: var(--jp-collab-touch-target-min);
+    min-height: var(--jp-collab-touch-target-min);
+    width: auto;
+    height: auto;
+  }
+
+  /* Hide detailed status text on very small screens */
+  .jp-collab-bar__status {
+    display: none;
+  }
+
+  .jp-collab-history-indicator {
+    font-size: 10px;
+  }
+}
+
+/* Additional responsive breakpoint for collaboration bar collapse */
+@media only screen and (max-width: 600px) {
+  .jp-collab-bar {
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+
+  .jp-collab-bar__section:not(:first-child) {
+    /* Collapse secondary sections into dropdown or secondary row */
+    flex-basis: 100%;
+    justify-content: flex-start;
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px solid var(--jp-border-color2);
+  }
+
+  .jp-collab-presence__list {
+    max-width: 80px;
+  }
+
+  .jp-collab-presence__count {
+    font-size: 10px;
+  }
+}
+
+/* Tablet and medium screen adaptations */
+@media only screen and (min-width: 761px) and (max-width: 1024px) {
+  .jp-collab-bar {
+    padding: 0 12px;
+  }
+
+  .jp-collab-presence__list {
+    max-width: 160px;
+  }
+
+  .jp-collab-bar__section {
+    gap: 6px;
   }
 }
 
@@ -275,4 +385,525 @@ body[data-notebook='notebooks']
 .jp-skiplink:focus-within a {
   text-decoration: underline;
   color: var(--jp-content-link-color);
+}
+
+/* ===========================
+   Collaboration UI Styles
+   Using BEM methodology with jp-collab- prefix
+   =========================== */
+
+/* Collaboration Bar - Main collaboration controls */
+.jp-collab-bar {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  background: var(--jp-layout-color1);
+  border-bottom: 1px solid var(--jp-border-color2);
+  min-height: var(--jp-private-title-panel-height);
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.jp-collab-bar__section {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.jp-collab-bar__divider {
+  width: 1px;
+  height: 20px;
+  background: var(--jp-border-color2);
+  margin: 0 4px;
+}
+
+.jp-collab-bar__status {
+  font-size: var(--jp-ui-font-size1);
+  color: var(--jp-ui-font-color1);
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-collab-bar__status--connected {
+  color: var(--jp-success-color1);
+}
+
+.jp-collab-bar__status--disconnected {
+  color: var(--jp-error-color1);
+}
+
+.jp-collab-bar__status--connecting {
+  color: var(--jp-warn-color1);
+}
+
+/* User Presence System - Avatars and indicators */
+.jp-collab-presence {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.jp-collab-presence__list {
+  display: flex;
+  align-items: center;
+  gap: -2px; /* Slight overlap for space efficiency */
+  max-width: 200px;
+  overflow: hidden;
+}
+
+.jp-collab-presence__avatar {
+  width: var(--jp-collab-avatar-size);
+  height: var(--jp-collab-avatar-size);
+  border-radius: 50%;
+  border: 2px solid var(--jp-layout-color0);
+  background: var(--jp-collab-presence-color-default);
+  color: var(--jp-layout-color0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--jp-ui-font-family);
+  cursor: pointer;
+  transition: transform var(--jp-collab-transition-fast) ease;
+  z-index: 1;
+  position: relative;
+}
+
+.jp-collab-presence__avatar:hover {
+  transform: scale(1.1);
+  z-index: 2;
+}
+
+.jp-collab-presence__avatar--self {
+  border-color: var(--jp-brand-color1);
+  box-shadow: 0 0 0 1px var(--jp-brand-color1);
+}
+
+.jp-collab-presence__avatar--editing {
+  animation: jp-collab-pulse var(--jp-collab-transition-slow) ease-in-out infinite alternate;
+}
+
+.jp-collab-presence__tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--jp-layout-color3);
+  color: var(--jp-ui-font-color0);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: var(--jp-ui-font-size0);
+  white-space: nowrap;
+  z-index: 1000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--jp-collab-transition-fast) ease;
+}
+
+.jp-collab-presence__avatar:hover .jp-collab-presence__tooltip {
+  opacity: 1;
+}
+
+.jp-collab-presence__count {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color1);
+  margin-left: 4px;
+}
+
+/* Cell Locking System - Lock indicators and controls */
+.jp-collab-cell--locked {
+  position: relative;
+}
+
+.jp-collab-cell--locked::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--jp-collab-lock-highlight-color);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.jp-collab-lock-indicator {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  background: var(--jp-layout-color0);
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  transition: all var(--jp-collab-transition-normal) ease;
+}
+
+.jp-collab-lock-indicator--locked {
+  color: var(--jp-collab-lock-icon-color);
+  background: rgba(243, 156, 18, 0.1);
+  border-color: var(--jp-collab-lock-icon-color);
+}
+
+.jp-collab-lock-indicator--unlocked {
+  color: var(--jp-collab-unlock-icon-color);
+}
+
+.jp-collab-lock-indicator:hover {
+  transform: scale(1.1);
+  box-shadow: var(--jp-elevation-z2);
+}
+
+/* Cell Collaboration Highlights - Subtle effects for cells being edited */
+.jp-collab-cell-highlight {
+  position: relative;
+  transition: all var(--jp-collab-transition-normal) ease;
+}
+
+.jp-collab-cell-highlight--editing {
+  box-shadow: inset 0 0 0 var(--jp-collab-cell-border-width) var(--jp-collab-presence-color-default);
+}
+
+.jp-collab-cell-highlight--editing::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: currentColor;
+  opacity: var(--jp-collab-cell-highlight-opacity);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Cursor indicators for real-time collaboration */
+.jp-collab-cursor {
+  position: absolute;
+  width: 2px;
+  background: var(--jp-collab-presence-color-default);
+  z-index: 100;
+  pointer-events: none;
+  transition: all var(--jp-collab-transition-fast) ease;
+}
+
+.jp-collab-cursor__label {
+  position: absolute;
+  top: -24px;
+  left: 0;
+  background: var(--jp-collab-presence-color-default);
+  color: var(--jp-layout-color0);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: var(--jp-ui-font-size0);
+  font-family: var(--jp-ui-font-family);
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+/* Comment System - Pins and thread indicators */
+.jp-collab-comment-pin {
+  position: absolute;
+  top: 4px;
+  left: -20px;
+  width: 16px;
+  height: 16px;
+  background: var(--jp-collab-comment-pin-color);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--jp-layout-color0);
+  font-size: 10px;
+  cursor: pointer;
+  z-index: 10;
+  transition: all var(--jp-collab-transition-fast) ease;
+}
+
+.jp-collab-comment-pin:hover {
+  transform: scale(1.2);
+  box-shadow: var(--jp-elevation-z2);
+}
+
+.jp-collab-comment-pin--unresolved {
+  background: var(--jp-warn-color1);
+}
+
+.jp-collab-comment-pin--resolved {
+  background: var(--jp-success-color1);
+}
+
+.jp-collab-cell--commented {
+  position: relative;
+}
+
+.jp-collab-cell--commented::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--jp-collab-comment-highlight-color);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* History and Version Controls - Integrated with existing status indicators */
+.jp-collab-history-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color1);
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-collab-history-indicator__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--jp-brand-color1);
+}
+
+.jp-collab-history-indicator__dot--modified {
+  background: var(--jp-warn-color1);
+}
+
+/* Permissions Display - Role indicators */
+.jp-collab-permission-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 12px;
+  font-size: var(--jp-ui-font-size0);
+  font-family: var(--jp-ui-font-family);
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  border: 1px solid var(--jp-border-color2);
+}
+
+.jp-collab-permission-badge--owner {
+  background: var(--jp-brand-color3);
+  color: var(--jp-brand-color1);
+  border-color: var(--jp-brand-color1);
+}
+
+.jp-collab-permission-badge--editor {
+  background: var(--jp-success-color3);
+  color: var(--jp-success-color1);
+  border-color: var(--jp-success-color1);
+}
+
+.jp-collab-permission-badge--viewer {
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  border-color: var(--jp-border-color2);
+}
+
+/* Animation keyframes */
+@keyframes jp-collab-pulse {
+  0% {
+    transform: scale(1);
+  }
+  100% {
+    transform: scale(1.05);
+  }
+}
+
+@keyframes jp-collab-fade-in {
+  0% {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes jp-collab-slide-in {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+/* Integration with existing kernel status and checkpoint displays */
+body[data-notebook='notebooks'] .jp-NotebookPanel-toolbar {
+  /* Ensure collaboration bar integrates with existing toolbar */
+  position: relative;
+}
+
+body[data-notebook='notebooks'] .jp-NotebookKernelStatus {
+  /* Add spacing for collaboration indicators */
+  margin-right: 8px;
+}
+
+body[data-notebook='notebooks'] .jp-NotebookCheckpoint {
+  /* Integrate with collaboration history */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ===========================
+   Collaboration Enhancement Styles
+   Preserving existing functionality while adding collaboration
+   =========================== */
+
+/* Ensure collaboration features don't interfere with existing cell operations */
+.jp-Notebook-cell {
+  /* Maintain existing cell functionality with collaboration overlay */
+  position: relative;
+}
+
+.jp-Notebook-cell .jp-collab-lock-indicator,
+.jp-Notebook-cell .jp-collab-comment-pin {
+  /* Ensure collaboration indicators don't block cell interactions */
+  pointer-events: auto;
+}
+
+.jp-Notebook-cell.jp-mod-selected {
+  /* Preserve cell selection highlighting even with collaboration highlights */
+  z-index: 2;
+}
+
+.jp-Notebook-cell.jp-mod-selected .jp-collab-cell-highlight--editing::after {
+  /* Reduce collaboration highlight opacity when cell is selected */
+  opacity: calc(var(--jp-collab-cell-highlight-opacity) * 0.5);
+}
+
+/* Accessibility enhancements for collaboration features */
+.jp-collab-presence__avatar {
+  /* Screen reader support for presence avatars */
+  role: status;
+  aria-label: "User presence indicator";
+}
+
+.jp-collab-lock-indicator {
+  /* Accessible lock controls */
+  role: button;
+  aria-label: "Cell lock control";
+  aria-pressed: "false";
+}
+
+.jp-collab-lock-indicator--locked {
+  aria-pressed: "true";
+  aria-label: "Cell is locked - click to unlock";
+}
+
+.jp-collab-comment-pin {
+  /* Accessible comment controls */
+  role: button;
+  aria-label: "View or add comments";
+}
+
+/* Focus management for keyboard navigation */
+.jp-collab-presence__avatar:focus,
+.jp-collab-lock-indicator:focus,
+.jp-collab-comment-pin:focus {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 2px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .jp-collab-cell-highlight--editing {
+    box-shadow: inset 0 0 0 calc(var(--jp-collab-cell-border-width) * 2) var(--jp-collab-presence-color-default);
+  }
+
+  .jp-collab-presence__avatar {
+    border-width: 3px;
+  }
+
+  .jp-collab-lock-indicator,
+  .jp-collab-comment-pin {
+    border-width: 2px;
+    font-weight: bold;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .jp-collab-presence__avatar,
+  .jp-collab-lock-indicator,
+  .jp-collab-comment-pin,
+  .jp-collab-cell-highlight,
+  .jp-collab-cursor {
+    transition: none;
+    animation: none;
+  }
+
+  .jp-collab-presence__avatar--editing {
+    /* Use static indicator instead of animation */
+    border-style: dashed;
+    animation: none;
+  }
+}
+
+/* Integration with dark/light theme switching */
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Adjust collaboration colors for dark mode */
+    --jp-collab-presence-color-default: #5dade2;
+    --jp-collab-lock-icon-color: #f7dc6f;
+    --jp-collab-comment-pin-color: #58d68d;
+  }
+}
+
+/* Print styles - hide collaboration UI when printing */
+@media print {
+  .jp-collab-bar,
+  .jp-collab-presence,
+  .jp-collab-lock-indicator,
+  .jp-collab-comment-pin,
+  .jp-collab-cursor {
+    display: none !important;
+  }
+
+  .jp-collab-cell-highlight--editing::after,
+  .jp-collab-cell--locked::before,
+  .jp-collab-cell--commented::before {
+    display: none !important;
+  }
+}
+
+/* Graceful degradation when collaboration is disabled */
+.jp-notebook-no-collaboration .jp-collab-bar,
+.jp-notebook-no-collaboration .jp-collab-presence,
+.jp-notebook-no-collaboration .jp-collab-lock-indicator,
+.jp-notebook-no-collaboration .jp-collab-comment-pin {
+  display: none;
+}
+
+/* Ensure collaboration features work with existing extensions */
+.jp-Notebook .jp-collab-cell-highlight,
+.jp-Notebook .jp-collab-presence__avatar,
+.jp-Notebook .jp-collab-lock-indicator {
+  /* Ensure collaboration elements respect notebook's existing z-index stack */
+  z-index: inherit;
+}
+
+/* Performance optimization for many collaborators */
+.jp-collab-presence__list:has(.jp-collab-presence__avatar:nth-child(n+10)) {
+  /* Optimize rendering when many users are present */
+  overflow: hidden;
+  position: relative;
+}
+
+.jp-collab-presence__list:has(.jp-collab-presence__avatar:nth-child(n+10))::after {
+  content: "...";
+  position: absolute;
+  right: 0;
+  background: var(--jp-layout-color1);
+  padding: 0 4px;
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color1);
 }
