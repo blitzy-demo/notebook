@@ -1,0 +1,843 @@
+/*-----------------------------------------------------------------------------
+| Copyright (c) Jupyter Development Team.
+|
+| Distributed under the terms of the Modified BSD License.
+|----------------------------------------------------------------------------*/
+
+/**
+ * Comment and Discussion System Styles for Jupyter Notebook v7
+ * 
+ * This module provides comprehensive styling for the collaborative comment
+ * sidebar, including threaded discussions, reply interfaces, status indicators,
+ * and smooth animations per Section 7.6.8 and 7.8.4 specifications.
+ */
+
+@import './variables.css';
+
+/* ===========================
+   Comment Sidebar Panel
+   Dockable component in right area per Section 7.6.8
+   =========================== */
+
+.jp-collab-comment-sidebar {
+  position: relative;
+  width: 300px;
+  min-width: 250px;
+  max-width: 400px;
+  height: 100%;
+  background: var(--jp-layout-color0);
+  border-left: 1px solid var(--jp-border-color2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 100;
+  
+  /* Slide-in animation from right per Section 7.8.4 */
+  transform: translateX(0);
+  transition: transform var(--jp-collab-transition-normal) ease-in-out;
+}
+
+.jp-collab-comment-sidebar.jp-mod-hidden {
+  /* Slide-out animation to right (left-to-right close) per Section 7.8.4 */
+  transform: translateX(100%);
+}
+
+.jp-collab-comment-sidebar.jp-mod-opening {
+  /* Slide-in animation from right (right-to-left open) per Section 7.8.4 */
+  animation: jp-collab-comment-slide-in var(--jp-collab-transition-normal) ease-in-out;
+}
+
+.jp-collab-comment-sidebar.jp-mod-closing {
+  /* Slide-out animation to right per Section 7.8.4 */
+  animation: jp-collab-comment-slide-out var(--jp-collab-transition-normal) ease-in-out;
+}
+
+/* Comment Sidebar Header */
+.jp-collab-comment-sidebar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--jp-layout-color1);
+  border-bottom: 1px solid var(--jp-border-color2);
+  min-height: var(--jp-private-title-panel-height);
+  flex-shrink: 0;
+}
+
+.jp-collab-comment-sidebar__title {
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+  margin: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jp-collab-comment-sidebar__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.jp-collab-comment-sidebar__refresh,
+.jp-collab-comment-sidebar__close {
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--jp-ui-font-color1);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 2px;
+  transition: all var(--jp-collab-transition-fast) ease;
+}
+
+.jp-collab-comment-sidebar__refresh:hover,
+.jp-collab-comment-sidebar__close:hover {
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color0);
+}
+
+.jp-collab-comment-sidebar__refresh:focus,
+.jp-collab-comment-sidebar__close:focus {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 1px;
+}
+
+/* Comment Sidebar Content Area */
+.jp-collab-comment-sidebar__content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.jp-collab-comment-sidebar__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--jp-ui-font-color2);
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  text-align: center;
+  padding: 20px;
+}
+
+.jp-collab-comment-sidebar__empty-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
+
+/* ===========================
+   Comment Threads
+   Expandable/collapsible containers per Section 7.6.8
+   =========================== */
+
+.jp-collab-comment-thread {
+  background: var(--jp-collab-comment-thread-background);
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 6px;
+  overflow: hidden;
+  transition: all var(--jp-collab-transition-fast) ease;
+}
+
+.jp-collab-comment-thread:hover {
+  border-color: var(--jp-border-color1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.jp-collab-comment-thread--highlighted {
+  border-color: var(--jp-collab-comment-pin-color);
+  box-shadow: 0 0 0 1px var(--jp-collab-comment-highlight-color);
+}
+
+/* Comment Thread Header */
+.jp-collab-comment-thread__header {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--jp-layout-color1);
+  border-bottom: 1px solid var(--jp-border-color2);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color var(--jp-collab-transition-fast) ease;
+}
+
+.jp-collab-comment-thread__header:hover {
+  background: var(--jp-layout-color2);
+}
+
+.jp-collab-comment-thread__cell-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.jp-collab-comment-thread__cell-label {
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+  margin: 0;
+}
+
+.jp-collab-comment-thread__cell-type {
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+  margin: 0;
+}
+
+.jp-collab-comment-thread__status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 8px;
+}
+
+.jp-collab-comment-thread__status-badge {
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: var(--jp-ui-font-size0);
+  font-family: var(--jp-ui-font-family);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.jp-collab-comment-thread__status-badge--active {
+  background: var(--jp-warn-color3);
+  color: var(--jp-warn-color1);
+}
+
+.jp-collab-comment-thread__status-badge--resolved {
+  background: var(--jp-success-color3);
+  color: var(--jp-success-color1);
+}
+
+.jp-collab-comment-thread__notification-badge {
+  background: var(--jp-error-color1);
+  color: var(--jp-layout-color0);
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+.jp-collab-comment-thread__toggle {
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--jp-ui-font-color1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: all var(--jp-collab-transition-fast) ease;
+}
+
+.jp-collab-comment-thread__toggle:hover {
+  background: var(--jp-layout-color3);
+  color: var(--jp-ui-font-color0);
+}
+
+.jp-collab-comment-thread__toggle--expanded {
+  transform: rotate(180deg);
+}
+
+/* Comment Thread Content */
+.jp-collab-comment-thread__content {
+  overflow: hidden;
+  transition: max-height var(--jp-collab-transition-normal) ease-in-out;
+}
+
+.jp-collab-comment-thread__content--collapsed {
+  max-height: 0;
+}
+
+.jp-collab-comment-thread__content--expanded {
+  max-height: 1000px; /* Large enough to accommodate content */
+}
+
+.jp-collab-comment-thread__comments {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+/* ===========================
+   Individual Comments
+   With proper threading and indentation
+   =========================== */
+
+.jp-collab-comment {
+  padding: 12px;
+  border-bottom: 1px solid var(--jp-border-color3);
+  position: relative;
+  background: var(--jp-layout-color0);
+  transition: background-color var(--jp-collab-transition-fast) ease;
+}
+
+.jp-collab-comment:hover {
+  background: var(--jp-layout-color1);
+}
+
+.jp-collab-comment:last-child {
+  border-bottom: none;
+}
+
+.jp-collab-comment--reply {
+  margin-left: 20px;
+  border-left: 2px solid var(--jp-border-color2);
+  padding-left: 16px;
+  background: var(--jp-layout-color1);
+}
+
+.jp-collab-comment--reply:hover {
+  background: var(--jp-layout-color2);
+}
+
+.jp-collab-comment__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.jp-collab-comment__avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--jp-collab-presence-color-default);
+  color: var(--jp-layout-color0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--jp-ui-font-family);
+  flex-shrink: 0;
+}
+
+.jp-collab-comment__author {
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+  margin: 0;
+  flex: 1;
+}
+
+.jp-collab-comment__timestamp {
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+  white-space: nowrap;
+}
+
+.jp-collab-comment__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity var(--jp-collab-transition-fast) ease;
+}
+
+.jp-collab-comment:hover .jp-collab-comment__actions {
+  opacity: 1;
+}
+
+.jp-collab-comment__action {
+  padding: 2px 4px;
+  border: none;
+  background: transparent;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+  cursor: pointer;
+  border-radius: 2px;
+  transition: all var(--jp-collab-transition-fast) ease;
+}
+
+.jp-collab-comment__action:hover {
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color0);
+}
+
+.jp-collab-comment__action--resolve {
+  color: var(--jp-success-color1);
+}
+
+.jp-collab-comment__action--resolve:hover {
+  background: var(--jp-success-color3);
+}
+
+.jp-collab-comment__content {
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  line-height: 1.4;
+  color: var(--jp-ui-font-color0);
+  margin: 0;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+}
+
+.jp-collab-comment__content--resolved {
+  opacity: 0.7;
+  text-decoration: line-through;
+}
+
+/* ===========================
+   Reply Interface
+   Inline response system with proper threading
+   =========================== */
+
+.jp-collab-comment-reply {
+  margin-top: 8px;
+  border-top: 1px solid var(--jp-border-color3);
+  padding-top: 8px;
+}
+
+.jp-collab-comment-reply__form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.jp-collab-comment-reply__textarea {
+  min-height: 60px;
+  max-height: 200px;
+  padding: 8px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 4px;
+  background: var(--jp-layout-color0);
+  color: var(--jp-ui-font-color0);
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  resize: vertical;
+  transition: border-color var(--jp-collab-transition-fast) ease;
+}
+
+.jp-collab-comment-reply__textarea:focus {
+  outline: none;
+  border-color: var(--jp-brand-color1);
+  box-shadow: 0 0 0 1px var(--jp-brand-color1);
+}
+
+.jp-collab-comment-reply__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.jp-collab-comment-reply__button {
+  padding: 6px 12px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 4px;
+  background: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color0);
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  cursor: pointer;
+  transition: all var(--jp-collab-transition-fast) ease;
+}
+
+.jp-collab-comment-reply__button:hover {
+  background: var(--jp-layout-color2);
+  border-color: var(--jp-border-color1);
+}
+
+.jp-collab-comment-reply__button--primary {
+  background: var(--jp-brand-color1);
+  color: var(--jp-layout-color0);
+  border-color: var(--jp-brand-color1);
+}
+
+.jp-collab-comment-reply__button--primary:hover {
+  background: var(--jp-brand-color0);
+}
+
+.jp-collab-comment-reply__button--primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ===========================
+   Comment Pin Styling
+   Using --jp-collab-comment-pin-color per Section 7.8.2
+   =========================== */
+
+.jp-collab-comment-pin {
+  position: absolute;
+  top: 4px;
+  left: -20px;
+  width: 16px;
+  height: 16px;
+  background: var(--jp-collab-comment-pin-color);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--jp-layout-color0);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  z-index: 10;
+  transition: all var(--jp-collab-transition-fast) ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.jp-collab-comment-pin:hover {
+  transform: scale(1.2);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.jp-collab-comment-pin:focus {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 2px;
+}
+
+.jp-collab-comment-pin--active {
+  background: var(--jp-warn-color1);
+  animation: jp-collab-comment-pin-pulse 2s ease-in-out infinite;
+}
+
+.jp-collab-comment-pin--resolved {
+  background: var(--jp-success-color1);
+  opacity: 0.7;
+}
+
+.jp-collab-comment-pin--multiple {
+  background: var(--jp-brand-color1);
+}
+
+.jp-collab-comment-pin__count {
+  font-size: 8px;
+  font-weight: 700;
+}
+
+/* ===========================
+   New Comment Interface
+   Creating new discussions
+   =========================== */
+
+.jp-collab-comment-sidebar__new-comment {
+  margin-top: auto;
+  padding: 12px;
+  border-top: 1px solid var(--jp-border-color2);
+  background: var(--jp-layout-color1);
+  flex-shrink: 0;
+}
+
+.jp-collab-comment-new {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.jp-collab-comment-new__target {
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+  margin: 0;
+}
+
+.jp-collab-comment-new__form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.jp-collab-comment-new__textarea {
+  min-height: 80px;
+  max-height: 150px;
+  padding: 8px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 4px;
+  background: var(--jp-layout-color0);
+  color: var(--jp-ui-font-color0);
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  resize: vertical;
+  transition: border-color var(--jp-collab-transition-fast) ease;
+}
+
+.jp-collab-comment-new__textarea:focus {
+  outline: none;
+  border-color: var(--jp-brand-color1);
+  box-shadow: 0 0 0 1px var(--jp-brand-color1);
+}
+
+.jp-collab-comment-new__textarea::placeholder {
+  color: var(--jp-ui-font-color3);
+}
+
+.jp-collab-comment-new__actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.jp-collab-comment-new__button {
+  padding: 8px 16px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 4px;
+  background: var(--jp-brand-color1);
+  color: var(--jp-layout-color0);
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--jp-collab-transition-fast) ease;
+}
+
+.jp-collab-comment-new__button:hover {
+  background: var(--jp-brand-color0);
+}
+
+.jp-collab-comment-new__button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color2);
+}
+
+/* ===========================
+   Animation Keyframes
+   Slide animations per Section 7.8.4
+   =========================== */
+
+@keyframes jp-collab-comment-slide-in {
+  0% {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes jp-collab-comment-slide-out {
+  0% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+@keyframes jp-collab-comment-pin-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.8;
+  }
+}
+
+@keyframes jp-collab-comment-fade-in {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ===========================
+   Mobile Responsive Design
+   Touch-friendly adaptations
+   =========================== */
+
+@media only screen and (max-width: 760px) {
+  .jp-collab-comment-sidebar {
+    width: 100%;
+    max-width: 100%;
+    min-width: 100%;
+    position: fixed;
+    top: 0;
+    right: 0;
+    z-index: 1000;
+    border-left: none;
+    box-shadow: var(--jp-elevation-z8);
+  }
+
+  .jp-collab-comment-pin {
+    width: var(--jp-collab-touch-target-min);
+    height: var(--jp-collab-touch-target-min);
+    left: -22px;
+  }
+
+  .jp-collab-comment-thread__header {
+    padding: 12px;
+  }
+
+  .jp-collab-comment {
+    padding: 16px 12px;
+  }
+
+  .jp-collab-comment__avatar {
+    width: 28px;
+    height: 28px;
+    font-size: 12px;
+  }
+
+  .jp-collab-comment-reply__textarea,
+  .jp-collab-comment-new__textarea {
+    min-height: 100px;
+    font-size: 16px; /* Prevent zoom on iOS */
+  }
+
+  .jp-collab-comment-reply__button,
+  .jp-collab-comment-new__button {
+    padding: 12px 16px;
+    font-size: var(--jp-ui-font-size1);
+    min-height: var(--jp-collab-touch-target-min);
+  }
+}
+
+/* ===========================
+   Accessibility Enhancements
+   Screen reader and keyboard support
+   =========================== */
+
+.jp-collab-comment-pin[role="button"] {
+  aria-label: "View or add comments for this cell";
+}
+
+.jp-collab-comment-thread__toggle[aria-expanded="true"] .jp-collab-comment-thread__content {
+  display: block;
+}
+
+.jp-collab-comment-thread__toggle[aria-expanded="false"] .jp-collab-comment-thread__content {
+  display: none;
+}
+
+.jp-collab-comment__action[aria-label] {
+  position: relative;
+}
+
+/* Screen reader only content */
+.jp-collab-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .jp-collab-comment-pin {
+    border: 2px solid var(--jp-layout-color0);
+  }
+
+  .jp-collab-comment-thread {
+    border-width: 2px;
+  }
+
+  .jp-collab-comment--reply {
+    border-left-width: 3px;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .jp-collab-comment-sidebar,
+  .jp-collab-comment-thread__content,
+  .jp-collab-comment-pin,
+  .jp-collab-comment,
+  .jp-collab-comment-reply__textarea,
+  .jp-collab-comment-new__textarea,
+  .jp-collab-comment-reply__button,
+  .jp-collab-comment-new__button {
+    transition: none;
+    animation: none;
+  }
+
+  .jp-collab-comment-pin--active {
+    animation: none;
+    border-style: dashed;
+  }
+}
+
+/* Print styles - hide comment interface when printing */
+@media print {
+  .jp-collab-comment-sidebar,
+  .jp-collab-comment-pin {
+    display: none !important;
+  }
+}
+
+/* Dark theme optimizations */
+@media (prefers-color-scheme: dark) {
+  .jp-collab-comment-sidebar {
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+  }
+
+  .jp-collab-comment-pin {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+}
+
+/* ===========================
+   Integration with Existing Components
+   Ensuring seamless integration
+   =========================== */
+
+/* When comment sidebar is open, adjust notebook layout */
+body[data-notebook='notebooks'] .jp-NotebookPanel.jp-mod-has-comment-sidebar .jp-WindowedPanel-outer {
+  margin-right: 300px;
+  transition: margin-right var(--jp-collab-transition-normal) ease;
+}
+
+/* Ensure comment pins don't interfere with cell selection */
+.jp-Notebook-cell.jp-mod-selected .jp-collab-comment-pin {
+  z-index: 15;
+}
+
+/* Integration with existing scrollbar */
+.jp-collab-comment-sidebar__content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.jp-collab-comment-sidebar__content::-webkit-scrollbar-track {
+  background: var(--jp-layout-color1);
+}
+
+.jp-collab-comment-sidebar__content::-webkit-scrollbar-thumb {
+  background: var(--jp-border-color2);
+  border-radius: 3px;
+}
+
+.jp-collab-comment-sidebar__content::-webkit-scrollbar-thumb:hover {
+  background: var(--jp-border-color1);
+}
