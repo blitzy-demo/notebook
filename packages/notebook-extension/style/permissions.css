@@ -1,0 +1,822 @@
+/*-----------------------------------------------------------------------------
+| Copyright (c) Jupyter Development Team.
+|
+| Distributed under the terms of the Modified BSD License.
+|----------------------------------------------------------------------------*/
+
+@import './variables.css';
+
+/**
+ * Permission Management Interface Styles
+ * 
+ * Provides comprehensive styling for the role-based access control system
+ * including modal dialogs, role selection, user search, and status indicators
+ * for collaborative editing permissions in Jupyter Notebook.
+ */
+
+/* =============================================================================
+   Permission Dialog Modal
+   ============================================================================= */
+
+.jp-PermissionDialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease-in-out, visibility 0.2s ease-in-out;
+  backdrop-filter: blur(2px);
+}
+
+.jp-PermissionDialog-overlay.jp-mod-active {
+  opacity: 1;
+  visibility: visible;
+}
+
+.jp-PermissionDialog {
+  background: var(--jp-layout-color0);
+  border-radius: var(--jp-border-radius);
+  box-shadow: var(--jp-elevation-z8);
+  min-width: 500px;
+  max-width: 700px;
+  width: 90vw;
+  max-height: 80vh;
+  overflow: hidden;
+  transform: scale(0.95);
+  transition: transform 0.2s ease-in-out;
+}
+
+.jp-PermissionDialog-overlay.jp-mod-active .jp-PermissionDialog {
+  transform: scale(1);
+}
+
+.jp-PermissionDialog-header {
+  padding: var(--jp-cell-padding);
+  border-bottom: 1px solid var(--jp-border-color1);
+  background: var(--jp-layout-color1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.jp-PermissionDialog-title {
+  font-size: var(--jp-ui-font-size2);
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+  margin: 0;
+  flex: 1;
+}
+
+.jp-PermissionDialog-close {
+  background: none;
+  border: none;
+  color: var(--jp-ui-font-color1);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--jp-border-radius);
+  transition: background-color 0.1s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.jp-PermissionDialog-close:hover {
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color0);
+}
+
+.jp-PermissionDialog-close:focus {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 1px;
+}
+
+.jp-PermissionDialog-body {
+  padding: calc(var(--jp-cell-padding) * 1.5);
+  overflow-y: auto;
+  max-height: calc(80vh - 120px);
+}
+
+.jp-PermissionDialog-footer {
+  padding: var(--jp-cell-padding);
+  border-top: 1px solid var(--jp-border-color1);
+  background: var(--jp-layout-color1);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--jp-cell-padding);
+}
+
+/* =============================================================================
+   User Search Component
+   ============================================================================= */
+
+.jp-UserSearch {
+  margin-bottom: calc(var(--jp-cell-padding) * 1.5);
+}
+
+.jp-UserSearch-label {
+  display: block;
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+  margin-bottom: calc(var(--jp-cell-padding) * 0.5);
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-UserSearch-container {
+  position: relative;
+  width: 100%;
+}
+
+.jp-UserSearch-input {
+  width: 100%;
+  padding: calc(var(--jp-cell-padding) * 0.75);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: var(--jp-border-radius);
+  background: var(--jp-layout-color0);
+  color: var(--jp-ui-font-color0);
+  font-size: var(--jp-ui-font-size1);
+  font-family: var(--jp-ui-font-family);
+  transition: border-color 0.1s ease, box-shadow 0.1s ease;
+  box-sizing: border-box;
+}
+
+.jp-UserSearch-input:focus {
+  outline: none;
+  border-color: var(--jp-brand-color1);
+  box-shadow: 0 0 0 2px var(--jp-brand-color3);
+}
+
+.jp-UserSearch-input::placeholder {
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-UserSearch-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--jp-layout-color0);
+  border: 1px solid var(--jp-border-color1);
+  border-top: none;
+  border-radius: 0 0 var(--jp-border-radius) var(--jp-border-radius);
+  box-shadow: var(--jp-elevation-z4);
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 1000;
+  display: none;
+}
+
+.jp-UserSearch-dropdown.jp-mod-active {
+  display: block;
+}
+
+.jp-UserSearch-option {
+  padding: calc(var(--jp-cell-padding) * 0.75);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--jp-cell-padding) * 0.75);
+  border-bottom: 1px solid var(--jp-border-color2);
+  transition: background-color 0.1s ease;
+}
+
+.jp-UserSearch-option:last-child {
+  border-bottom: none;
+}
+
+.jp-UserSearch-option:hover {
+  background: var(--jp-layout-color2);
+}
+
+.jp-UserSearch-option.jp-mod-selected {
+  background: var(--jp-brand-color3);
+  color: var(--jp-brand-color1);
+}
+
+.jp-UserSearch-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--jp-brand-color1);
+  color: var(--jp-layout-color0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.jp-UserSearch-userInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.jp-UserSearch-username {
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jp-UserSearch-email {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jp-UserSearch-noResults {
+  padding: calc(var(--jp-cell-padding) * 1.5);
+  text-align: center;
+  color: var(--jp-ui-font-color2);
+  font-style: italic;
+}
+
+/* =============================================================================
+   Role Selection Interface
+   ============================================================================= */
+
+.jp-RoleSelection {
+  margin-bottom: calc(var(--jp-cell-padding) * 1.5);
+}
+
+.jp-RoleSelection-label {
+  display: block;
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+  margin-bottom: var(--jp-cell-padding);
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-RoleSelection-options {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--jp-cell-padding) * 0.75);
+}
+
+.jp-RoleOption {
+  display: flex;
+  align-items: flex-start;
+  gap: calc(var(--jp-cell-padding) * 0.75);
+  padding: var(--jp-cell-padding);
+  border: 1px solid var(--jp-border-color2);
+  border-radius: var(--jp-border-radius);
+  cursor: pointer;
+  transition: border-color 0.1s ease, background-color 0.1s ease;
+}
+
+.jp-RoleOption:hover {
+  border-color: var(--jp-border-color1);
+  background: var(--jp-layout-color1);
+}
+
+.jp-RoleOption.jp-mod-selected {
+  border-color: var(--jp-brand-color1);
+  background: var(--jp-brand-color3);
+}
+
+.jp-RoleOption-radio {
+  margin-top: 2px;
+  accent-color: var(--jp-brand-color1);
+}
+
+.jp-RoleOption-content {
+  flex: 1;
+}
+
+.jp-RoleOption-title {
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+  margin-bottom: calc(var(--jp-cell-padding) * 0.25);
+  display: flex;
+  align-items: center;
+  gap: calc(var(--jp-cell-padding) * 0.5);
+}
+
+.jp-RoleOption-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--jp-layout-color0);
+}
+
+.jp-RoleOption-icon.jp-mod-view {
+  background: var(--jp-info-color1);
+}
+
+.jp-RoleOption-icon.jp-mod-edit {
+  background: var(--jp-warn-color1);
+}
+
+.jp-RoleOption-icon.jp-mod-admin {
+  background: var(--jp-error-color1);
+}
+
+.jp-RoleOption-description {
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+  line-height: 1.4;
+}
+
+.jp-RoleOption-permissions {
+  margin-top: calc(var(--jp-cell-padding) * 0.5);
+}
+
+.jp-RoleOption-permissionList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--jp-cell-padding) * 0.5);
+}
+
+.jp-RoleOption-permission {
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  padding: 2px calc(var(--jp-cell-padding) * 0.5);
+  border-radius: calc(var(--jp-border-radius) * 0.5);
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 500;
+}
+
+/* =============================================================================
+   Current Permissions List
+   ============================================================================= */
+
+.jp-CurrentPermissions {
+  margin-bottom: calc(var(--jp-cell-padding) * 1.5);
+}
+
+.jp-CurrentPermissions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--jp-cell-padding);
+}
+
+.jp-CurrentPermissions-title {
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+  font-size: var(--jp-ui-font-size1);
+  margin: 0;
+}
+
+.jp-CurrentPermissions-count {
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-CurrentPermissions-list {
+  border: 1px solid var(--jp-border-color1);
+  border-radius: var(--jp-border-radius);
+  overflow: hidden;
+}
+
+.jp-CurrentPermissions-empty {
+  padding: calc(var(--jp-cell-padding) * 2);
+  text-align: center;
+  color: var(--jp-ui-font-color2);
+  font-style: italic;
+}
+
+.jp-PermissionItem {
+  display: flex;
+  align-items: center;
+  padding: var(--jp-cell-padding);
+  border-bottom: 1px solid var(--jp-border-color2);
+  transition: background-color 0.1s ease;
+}
+
+.jp-PermissionItem:last-child {
+  border-bottom: none;
+}
+
+.jp-PermissionItem:hover {
+  background: var(--jp-layout-color1);
+}
+
+.jp-PermissionItem-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--jp-brand-color1);
+  color: var(--jp-layout-color0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  margin-right: var(--jp-cell-padding);
+  flex-shrink: 0;
+}
+
+.jp-PermissionItem-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.jp-PermissionItem-name {
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jp-PermissionItem-email {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jp-PermissionItem-role {
+  margin-right: var(--jp-cell-padding);
+  display: flex;
+  align-items: center;
+  gap: calc(var(--jp-cell-padding) * 0.5);
+}
+
+.jp-PermissionItem-actions {
+  display: flex;
+  gap: calc(var(--jp-cell-padding) * 0.5);
+}
+
+/* =============================================================================
+   Permission Status Indicators
+   ============================================================================= */
+
+.jp-PermissionStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--jp-cell-padding) * 0.5);
+  padding: calc(var(--jp-cell-padding) * 0.5) calc(var(--jp-cell-padding) * 0.75);
+  border-radius: calc(var(--jp-border-radius) * 1.5);
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.jp-PermissionStatus.jp-mod-view {
+  background: var(--jp-info-color3);
+  color: var(--jp-info-color1);
+}
+
+.jp-PermissionStatus.jp-mod-edit {
+  background: var(--jp-warn-color3);
+  color: var(--jp-warn-color1);
+}
+
+.jp-PermissionStatus.jp-mod-admin {
+  background: var(--jp-error-color3);
+  color: var(--jp-error-color1);
+}
+
+.jp-PermissionStatus-icon {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.8;
+}
+
+/* Toolbar Permission Indicator */
+.jp-Toolbar-PermissionIndicator {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--jp-cell-padding) * 0.5);
+  padding: calc(var(--jp-cell-padding) * 0.5);
+  color: var(--jp-ui-font-color1);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-Toolbar-PermissionIndicator .jp-PermissionStatus {
+  padding: calc(var(--jp-cell-padding) * 0.25) calc(var(--jp-cell-padding) * 0.5);
+  font-size: var(--jp-ui-font-size0);
+}
+
+/* =============================================================================
+   Form Controls
+   ============================================================================= */
+
+.jp-PermissionDialog-button {
+  padding: calc(var(--jp-cell-padding) * 0.75) calc(var(--jp-cell-padding) * 1.5);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: var(--jp-border-radius);
+  background: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color0);
+  font-size: var(--jp-ui-font-size1);
+  font-family: var(--jp-ui-font-family);
+  cursor: pointer;
+  transition: all 0.1s ease;
+  min-width: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--jp-cell-padding) * 0.5);
+}
+
+.jp-PermissionDialog-button:hover {
+  background: var(--jp-layout-color2);
+  border-color: var(--jp-border-color0);
+}
+
+.jp-PermissionDialog-button:focus {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 1px;
+}
+
+.jp-PermissionDialog-button.jp-mod-primary {
+  background: var(--jp-brand-color1);
+  color: var(--jp-ui-inverse-font-color0);
+  border-color: var(--jp-brand-color1);
+}
+
+.jp-PermissionDialog-button.jp-mod-primary:hover {
+  background: var(--jp-brand-color0);
+  border-color: var(--jp-brand-color0);
+}
+
+.jp-PermissionDialog-button.jp-mod-danger {
+  background: var(--jp-error-color1);
+  color: var(--jp-ui-inverse-font-color0);
+  border-color: var(--jp-error-color1);
+}
+
+.jp-PermissionDialog-button.jp-mod-danger:hover {
+  background: var(--jp-error-color0);
+  border-color: var(--jp-error-color0);
+}
+
+.jp-PermissionDialog-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.jp-PermissionDialog-button:disabled:hover {
+  background: var(--jp-layout-color1);
+  border-color: var(--jp-border-color1);
+}
+
+.jp-PermissionDialog-iconButton {
+  padding: calc(var(--jp-cell-padding) * 0.5);
+  min-width: auto;
+  width: 32px;
+  height: 32px;
+}
+
+/* =============================================================================
+   Loading and Error States
+   ============================================================================= */
+
+.jp-PermissionDialog-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(var(--jp-cell-padding) * 2);
+  color: var(--jp-ui-font-color2);
+  gap: var(--jp-cell-padding);
+}
+
+.jp-PermissionDialog-error {
+  background: var(--jp-error-color3);
+  color: var(--jp-error-color1);
+  padding: var(--jp-cell-padding);
+  border-radius: var(--jp-border-radius);
+  margin-bottom: var(--jp-cell-padding);
+  display: flex;
+  align-items: center;
+  gap: calc(var(--jp-cell-padding) * 0.5);
+}
+
+.jp-PermissionDialog-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--jp-border-color2);
+  border-top: 2px solid var(--jp-brand-color1);
+  border-radius: 50%;
+  animation: jp-spinner-rotation 1s linear infinite;
+}
+
+@keyframes jp-spinner-rotation {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* =============================================================================
+   Responsive Design
+   ============================================================================= */
+
+@media only screen and (max-width: 760px) {
+  .jp-PermissionDialog {
+    min-width: auto;
+    width: 95vw;
+    max-height: 90vh;
+    margin: 0 auto;
+  }
+
+  .jp-PermissionDialog-header {
+    padding: calc(var(--jp-cell-padding) * 0.75);
+  }
+
+  .jp-PermissionDialog-body {
+    padding: var(--jp-cell-padding);
+    max-height: calc(90vh - 100px);
+  }
+
+  .jp-PermissionDialog-footer {
+    padding: calc(var(--jp-cell-padding) * 0.75);
+    flex-direction: column-reverse;
+    gap: calc(var(--jp-cell-padding) * 0.5);
+  }
+
+  .jp-PermissionDialog-button {
+    width: 100%;
+  }
+
+  .jp-RoleSelection-options {
+    gap: calc(var(--jp-cell-padding) * 0.5);
+  }
+
+  .jp-RoleOption {
+    padding: calc(var(--jp-cell-padding) * 0.75);
+  }
+
+  .jp-RoleOption-permissionList {
+    flex-direction: column;
+    gap: calc(var(--jp-cell-padding) * 0.25);
+  }
+
+  .jp-PermissionItem {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: calc(var(--jp-cell-padding) * 0.5);
+  }
+
+  .jp-PermissionItem-avatar {
+    align-self: flex-start;
+    margin-right: 0;
+  }
+
+  .jp-PermissionItem-role {
+    margin-right: 0;
+    align-self: flex-end;
+  }
+
+  .jp-PermissionItem-actions {
+    align-self: flex-end;
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .jp-UserSearch-dropdown {
+    position: fixed;
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    border-radius: var(--jp-border-radius) var(--jp-border-radius) 0 0;
+    max-height: 50vh;
+  }
+}
+
+@media only screen and (max-width: 480px) {
+  .jp-PermissionDialog {
+    width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+
+  .jp-PermissionDialog-overlay {
+    align-items: stretch;
+    justify-content: stretch;
+  }
+
+  .jp-PermissionDialog-body {
+    max-height: calc(100vh - 120px);
+  }
+
+  .jp-UserSearch-avatar,
+  .jp-PermissionItem-avatar {
+    width: 28px;
+    height: 28px;
+  }
+
+  .jp-RoleOption-title {
+    font-size: var(--jp-ui-font-size0);
+  }
+
+  .jp-RoleOption-description {
+    font-size: var(--jp-ui-font-size0);
+  }
+}
+
+/* =============================================================================
+   Accessibility Enhancements
+   ============================================================================= */
+
+.jp-PermissionDialog-overlay[aria-hidden="true"] {
+  pointer-events: none;
+}
+
+.jp-PermissionDialog[role="dialog"] {
+  position: relative;
+}
+
+.jp-UserSearch-input[aria-expanded="true"] + .jp-UserSearch-dropdown {
+  display: block;
+}
+
+.jp-UserSearch-option[aria-selected="true"] {
+  background: var(--jp-brand-color3);
+  color: var(--jp-brand-color1);
+}
+
+.jp-RoleOption[aria-checked="true"] {
+  border-color: var(--jp-brand-color1);
+  background: var(--jp-brand-color3);
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .jp-PermissionDialog-overlay {
+    background: rgba(0, 0, 0, 0.8);
+  }
+
+  .jp-PermissionDialog {
+    border: 2px solid var(--jp-border-color0);
+  }
+
+  .jp-PermissionStatus {
+    border: 1px solid currentColor;
+  }
+
+  .jp-RoleOption {
+    border-width: 2px;
+  }
+
+  .jp-RoleOption.jp-mod-selected {
+    border-width: 3px;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .jp-PermissionDialog-overlay,
+  .jp-PermissionDialog,
+  .jp-PermissionDialog-button,
+  .jp-RoleOption,
+  .jp-PermissionItem {
+    transition: none;
+  }
+
+  .jp-PermissionDialog-spinner {
+    animation: none;
+    border-top-color: var(--jp-brand-color1);
+  }
+}
+
+/* Print styles */
+@media print {
+  .jp-PermissionDialog-overlay {
+    position: static;
+    background: none;
+    backdrop-filter: none;
+  }
+
+  .jp-PermissionDialog {
+    box-shadow: none;
+    border: 1px solid var(--jp-border-color0);
+  }
+
+  .jp-PermissionDialog-footer {
+    display: none;
+  }
+
+  .jp-PermissionItem-actions {
+    display: none;
+  }
+}
