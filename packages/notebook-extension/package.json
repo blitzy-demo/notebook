@@ -14,7 +14,9 @@
   "author": "Project Jupyter",
   "sideEffects": [
     "style/**/*.css",
-    "style/index.js"
+    "style/index.js",
+    "style/collab/**/*.css",
+    "lib/collab/**/*.js"
   ],
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -26,7 +28,11 @@
     "lib/*.d.ts",
     "lib/*.js.map",
     "lib/*.js",
+    "lib/collab/**/*.d.ts",
+    "lib/collab/**/*.js.map",
+    "lib/collab/**/*.js",
     "schema/*.json",
+    "schema/collab/*.json",
     "style/**/*.css",
     "style/index.js"
   ],
@@ -42,14 +48,19 @@
     "@jupyterlab/application": "~4.5.0-alpha.0",
     "@jupyterlab/apputils": "~4.6.0-alpha.0",
     "@jupyterlab/cells": "~4.5.0-alpha.0",
+    "@jupyterlab/collaboration": "^4.5.0",
     "@jupyterlab/docmanager": "~4.5.0-alpha.0",
     "@jupyterlab/notebook": "~4.5.0-alpha.0",
     "@jupyterlab/settingregistry": "~4.5.0-alpha.0",
     "@jupyterlab/translation": "~4.5.0-alpha.0",
     "@lumino/polling": "^2.1.4",
     "@lumino/widgets": "^2.7.1",
+    "lib0": "^0.2.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "y-protocols": "^1.0.5",
+    "y-websocket": "^1.4.0",
+    "yjs": "^13.5.40"
   },
   "devDependencies": {
     "rimraf": "^3.0.2",
