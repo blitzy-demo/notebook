@@ -39,6 +39,27 @@ import { Widget } from '@lumino/widgets';
 
 import { TrustedComponent } from './trusted';
 
+// Collaboration imports
+import * as Y from 'yjs';
+import { WebsocketProvider } from 'y-websocket';
+import { Awareness } from 'y-protocols/awareness';
+
+// Collaboration services
+import { YjsNotebookProvider } from '../notebook/src/collab/provider';
+import { AwarenessService } from '../notebook/src/collab/awareness';
+import { LockService } from '../notebook/src/collab/locks';
+import { HistoryService } from '../notebook/src/collab/history';
+import { PermissionsService } from '../notebook/src/collab/permissions';
+import { CommentService } from '../notebook/src/collab/comments';
+
+// Collaboration UI components
+import { UserPresenceComponent } from './components/userPresence';
+import { CellLockIndicatorComponent } from './components/cellLockIndicator';
+import { HistoryViewerComponent } from './components/historyViewer';
+import { PermissionsDialogComponent } from './components/permissionsDialog';
+import { CommentSystemComponent } from './components/commentSystem';
+import { CollaborationBarComponent } from './components/collaborationBar';
+
 /**
  * The class for kernel status errors.
  */
@@ -678,6 +699,270 @@ const editNotebookMetadata: JupyterFrontEndPlugin<void> = {
 };
 
 /**
+ * A plugin for real-time collaborative editing with Yjs CRDT integration.
+ */
+const collaboration: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:collaboration',
+  description: 'A plugin for real-time collaborative editing with Yjs CRDT integration.',
+  autoStart: true,
+  requires: [INotebookShell, INotebookTracker],
+  optional: [ISettingRegistry, ITranslator],
+  activate: async (
+    app: JupyterFrontEnd,
+    shell: INotebookShell,
+    tracker: INotebookTracker,
+    settingRegistry: ISettingRegistry | null,
+    translator: ITranslator | null
+  ) => {
+    const trans = (translator ?? nullTranslator).load('notebook');
+    
+    // Configuration for enabling/disabling collaboration features
+    let collaborationEnabled = true;
+    let collaborationSettings: ISettingRegistry.ISettings | null = null;
+
+    // Load collaboration settings if available
+    if (settingRegistry) {
+      try {
+        collaborationSettings = await settingRegistry.load(collaboration.id);
+        collaborationEnabled = collaborationSettings.get('enabled').composite as boolean;
+        
+        // Watch for setting changes
+        collaborationSettings.changed.connect(() => {
+          const newEnabled = collaborationSettings!.get('enabled').composite as boolean;
+          if (newEnabled !== collaborationEnabled) {
+            collaborationEnabled = newEnabled;
+            // Handle enable/disable of collaboration features
+            handleCollaborationToggle(newEnabled);
+          }
+        });
+      } catch (error) {
+        console.warn('Failed to load collaboration settings, using defaults:', error);
+      }
+    }
+
+    // Initialize collaboration services if enabled
+    let collaborationServices: {
+      yjsProvider?: YjsNotebookProvider;
+      awarenessService?: AwarenessService;
+      lockService?: LockService;
+      historyService?: HistoryService;
+      permissionsService?: PermissionsService;
+      commentService?: CommentService;
+    } = {};
+
+    const initializeCollaborationServices = async () => {
+      if (!collaborationEnabled) {
+        return;
+      }
+
+      try {
+        // Initialize Yjs document provider
+        const yjsProvider = new YjsNotebookProvider({
+          tracker,
+          shell,
+          translator: trans
+        });
+
+        // Initialize awareness service for user presence
+        const awarenessService = new AwarenessService({
+          provider: yjsProvider,
+          tracker,
+          translator: trans
+        });
+
+        // Initialize lock service for cell-level locking
+        const lockService = new LockService({
+          provider: yjsProvider,
+          awarenessService,
+          tracker,
+          translator: trans
+        });
+
+        // Initialize history service for version tracking
+        const historyService = new HistoryService({
+          provider: yjsProvider,
+          tracker,
+          translator: trans
+        });
+
+        // Initialize permissions service for access control
+        const permissionsService = new PermissionsService({
+          provider: yjsProvider,
+          tracker,
+          translator: trans
+        });
+
+        // Initialize comment service for collaborative comments
+        const commentService = new CommentService({
+          provider: yjsProvider,
+          tracker,
+          translator: trans
+        });
+
+        collaborationServices = {
+          yjsProvider,
+          awarenessService,
+          lockService,
+          historyService,
+          permissionsService,
+          commentService
+        };
+
+        // Initialize UI components
+        await initializeCollaborationUI();
+
+        console.log('Collaboration services initialized successfully');
+      } catch (error) {
+        console.error('Failed to initialize collaboration services:', error);
+        // Graceful fallback to single-user mode
+        collaborationEnabled = false;
+        await cleanupCollaborationServices();
+      }
+    };
+
+    const initializeCollaborationUI = async () => {
+      if (!collaborationEnabled || !collaborationServices.yjsProvider) {
+        return;
+      }
+
+      // Create collaboration bar component
+      const collaborationBar = CollaborationBarComponent.create({
+        services: collaborationServices,
+        tracker,
+        translator: trans
+      });
+
+      // Create user presence component
+      const userPresence = UserPresenceComponent.create({
+        awarenessService: collaborationServices.awarenessService!,
+        tracker,
+        translator: trans
+      });
+
+      // Create cell lock indicator component
+      const cellLockIndicator = CellLockIndicatorComponent.create({
+        lockService: collaborationServices.lockService!,
+        tracker,
+        translator: trans
+      });
+
+      // Create history viewer component
+      const historyViewer = HistoryViewerComponent.create({
+        historyService: collaborationServices.historyService!,
+        tracker,
+        translator: trans
+      });
+
+      // Create permissions dialog component
+      const permissionsDialog = PermissionsDialogComponent.create({
+        permissionsService: collaborationServices.permissionsService!,
+        tracker,
+        translator: trans
+      });
+
+      // Create comment system component
+      const commentSystem = CommentSystemComponent.create({
+        commentService: collaborationServices.commentService!,
+        tracker,
+        translator: trans
+      });
+
+      // Add components to the shell
+      shell.add(collaborationBar, 'top', { rank: 1000 });
+      shell.add(userPresence, 'menu', { rank: 12000 });
+      shell.add(cellLockIndicator, 'left', { rank: 200 });
+      shell.add(historyViewer, 'right', { rank: 300 });
+      shell.add(permissionsDialog, 'right', { rank: 400 });
+      shell.add(commentSystem, 'right', { rank: 500 });
+
+      // Connect to notebook changes to update collaboration state
+      tracker.widgetAdded.connect(async (sender, notebookPanel) => {
+        if (collaborationServices.yjsProvider) {
+          await collaborationServices.yjsProvider.connectToNotebook(notebookPanel);
+        }
+      });
+
+      tracker.widgetRemoved.connect((sender, notebookPanel) => {
+        if (collaborationServices.yjsProvider) {
+          collaborationServices.yjsProvider.disconnectFromNotebook(notebookPanel);
+        }
+      });
+    };
+
+    const cleanupCollaborationServices = async () => {
+      // Cleanup all collaboration services
+      Object.values(collaborationServices).forEach(service => {
+        if (service && typeof service.dispose === 'function') {
+          service.dispose();
+        }
+      });
+      collaborationServices = {};
+    };
+
+    const handleCollaborationToggle = async (enabled: boolean) => {
+      if (enabled) {
+        await initializeCollaborationServices();
+      } else {
+        await cleanupCollaborationServices();
+      }
+    };
+
+    // Initialize collaboration if enabled
+    if (collaborationEnabled) {
+      await initializeCollaborationServices();
+    }
+
+    // Commands for collaboration features
+    const commands = app.commands;
+
+    commands.addCommand('notebook:toggle-collaboration', {
+      label: trans.__('Toggle Collaboration'),
+      execute: async () => {
+        collaborationEnabled = !collaborationEnabled;
+        if (collaborationSettings) {
+          await collaborationSettings.set('enabled', collaborationEnabled);
+        }
+        await handleCollaborationToggle(collaborationEnabled);
+      },
+      isEnabled: () => true,
+      isToggled: () => collaborationEnabled
+    });
+
+    commands.addCommand('notebook:show-collaboration-history', {
+      label: trans.__('Show Collaboration History'),
+      execute: async () => {
+        if (collaborationServices.historyService) {
+          await collaborationServices.historyService.showHistory();
+        }
+      },
+      isEnabled: () => collaborationEnabled && !!collaborationServices.historyService
+    });
+
+    commands.addCommand('notebook:manage-collaboration-permissions', {
+      label: trans.__('Manage Collaboration Permissions'),
+      execute: async () => {
+        if (collaborationServices.permissionsService) {
+          await collaborationServices.permissionsService.showPermissionsDialog();
+        }
+      },
+      isEnabled: () => collaborationEnabled && !!collaborationServices.permissionsService
+    });
+
+    commands.addCommand('notebook:toggle-collaboration-comments', {
+      label: trans.__('Toggle Collaboration Comments'),
+      execute: async () => {
+        if (collaborationServices.commentService) {
+          await collaborationServices.commentService.toggleComments();
+        }
+      },
+      isEnabled: () => collaborationEnabled && !!collaborationServices.commentService
+    });
+
+    console.log('Collaboration plugin activated');
+  }
+};
+
+/**
  * Export the plugins as default.
  */
 const plugins: JupyterFrontEndPlugin<any>[] = [
@@ -692,6 +977,7 @@ const plugins: JupyterFrontEndPlugin<any>[] = [
   scrollOutput,
   tabIcon,
   trusted,
+  collaboration,
 ];
 
 export default plugins;
