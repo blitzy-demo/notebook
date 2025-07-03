@@ -1,0 +1,241 @@
+/*
+ * Copyright (c) Jupyter Development Team.
+ * Distributed under the terms of the Modified BSD License.
+ */
+
+/* Cell Lock Indicator Component Styles */
+
+.jp-CellLockIndicator {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background: var(--jp-cell-lock-user-color-alpha, rgba(255, 193, 7, 0.1));
+  border: 1px solid var(--jp-cell-lock-user-color, #ffc107);
+  border-radius: 8px;
+  padding: 4px 8px;
+  margin: 2px 0;
+  font-size: var(--jp-ui-font-size1);
+  color: var(--jp-ui-font-color1);
+  transition: all 0.2s ease-in-out;
+  max-width: 200px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.jp-CellLockIndicator:hover {
+  background: var(--jp-cell-lock-user-color-alpha, rgba(255, 193, 7, 0.15));
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.jp-CellLockIndicator-hidden {
+  display: none;
+}
+
+.jp-CellLockIndicator-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.jp-CellLockIndicator-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--jp-cell-lock-user-color, #ffc107);
+  color: var(--jp-ui-inverse-font-color1);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.jp-CellLockIndicator-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.jp-CellLockIndicator-user {
+  font-weight: 500;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--jp-ui-font-color1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jp-CellLockIndicator-status {
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--jp-ui-font-color2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jp-CellLockIndicator-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--jp-cell-lock-user-color, #ffc107);
+  flex-shrink: 0;
+}
+
+.jp-CellLockIndicator-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Widget container styles */
+.jp-CellLockIndicator-widget {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 10;
+  pointer-events: all;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .jp-CellLockIndicator {
+    max-width: 150px;
+    padding: 3px 6px;
+  }
+  
+  .jp-CellLockIndicator-avatar {
+    width: 16px;
+    height: 16px;
+    font-size: 8px;
+  }
+  
+  .jp-CellLockIndicator-user {
+    font-size: 10px;
+  }
+  
+  .jp-CellLockIndicator-status {
+    font-size: 9px;
+  }
+}
+
+/* Dark theme adjustments */
+.jp-mod-light .jp-CellLockIndicator {
+  background: var(--jp-cell-lock-user-color-alpha, rgba(255, 193, 7, 0.1));
+  border-color: var(--jp-cell-lock-user-color, #ffc107);
+}
+
+.jp-mod-dark .jp-CellLockIndicator {
+  background: var(--jp-cell-lock-user-color-alpha, rgba(255, 193, 7, 0.15));
+  border-color: var(--jp-cell-lock-user-color, #ffc107);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.jp-mod-dark .jp-CellLockIndicator:hover {
+  background: var(--jp-cell-lock-user-color-alpha, rgba(255, 193, 7, 0.2));
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+/* Animation for lock state changes */
+.jp-CellLockIndicator.jp-mod-appearing {
+  animation: jp-cell-lock-appear 0.3s ease-out forwards;
+}
+
+.jp-CellLockIndicator.jp-mod-disappearing {
+  animation: jp-cell-lock-disappear 0.2s ease-in forwards;
+}
+
+@keyframes jp-cell-lock-appear {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes jp-cell-lock-disappear {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.95);
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .jp-CellLockIndicator {
+    border-width: 2px;
+    background: var(--jp-cell-lock-user-color-alpha, rgba(255, 193, 7, 0.2));
+  }
+  
+  .jp-CellLockIndicator-avatar {
+    border: 1px solid var(--jp-ui-font-color1);
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .jp-CellLockIndicator {
+    transition: none;
+  }
+  
+  .jp-CellLockIndicator.jp-mod-appearing,
+  .jp-CellLockIndicator.jp-mod-disappearing {
+    animation: none;
+  }
+}
+
+/* Focus styles for accessibility */
+.jp-CellLockIndicator:focus {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 2px;
+}
+
+/* Integration with cell editor */
+.jp-Cell .jp-CellLockIndicator-widget {
+  position: absolute;
+  top: var(--jp-cell-padding);
+  right: var(--jp-cell-padding);
+}
+
+/* Collaboration-specific color overrides */
+.jp-CellLockIndicator[data-user-color="blue"] {
+  --jp-cell-lock-user-color: #2196f3;
+  --jp-cell-lock-user-color-alpha: rgba(33, 150, 243, 0.1);
+}
+
+.jp-CellLockIndicator[data-user-color="green"] {
+  --jp-cell-lock-user-color: #4caf50;
+  --jp-cell-lock-user-color-alpha: rgba(76, 175, 80, 0.1);
+}
+
+.jp-CellLockIndicator[data-user-color="red"] {
+  --jp-cell-lock-user-color: #f44336;
+  --jp-cell-lock-user-color-alpha: rgba(244, 67, 54, 0.1);
+}
+
+.jp-CellLockIndicator[data-user-color="purple"] {
+  --jp-cell-lock-user-color: #9c27b0;
+  --jp-cell-lock-user-color-alpha: rgba(156, 39, 176, 0.1);
+}
+
+.jp-CellLockIndicator[data-user-color="orange"] {
+  --jp-cell-lock-user-color: #ff9800;
+  --jp-cell-lock-user-color-alpha: rgba(255, 152, 0, 0.1);
+}
+
+.jp-CellLockIndicator[data-user-color="teal"] {
+  --jp-cell-lock-user-color: #009688;
+  --jp-cell-lock-user-color-alpha: rgba(0, 150, 136, 0.1);
+}
