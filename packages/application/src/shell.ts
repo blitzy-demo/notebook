@@ -20,6 +20,16 @@ import {
 import { PanelHandler, SidePanelHandler } from './panelhandler';
 import { TabPanelSvg } from '@jupyterlab/ui-components';
 
+// Collaboration component imports
+import {
+  ICollaborationProvider,
+  AwarenessService,
+  LockService,
+  CommentService,
+  HistoryManager,
+  PermissionsManager
+} from './tokens';
+
 /**
  * The Jupyter Notebook application shell token.
  */
@@ -39,7 +49,7 @@ export namespace INotebookShell {
   /**
    * The areas of the application shell where widgets can reside.
    */
-  export type Area = 'main' | 'top' | 'menu' | 'left' | 'right' | 'down';
+  export type Area = 'main' | 'top' | 'menu' | 'left' | 'right' | 'down' | 'collaboration';
 
   /**
    * Widget position
@@ -84,14 +94,19 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     this._menuHandler = new PanelHandler();
     this._leftHandler = new SidePanelHandler('left');
     this._rightHandler = new SidePanelHandler('right');
+    this._collaborationHandler = new PanelHandler();
     this._main = new Panel();
     const topWrapper = (this._topWrapper = new Panel());
     const menuWrapper = (this._menuWrapper = new Panel());
+    const collaborationWrapper = (this._collaborationWrapper = new Panel());
 
     this._topHandler.panel.id = 'top-panel';
     this._topHandler.panel.node.setAttribute('role', 'banner');
     this._menuHandler.panel.id = 'menu-panel';
     this._menuHandler.panel.node.setAttribute('role', 'navigation');
+    this._collaborationHandler.panel.id = 'collaboration-panel';
+    this._collaborationHandler.panel.node.setAttribute('role', 'complementary');
+    this._collaborationHandler.panel.node.setAttribute('aria-label', 'Collaboration tools');
     this._main.id = 'main-panel';
     this._main.node.setAttribute('role', 'main');
 
@@ -100,12 +115,17 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     this._spacer_bottom = new Widget();
     this._spacer_bottom.id = 'spacer-widget-bottom';
 
-    // create wrappers around the top and menu areas
+    // create wrappers around the top, menu, and collaboration areas
     topWrapper.id = 'top-panel-wrapper';
     topWrapper.addWidget(this._topHandler.panel);
 
     menuWrapper.id = 'menu-panel-wrapper';
     menuWrapper.addWidget(this._menuHandler.panel);
+
+    collaborationWrapper.id = 'collaboration-panel-wrapper';
+    collaborationWrapper.addWidget(this._collaborationHandler.panel);
+    // Initially hide collaboration area - will be shown when collaboration is active
+    collaborationWrapper.hide();
 
     const rootLayout = new BoxLayout();
     const leftHandler = this._leftHandler;
@@ -126,11 +146,13 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     });
     BoxLayout.setStretch(this._topWrapper, 0);
     BoxLayout.setStretch(this._menuWrapper, 0);
+    BoxLayout.setStretch(this._collaborationWrapper, 0);
     BoxLayout.setStretch(this._main, 1);
 
     const middlePanel = new Panel({ layout: middleLayout });
     middlePanel.addWidget(this._topWrapper);
     middlePanel.addWidget(this._menuWrapper);
+    middlePanel.addWidget(this._collaborationWrapper);
     middlePanel.addWidget(this._spacer_top);
     middlePanel.addWidget(this._main);
     middlePanel.addWidget(this._spacer_bottom);
@@ -183,6 +205,12 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
       this
     );
 
+    // Connect collaboration panel change listeners
+    this._collaborationHandler.panel.childRemoved.connect(
+      this._onCollaborationPanelChanged,
+      this
+    );
+
     this.layout = rootLayout;
 
     // Added Skip to Main Link
@@ -222,6 +250,20 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
    */
   get menu(): Widget {
     return this._menuWrapper;
+  }
+
+  /**
+   * Get the collaboration area wrapper panel
+   */
+  get collaboration(): Widget {
+    return this._collaborationWrapper;
+  }
+
+  /**
+   * Get the collaboration area handler
+   */
+  get collaborationHandler(): PanelHandler {
+    return this._collaborationHandler;
   }
 
   /**
@@ -294,7 +336,7 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
    */
   activateById(id: string): void {
     // Search all areas that can have widgets for this widget, starting with main.
-    for (const area of ['main', 'top', 'left', 'right', 'menu', 'down']) {
+    for (const area of ['main', 'top', 'left', 'right', 'menu', 'down', 'collaboration']) {
       const widget = find(
         this.widgets(area as INotebookShell.Area),
         (w) => w.id === id
@@ -306,6 +348,9 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
           this.expandRight(id);
         } else if (area === 'down') {
           this._downPanel.show();
+          widget.activate();
+        } else if (area === 'collaboration') {
+          this.showCollaboration();
           widget.activate();
         } else {
           widget.activate();
@@ -352,6 +397,21 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
         return this._topHandler.addWidget(widget, rank);
       case 'menu':
         return this._menuHandler.addWidget(widget, rank);
+      case 'collaboration': {
+        // Check configuration to determine where to place collaboration widgets
+        if (this._collaborationConfig.useTopArea) {
+          // Place collaboration widgets in the top area instead
+          this._topHandler.addWidget(widget, rank);
+        } else {
+          // Place in dedicated collaboration area
+          this._collaborationHandler.addWidget(widget, rank);
+          this.showCollaboration();
+        }
+        
+        // Check if widget is a collaboration component and bind to services
+        this._bindCollaborationWidget(widget, options);
+        break;
+      }
       case 'main':
       case undefined: {
         if (this._main.widgets.length > 0) {
@@ -408,6 +468,18 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
       case 'menu':
         yield* this._menuHandler.panel.widgets;
         return;
+      case 'collaboration':
+        if (this._collaborationConfig.useTopArea) {
+          // Filter top area widgets to only return collaboration widgets
+          for (const widget of this._topHandler.panel.widgets) {
+            if (this._isCollaborationWidget(widget)) {
+              yield widget;
+            }
+          }
+        } else {
+          yield* this._collaborationHandler.panel.widgets;
+        }
+        return;
       case 'main':
         yield* this._main.widgets;
         return;
@@ -459,6 +531,47 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
   }
 
   /**
+   * Show the collaboration area if it contains widgets.
+   */
+  showCollaboration(): void {
+    if (this._collaborationHandler.panel.widgets.length > 0) {
+      this._collaborationWrapper.show();
+    }
+  }
+
+  /**
+   * Hide the collaboration area.
+   */
+  hideCollaboration(): void {
+    this._collaborationWrapper.hide();
+  }
+
+  /**
+   * Check if collaboration area is visible.
+   */
+  get isCollaborationVisible(): boolean {
+    return this._collaborationWrapper.isVisible;
+  }
+
+  /**
+   * Get the collaboration area configuration.
+   */
+  get collaborationConfig(): { useTopArea: boolean; enabled: boolean } {
+    return this._collaborationConfig;
+  }
+
+  /**
+   * Set collaboration area configuration.
+   */
+  setCollaborationConfig(config: { useTopArea?: boolean; enabled?: boolean }): void {
+    this._collaborationConfig = { ...this._collaborationConfig, ...config };
+    
+    if (!config.enabled) {
+      this.hideCollaboration();
+    }
+  }
+
+  /**
    * Restore the layout state and configuration for the application shell.
    */
   async restoreLayout(
@@ -476,10 +589,145 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     }
   }
 
+  /**
+   * Handle a change on the collaboration panel widgets
+   */
+  private _onCollaborationPanelChanged(): void {
+    if (this._collaborationHandler.panel.widgets.length === 0) {
+      this.hideCollaboration();
+    }
+  }
+
+  /**
+   * Bind collaboration-specific services to widgets that need them.
+   */
+  private _bindCollaborationWidget(
+    widget: Widget,
+    options?: DocumentRegistry.IOpenOptions
+  ): void {
+    // Check if widget needs collaboration service binding
+    const widgetId = widget.id;
+    const widgetType = options?.type;
+
+    try {
+      // Handle different types of collaboration widgets
+      if (widgetId.includes('collaboration-bar') || widgetType === 'collaboration-bar') {
+        this._bindCollaborationBarWidget(widget);
+      } else if (widgetId.includes('user-presence') || widgetType === 'user-presence') {
+        this._bindUserPresenceWidget(widget);
+      } else if (widgetId.includes('cell-lock') || widgetType === 'cell-lock') {
+        this._bindCellLockWidget(widget);
+      } else if (widgetId.includes('comment-system') || widgetType === 'comment-system') {
+        this._bindCommentSystemWidget(widget);
+      }
+
+      // Set up proper disposal for collaboration widgets
+      this._setupCollaborationWidgetDisposal(widget);
+    } catch (error) {
+      console.warn('Failed to bind collaboration services to widget:', error);
+    }
+  }
+
+  /**
+   * Bind collaboration services to a collaboration bar widget.
+   */
+  private _bindCollaborationBarWidget(widget: Widget): void {
+    // Implementation will depend on actual widget interface
+    // This is a placeholder for proper service injection
+    if ((widget as any).setCollaborationServices) {
+      (widget as any).setCollaborationServices({
+        collaborationProvider: this._collaborationProvider,
+        awarenessService: this._awarenessService,
+        lockService: this._lockService,
+        commentService: this._commentService,
+        historyManager: this._historyManager,
+        permissionsManager: this._permissionsManager
+      });
+    }
+  }
+
+  /**
+   * Bind awareness service to a user presence widget.
+   */
+  private _bindUserPresenceWidget(widget: Widget): void {
+    if ((widget as any).setAwarenessService && this._awarenessService) {
+      (widget as any).setAwarenessService(this._awarenessService);
+    }
+  }
+
+  /**
+   * Bind lock service to a cell lock indicator widget.
+   */
+  private _bindCellLockWidget(widget: Widget): void {
+    if ((widget as any).setLockService && this._lockService) {
+      (widget as any).setLockService(this._lockService);
+    }
+  }
+
+  /**
+   * Bind comment service to a comment system widget.
+   */
+  private _bindCommentSystemWidget(widget: Widget): void {
+    if ((widget as any).setCommentService && this._commentService) {
+      (widget as any).setCommentService(this._commentService);
+    }
+  }
+
+  /**
+   * Set up proper disposal handling for collaboration widgets.
+   */
+  private _setupCollaborationWidgetDisposal(widget: Widget): void {
+    widget.disposed.connect(() => {
+      // Clean up any collaboration-specific resources
+      if ((widget as any).disposeCollaborationBindings) {
+        (widget as any).disposeCollaborationBindings();
+      }
+    });
+  }
+
+  /**
+   * Set collaboration service instances for widget binding.
+   */
+  setCollaborationServices(services: {
+    collaborationProvider?: ICollaborationProvider;
+    awarenessService?: AwarenessService;
+    lockService?: LockService;
+    commentService?: CommentService;
+    historyManager?: HistoryManager;
+    permissionsManager?: PermissionsManager;
+  }): void {
+    this._collaborationProvider = services.collaborationProvider;
+    this._awarenessService = services.awarenessService;
+    this._lockService = services.lockService;
+    this._commentService = services.commentService;
+    this._historyManager = services.historyManager;
+    this._permissionsManager = services.permissionsManager;
+  }
+
+  /**
+   * Check if a widget is a collaboration widget.
+   */
+  private _isCollaborationWidget(widget: Widget): boolean {
+    const widgetId = widget.id;
+    const collaborationWidgetIds = [
+      'collaboration-bar',
+      'user-presence',
+      'cell-lock-indicator',
+      'comment-system',
+      'history-viewer',
+      'permissions-dialog'
+    ];
+    
+    return collaborationWidgetIds.some(id => widgetId.includes(id)) ||
+           widget.hasClass('jp-CollaborationWidget');
+  }
+
   private _topWrapper: Panel;
   private _topHandler: PanelHandler;
   private _menuWrapper: Panel;
   private _menuHandler: PanelHandler;
+  private _collaborationWrapper: Panel;
+  private _collaborationHandler: PanelHandler;
   private _leftHandler: SidePanelHandler;
   private _rightHandler: SidePanelHandler;
   private _spacer_top: Widget;
@@ -493,6 +741,18 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
   );
   private _mainWidgetLoaded = new PromiseDelegate<void>();
   private _userLayout: INotebookShell.IUserLayout;
+  
+  // Collaboration-related private fields
+  private _collaborationConfig: { useTopArea: boolean; enabled: boolean } = {
+    useTopArea: false,
+    enabled: true
+  };
+  private _collaborationProvider?: ICollaborationProvider;
+  private _awarenessService?: AwarenessService;
+  private _lockService?: LockService;
+  private _commentService?: CommentService;
+  private _historyManager?: HistoryManager;
+  private _permissionsManager?: PermissionsManager;
 }
 
 export namespace Private {
