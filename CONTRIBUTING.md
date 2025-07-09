@@ -7,7 +7,9 @@ for a friendly and welcoming collaborative environment.
 
 ## Setting up a development environment
 
-Note: You will need NodeJS to build the extension package.
+**Requirements:**
+- Python 3.13 or higher (minimum supported version)
+- NodeJS to build the extension package
 
 The `jlpm` command is JupyterLab's pinned version of [yarn](https://yarnpkg.com/) that is installed with JupyterLab. You may use
 `yarn` or `npm` in lieu of `jlpm` below.
@@ -16,7 +18,7 @@ The `jlpm` command is JupyterLab's pinned version of [yarn](https://yarnpkg.com/
 
 ```bash
 # create a new environment
-mamba create -n notebook -c conda-forge python nodejs -y
+mamba create -n notebook -c conda-forge python=3.13 nodejs -y
 
 # activate the environment
 mamba activate notebook
