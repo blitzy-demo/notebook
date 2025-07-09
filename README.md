@@ -28,6 +28,8 @@ The newest major version of Notebook is based on:
 
 This represents a significant change to the `jupyter/notebook` code base.
 
+**Requirements**: Notebook v7 requires Python 3.13 or newer.
+
 To learn more about Notebook v7: https://jupyter.org/enhancement-proposals/79-notebook-v7/notebook-v7.html
 
 ### Classic Notebook v6
@@ -61,7 +63,11 @@ You can find the installation documentation for the
 The documentation for advanced usage of Jupyter notebook can be found
 [here](https://jupyter-notebook.readthedocs.io/en/latest/).
 
-For a local installation, make sure you have
+### Requirements
+
+Jupyter Notebook v7 requires **Python 3.13 or newer**.
+
+For a local installation, make sure you have Python 3.13+ and
 [pip installed](https://pip.readthedocs.io/en/stable/installing/) and run:
 
 ```bash
@@ -83,6 +89,8 @@ jupyter notebook
 You need some configuration before starting Jupyter notebook remotely. See [Running a notebook server](https://jupyter-server.readthedocs.io/en/latest/operators/public-server.html).
 
 ## Development Installation
+
+**Requirements**: Development requires Python 3.13 or newer.
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to set up a local development installation.
 

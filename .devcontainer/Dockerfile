@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/base:jammy
+FROM mcr.microsoft.com/devcontainers/python:3.13
 
 ARG PIXI_VERSION=v0.42.1
 
