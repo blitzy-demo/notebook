@@ -7,8 +7,31 @@
   "forwardPorts": [8888],
   "customizations": {
     "vscode": {
-      "settings": {},
-      "extensions": ["ms-python.python", "charliermarsh.ruff", "GitHub.copilot"]
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/conda/envs/notebook/bin/python",
+        "python.terminal.activateEnvironment": true,
+        "python.terminal.activateEnvInCurrentTerminal": true,
+        "python.formatting.provider": "none",
+        "python.linting.enabled": true,
+        "python.linting.ruffEnabled": true,
+        "python.analysis.autoImportCompletions": true,
+        "python.analysis.typeCheckingMode": "basic",
+        "python.analysis.autoSearchPaths": true,
+        "python.analysis.diagnosticMode": "workspace",
+        "python.languageServer": "Pylance",
+        "ruff.args": ["--target-version", "py313"],
+        "ruff.interpreter": ["/opt/conda/envs/notebook/bin/python"],
+        "files.associations": {
+          "*.ipynb": "jupyter-notebook"
+        }
+      },
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "ms-toolsai.jupyter",
+        "GitHub.copilot"
+      ]
     }
   },
   "features": {
