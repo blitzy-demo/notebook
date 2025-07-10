@@ -17,6 +17,36 @@
     "strictNullChecks": true,
     "target": "ES2018",
     "types": [],
-    "lib": ["DOM", "DOM.Iterable", "ES2018", "ES2020.Intl"]
-  }
+    "lib": ["DOM", "DOM.Iterable", "ES2018", "ES2020.Intl"],
+    "baseUrl": ".",
+    "paths": {
+      "@jupyterlab/notebook/lib/collab/*": ["packages/notebook/src/collab/*"],
+      "@jupyterlab/notebook-extension/lib/components/*": ["packages/notebook-extension/src/components/*"],
+      "@jupyterlab/collaboration": ["node_modules/@jupyterlab/collaboration/lib/index"],
+      "@jupyterlab/collaboration/lib/*": ["node_modules/@jupyterlab/collaboration/lib/*"],
+      "yjs": ["node_modules/yjs/dist/yjs.mjs"],
+      "yjs/*": ["node_modules/yjs/dist/*"],
+      "y-websocket": ["node_modules/y-websocket/dist/y-websocket.mjs"],
+      "y-websocket/*": ["node_modules/y-websocket/dist/*"],
+      "y-protocols": ["node_modules/y-protocols/dist/y-protocols.mjs"],
+      "y-protocols/*": ["node_modules/y-protocols/dist/*"]
+    }
+  },
+  "include": [
+    "packages/*/src/**/*",
+    "packages/notebook/src/collab/**/*",
+    "packages/notebook-extension/src/components/**/*",
+    "packages/*/test/**/*",
+    "packages/*/typings/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "packages/*/build",
+    "packages/*/dist",
+    "packages/*/lib",
+    "packages/*/docs",
+    "packages/*/examples",
+    "packages/*/test_data",
+    "packages/*/tests"
+  ]
 }
