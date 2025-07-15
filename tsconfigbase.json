@@ -1,4 +1,5 @@
 {
+  "extends": "./tsconfig.json",
   "compilerOptions": {
     "allowSyntheticDefaultImports": true,
     "composite": true,
@@ -18,5 +19,25 @@
     "target": "ES2018",
     "types": [],
     "lib": ["DOM", "DOM.Iterable", "ES2018", "ES2020.Intl"]
-  }
+  },
+  "include": [
+    "src/**/*",
+    "packages/*/src/**/*",
+    "packages/notebook/src/collab/**/*",
+    "packages/notebook-extension/src/components/**/*",
+    "typings/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build",
+    "lib",
+    "*.min.js",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx",
+    "coverage",
+    "**/*.d.ts"
+  ]
 }
