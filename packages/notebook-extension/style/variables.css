@@ -47,34 +47,30 @@
   --jp-collab-fade-duration: 0.4s;
 
   /* Collaboration - Theme Light Mode */
-  --jp-collab-theme-light: {
-    --jp-collab-background-primary: #ffffff;
-    --jp-collab-background-secondary: #f8f9fa;
-    --jp-collab-background-tertiary: #e9ecef;
-    --jp-collab-text-primary: #212529;
-    --jp-collab-text-secondary: #6c757d;
-    --jp-collab-text-muted: #adb5bd;
-    --jp-collab-border-color: #dee2e6;
-    --jp-collab-shadow: rgba(0, 0, 0, 0.1);
-    --jp-collab-cursor-shadow: rgba(0, 0, 0, 0.15);
-    --jp-collab-selection-opacity: 0.2;
-    --jp-collab-highlight-opacity: 0.1;
-  };
+  --jp-collab-background-primary-light: #ffffff;
+  --jp-collab-background-secondary-light: #f8f9fa;
+  --jp-collab-background-tertiary-light: #e9ecef;
+  --jp-collab-text-primary-light: #212529;
+  --jp-collab-text-secondary-light: #6c757d;
+  --jp-collab-text-muted-light: #adb5bd;
+  --jp-collab-border-color-light: #dee2e6;
+  --jp-collab-shadow-light: rgba(0, 0, 0, 0.1);
+  --jp-collab-cursor-shadow-light: rgba(0, 0, 0, 0.15);
+  --jp-collab-selection-opacity-light: 0.2;
+  --jp-collab-highlight-opacity-light: 0.1;
 
   /* Collaboration - Theme Dark Mode */
-  --jp-collab-theme-dark: {
-    --jp-collab-background-primary: #212529;
-    --jp-collab-background-secondary: #343a40;
-    --jp-collab-background-tertiary: #495057;
-    --jp-collab-text-primary: #f8f9fa;
-    --jp-collab-text-secondary: #ced4da;
-    --jp-collab-text-muted: #6c757d;
-    --jp-collab-border-color: #495057;
-    --jp-collab-shadow: rgba(255, 255, 255, 0.1);
-    --jp-collab-cursor-shadow: rgba(255, 255, 255, 0.15);
-    --jp-collab-selection-opacity: 0.25;
-    --jp-collab-highlight-opacity: 0.15;
-  };
+  --jp-collab-background-primary-dark: #212529;
+  --jp-collab-background-secondary-dark: #343a40;
+  --jp-collab-background-tertiary-dark: #495057;
+  --jp-collab-text-primary-dark: #f8f9fa;
+  --jp-collab-text-secondary-dark: #ced4da;
+  --jp-collab-text-muted-dark: #6c757d;
+  --jp-collab-border-color-dark: #495057;
+  --jp-collab-shadow-dark: rgba(255, 255, 255, 0.1);
+  --jp-collab-cursor-shadow-dark: rgba(255, 255, 255, 0.15);
+  --jp-collab-selection-opacity-dark: 0.25;
+  --jp-collab-highlight-opacity-dark: 0.15;
 
   /* Collaboration - Presence Awareness */
   --jp-collab-cursor-width: 2px;
