@@ -3,14 +3,11 @@
 
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
-import { YNotebook } from '@jupyter/ydoc';
 import { ISignal, Signal } from '@lumino/signaling';
 import { IDisposable } from '@lumino/disposable';
 import { UUID } from '@lumino/coreutils';
 import { ServerConnection } from '@jupyterlab/services';
-import { Time } from '@jupyterlab/coreutils';
-import { ICellModel } from '@jupyterlab/cells';
-import { YjsNotebookProvider } from './provider';
+import YjsNotebookProvider from './provider';
 
 /**
  * Connection status enumeration for awareness system
@@ -1068,12 +1065,12 @@ export default class UserAwareness implements IUserAwareness, IDisposable {
 
     this._updateThrottleTimer = window.setTimeout(() => {
       // Process all pending updates
-      for (const uid of this._pendingUpdates) {
+      this._pendingUpdates.forEach(uid => {
         const user = this._users.get(uid);
         if (user) {
           this._updateAwarenessForUser(user);
         }
-      }
+      });
 
       this._pendingUpdates.clear();
       this._updateThrottleTimer = null;
@@ -1084,13 +1081,14 @@ export default class UserAwareness implements IUserAwareness, IDisposable {
    * Handle awareness map changes
    */
   private _handleAwarenessMapChange(event: Y.YMapEvent<any>): void {
-    for (const [userId, change] of event.changes.keys) {
+    const changes = event.changes.keys;
+    changes.forEach((change, userId) => {
       if (change.action === 'add' || change.action === 'update') {
         this._handleUserAwarenessUpdate(userId, this._awarenessMap.get(userId));
       } else if (change.action === 'delete') {
         this._handleUserAwarenessRemoval(userId);
       }
-    }
+    });
   }
 
   /**
@@ -1275,7 +1273,7 @@ export default class UserAwareness implements IUserAwareness, IDisposable {
     const now = Date.now();
     const inactivityThreshold = now - this._config.inactivityTimeout;
 
-    for (const [userId, user] of this._users.entries()) {
+    this._users.forEach((user, userId) => {
       if (user.lastSeen < inactivityThreshold && user.isActive) {
         // Mark user as inactive
         const updatedUser = { ...user, isActive: false, activity: UserActivityType.IDLE };
@@ -1291,7 +1289,7 @@ export default class UserAwareness implements IUserAwareness, IDisposable {
 
         this._updateAwarenessForUser(updatedUser);
       }
-    }
+    });
 
     // Emit users changed event if any changes were made
     this._onUsersChanged.emit(this.users);
@@ -1438,4 +1436,4 @@ class AwarenessRegistry implements IAwarenessRegistry {
 }
 
 // Export the registry class
-export { AwarenessRegistry as IAwarenessRegistry };
+export { AwarenessRegistry };
