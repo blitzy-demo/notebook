@@ -276,3 +276,17 @@ body[data-notebook='notebooks']
   text-decoration: underline;
   color: var(--jp-content-link-color);
 }
+
+/* Export CSS class names for collaboration components to extend and reference */
+:export {
+  jp-NotebookPanel: jp-NotebookPanel;
+  jp-WindowedPanel-outer: jp-WindowedPanel-outer;
+  jp-Notebook: jp-Notebook;
+  jp-cell: jp-cell;
+  jp-NotebookPanel-toolbar: jp-NotebookPanel-toolbar;
+  jp-NotebookKernelStatus: jp-NotebookKernelStatus;
+  jp-NotebookTrustedStatus: jp-NotebookTrustedStatus;
+  jp-mod-fullwidth: jp-mod-fullwidth;
+  jp-mod-commandMode: jp-mod-commandMode;
+  jp-NotebookCheckpoint: jp-NotebookCheckpoint;
+}
