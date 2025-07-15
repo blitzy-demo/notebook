@@ -1,7 +1,7 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { Y } from 'yjs';
+import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import { YNotebook } from '@jupyter/ydoc';
@@ -515,7 +515,7 @@ export default class YjsNotebookProvider implements IDisposable {
       roomName: this._config.roomName,
       connectedUsers: this._websocketProvider?.awareness?.getStates().size || 0,
       uptime: this._connectionState.lastSyncTime > 0 ? Date.now() - this._connectionState.lastSyncTime : 0,
-      documentSize: this._yjsDocument.toUint8Array().length
+      documentSize: Y.encodeStateAsUpdate(this._yjsDocument).length
     };
   }
 
@@ -591,6 +591,13 @@ export default class YjsNotebookProvider implements IDisposable {
    * Check if the provider is disposed
    */
   get disposed(): boolean {
+    return this._disposed;
+  }
+
+  /**
+   * Check if the provider is disposed (IDisposable interface)
+   */
+  get isDisposed(): boolean {
     return this._disposed;
   }
 
@@ -694,7 +701,7 @@ export default class YjsNotebookProvider implements IDisposable {
       transaction,
       timestamp: now,
       author: this._sessionId,
-      changes: transaction.changedParentTypes.values() as Y.YEvent<any>[],
+      changes: Array.from(transaction.changedParentTypes.values()).flat(),
       stateVector: this.getStateVector()
     };
 
@@ -856,7 +863,7 @@ export default class YjsNotebookProvider implements IDisposable {
       this._yNotebook.fromJSON(data);
       
       // Sync with Yjs document
-      this._yjsDocument.getMap('notebook').set('data', this._yNotebook.getState());
+      this._yjsDocument.getMap('notebook').set('data', this._yNotebook.toJSON());
     } catch (error) {
       console.error('Failed to load initial data:', error);
     }
