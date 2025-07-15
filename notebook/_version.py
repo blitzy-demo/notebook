@@ -8,6 +8,9 @@ from collections import namedtuple
 # Use "hatch version xx.yy.zz" to handle version changes
 __version__ = "7.5.0a0"
 
+# Explicitly export the version constant
+__all__ = ["__version__"]
+
 # PEP440 version parser
 _version_regex = re.compile(
     r"""
