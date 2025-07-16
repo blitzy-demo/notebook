@@ -680,7 +680,7 @@ class DatabaseStorageBackend:
         try:
             await self._create_connection()
             await self._create_tables()
-            await self._migrate_schema()
+            await self.migrate_schema()
             self.logger.info(f"Database storage backend initialized successfully")
         except Exception as e:
             self.logger.error(f"Failed to initialize database storage backend: {e}")
