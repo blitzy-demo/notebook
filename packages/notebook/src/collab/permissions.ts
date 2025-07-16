@@ -2,14 +2,14 @@
 // Distributed under the terms of the Modified BSD License.
 
 import * as Y from 'yjs';
-import { YNotebook } from '@jupyter/ydoc';
+
 import { Signal, ISignal } from '@lumino/signaling';
 import { IDisposable } from '@lumino/disposable';
-import { ICellModel } from '@jupyterlab/cells';
-import { INotebookModel } from '@jupyterlab/notebook';
-import { UUID } from '@lumino/coreutils';
+
+
+
 import { ServerConnection } from '@jupyterlab/services';
-import { Time } from '@jupyterlab/coreutils';
+
 import YjsNotebookProvider from './provider';
 import UserAwareness from './awareness';
 
@@ -1035,6 +1035,7 @@ export default class PermissionsSystem implements IPermissionsManager, IPermissi
         // Update current user context
         this._currentUser = {
           ...this._currentUser,
+          userId: this._currentUser.userId,
           roles: user.roles || this._currentUser.roles,
           groups: user.groups || this._currentUser.groups,
           permissions: user.permissions || this._currentUser.permissions
