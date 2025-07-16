@@ -1183,7 +1183,7 @@ export default class CommentSystem implements ICommentManager, IDisposable {
       throw new Error(`Comment not found: ${commentId}`);
     }
     
-    return new CommentThread(comment, this._renderer);
+    return new CommentThread(comment, this._renderer || undefined);
   }
 
   /**
