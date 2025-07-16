@@ -2,15 +2,14 @@
 // Distributed under the terms of the Modified BSD License.
 
 import * as Y from 'yjs';
-import { WebsocketProvider } from 'y-websocket';
-import { IndexeddbPersistence } from 'y-indexeddb';
+
 import { YNotebook } from '@jupyter/ydoc';
 
-import { INotebookModel } from '@jupyterlab/notebook';
+
 import { INotebookContent } from '@jupyterlab/nbformat';
 import { ICellModel } from '@jupyterlab/cells';
 import { DocumentRegistry } from '@jupyterlab/docregistry';
-import { IObservableList } from '@jupyterlab/observables';
+
 
 import { Signal, ISignal } from '@lumino/signaling';
 import { IDisposable } from '@lumino/disposable';
@@ -214,8 +213,7 @@ export default class NotebookModel implements ICollaborativeNotebook, ICollabora
   private _onActiveUsersChanged = new Signal<this, any[]>(this);
   
   // Synchronization management
-  private _syncInProgress = false;
-  private _pendingUpdates = new Set<string>();
+
   private _updateThrottleTimer: number | null = null;
   private _reconnectTimer: number | null = null;
 
