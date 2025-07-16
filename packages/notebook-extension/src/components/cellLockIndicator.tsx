@@ -1,15 +1,15 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { ReactWidget } from '@jupyterlab/apputils';
 import { ITranslator } from '@jupyterlab/translation';
-import { Cell } from '@jupyterlab/cells';
 import { Time } from '@jupyterlab/coreutils';
 import { userIcon } from '@jupyterlab/ui-components';
-import { CellLocking, ICellLock, LockState } from '../../../notebook/src/collab/locks';
-import { YjsNotebookProvider } from '../../../notebook/src/collab/provider';
-import { UserAwareness, IUser } from '../../../notebook/src/collab/awareness';
+import CellLocking, { ICellLock } from '../../../notebook/src/collab/locks';
+import YjsNotebookProvider from '../../../notebook/src/collab/provider';
+import UserAwareness, { IUser } from '../../../notebook/src/collab/awareness';
 
 /**
  * Interface for cell lock indicator component properties
@@ -76,7 +76,7 @@ export default class CellLockIndicator extends ReactWidget {
   private _awareness: UserAwareness;
   private _cellId: string;
   private _translator: ITranslator;
-  private _disposed = false;
+  private _isDisposed = false;
   private _lockUpdateTimer: number | null = null;
 
   /**
@@ -108,7 +108,6 @@ export default class CellLockIndicator extends ReactWidget {
    */
   get props(): ICellLockIndicatorProps {
     const currentLock = this._getLockForCell(this._cellId);
-    const currentUser = this._awareness.getCurrentUser();
     const lockOwner = currentLock ? currentLock.owner : null;
     
     return {
@@ -174,11 +173,11 @@ export default class CellLockIndicator extends ReactWidget {
    * Dispose of the component
    */
   dispose(): void {
-    if (this._disposed) {
+    if (this._isDisposed) {
       return;
     }
     
-    this._disposed = true;
+    this._isDisposed = true;
     
     // Clear update timer
     if (this._lockUpdateTimer) {
@@ -596,5 +595,5 @@ const style = document.createElement('style');
 style.textContent = CSS_STYLES;
 document.head.appendChild(style);
 
-// Export the component and interface
-export { CellLockIndicator, ICellLockIndicatorProps };
+// Export the component
+export { CellLockIndicator };
