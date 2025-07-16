@@ -228,6 +228,13 @@ export class CollaborativeCell extends Widget implements ICellCollaborationFeatu
   }
 
   /**
+   * Get the cell ID
+   */
+  get cellId(): string {
+    return this._cellId;
+  }
+
+  /**
    * Get the cell editor
    */
   get editor(): any {
@@ -474,7 +481,7 @@ export class CollaborativeCell extends Widget implements ICellCollaborationFeatu
    * Check if disposed
    */
   get isDisposed(): boolean {
-    return this._collaborationDisposed || super.isDisposed;
+    return this._collaborationDisposed || Boolean(this.disposed);
   }
 
   /**
