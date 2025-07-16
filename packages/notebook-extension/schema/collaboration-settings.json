@@ -1,0 +1,342 @@
+{
+  "title": "Jupyter Notebook Collaboration Settings",
+  "description": "Configuration for real-time collaborative editing features including user preferences, feature toggles, and synchronization settings",
+  "jupyter.lab.menus": {
+    "main": [
+      {
+        "id": "jp-mainmenu-edit",
+        "items": [
+          {
+            "type": "separator",
+            "rank": 9.5
+          },
+          {
+            "command": "notebook:toggle-collaboration",
+            "rank": 9.5
+          },
+          {
+            "command": "notebook:collaboration-settings",
+            "rank": 9.5
+          },
+          {
+            "type": "separator",
+            "rank": 9.5
+          }
+        ]
+      },
+      {
+        "id": "jp-mainmenu-view",
+        "items": [
+          {
+            "command": "notebook:toggle-collaboration-status-bar",
+            "rank": 5
+          },
+          {
+            "command": "notebook:toggle-user-presence",
+            "rank": 5
+          },
+          {
+            "command": "notebook:toggle-cell-lock-indicators",
+            "rank": 5
+          }
+        ]
+      },
+      {
+        "id": "jp-mainmenu-help",
+        "items": [
+          {
+            "command": "notebook:collaboration-help",
+            "rank": 10
+          }
+        ]
+      }
+    ]
+  },
+  "properties": {
+    "enableCollaboration": {
+      "type": "boolean",
+      "title": "Enable Collaboration",
+      "description": "Enable real-time collaborative editing features for this notebook session",
+      "default": true
+    },
+    "autoConnectToSession": {
+      "type": "boolean",
+      "title": "Auto-connect to Collaboration Session",
+      "description": "Automatically connect to collaborative session when opening a notebook",
+      "default": true
+    },
+    "updateFrequency": {
+      "type": "integer",
+      "title": "Update Frequency (ms)",
+      "description": "Frequency of synchronization updates in milliseconds (affects performance vs. real-time responsiveness)",
+      "default": 100,
+      "minimum": 50,
+      "maximum": 1000
+    },
+    "awarenessUpdateInterval": {
+      "type": "integer",
+      "title": "Awareness Update Interval (ms)",
+      "description": "Interval for broadcasting user presence and cursor position updates",
+      "default": 200,
+      "minimum": 100,
+      "maximum": 2000
+    },
+    "connectionTimeout": {
+      "type": "integer",
+      "title": "Connection Timeout (ms)",
+      "description": "Maximum time to wait for initial collaboration connection",
+      "default": 3000,
+      "minimum": 1000,
+      "maximum": 30000
+    },
+    "enablePresenceAwareness": {
+      "type": "boolean",
+      "title": "Enable User Presence Awareness",
+      "description": "Show cursor positions and selections of other collaborators",
+      "default": true
+    },
+    "enableCellLocking": {
+      "type": "boolean",
+      "title": "Enable Cell Locking",
+      "description": "Allow users to lock cells for exclusive editing access",
+      "default": true
+    },
+    "enableChangeHistory": {
+      "type": "boolean",
+      "title": "Enable Change History",
+      "description": "Track change history and version control for collaborative editing",
+      "default": true
+    },
+    "enableComments": {
+      "type": "boolean",
+      "title": "Enable Comments System",
+      "description": "Allow users to add comments and discussions to notebook cells",
+      "default": true
+    },
+    "enablePermissions": {
+      "type": "boolean",
+      "title": "Enable Permissions System",
+      "description": "Enforce access control and permission management for collaborative editing",
+      "default": true
+    },
+    "showCollaborationStatusBar": {
+      "type": "boolean",
+      "title": "Show Collaboration Status Bar",
+      "description": "Display collaboration status bar showing active users and connection status",
+      "default": true
+    },
+    "showUserPresenceIndicators": {
+      "type": "boolean",
+      "title": "Show User Presence Indicators",
+      "description": "Display visual indicators for user cursors and selections",
+      "default": true
+    },
+    "showCellLockIndicators": {
+      "type": "boolean",
+      "title": "Show Cell Lock Indicators",
+      "description": "Display visual indicators for locked cells",
+      "default": true
+    },
+    "maxConcurrentUsers": {
+      "type": "integer",
+      "title": "Maximum Concurrent Users",
+      "description": "Maximum number of users allowed in a single collaboration session",
+      "default": 10,
+      "minimum": 1,
+      "maximum": 50
+    },
+    "lockAcquisitionTimeout": {
+      "type": "integer",
+      "title": "Lock Acquisition Timeout (ms)",
+      "description": "Maximum time to wait when acquiring a cell lock",
+      "default": 5000,
+      "minimum": 1000,
+      "maximum": 30000
+    },
+    "retryConnectionAttempts": {
+      "type": "integer",
+      "title": "Retry Connection Attempts",
+      "description": "Number of times to retry connection to collaboration server",
+      "default": 3,
+      "minimum": 0,
+      "maximum": 10
+    },
+    "retryConnectionDelay": {
+      "type": "integer",
+      "title": "Retry Connection Delay (ms)",
+      "description": "Delay between connection retry attempts",
+      "default": 2000,
+      "minimum": 500,
+      "maximum": 10000
+    },
+    "enableOfflineEditing": {
+      "type": "boolean",
+      "title": "Enable Offline Editing",
+      "description": "Allow editing when disconnected from collaboration server (changes will sync when reconnected)",
+      "default": true
+    },
+    "enableConflictResolution": {
+      "type": "boolean",
+      "title": "Enable Conflict Resolution",
+      "description": "Enable automatic conflict resolution using CRDT algorithms",
+      "default": true
+    },
+    "saveHistorySnapshots": {
+      "type": "boolean",
+      "title": "Save History Snapshots",
+      "description": "Save periodic snapshots of document state for version history",
+      "default": true
+    },
+    "historySnapshotInterval": {
+      "type": "integer",
+      "title": "History Snapshot Interval (minutes)",
+      "description": "Interval for creating automatic history snapshots",
+      "default": 30,
+      "minimum": 5,
+      "maximum": 1440
+    },
+    "notificationSettings": {
+      "type": "object",
+      "title": "Notification Settings",
+      "description": "Configure notifications for collaboration events",
+      "properties": {
+        "userJoinedSession": {
+          "type": "boolean",
+          "title": "User Joined Session",
+          "description": "Show notification when a user joins the collaboration session",
+          "default": true
+        },
+        "userLeftSession": {
+          "type": "boolean",
+          "title": "User Left Session",
+          "description": "Show notification when a user leaves the collaboration session",
+          "default": true
+        },
+        "cellLocked": {
+          "type": "boolean",
+          "title": "Cell Locked",
+          "description": "Show notification when a cell is locked by another user",
+          "default": true
+        },
+        "commentAdded": {
+          "type": "boolean",
+          "title": "Comment Added",
+          "description": "Show notification when a comment is added to a cell",
+          "default": true
+        },
+        "permissionChanged": {
+          "type": "boolean",
+          "title": "Permission Changed",
+          "description": "Show notification when notebook permissions are modified",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "userInterfaceSettings": {
+      "type": "object",
+      "title": "User Interface Settings",
+      "description": "Configuration for collaboration UI elements",
+      "properties": {
+        "showUserAvatars": {
+          "type": "boolean",
+          "title": "Show User Avatars",
+          "description": "Display user avatars in presence indicators",
+          "default": true
+        },
+        "showUserNames": {
+          "type": "boolean",
+          "title": "Show User Names",
+          "description": "Display user names in presence indicators",
+          "default": true
+        },
+        "cursorColorScheme": {
+          "type": "string",
+          "title": "Cursor Color Scheme",
+          "description": "Color scheme for user cursors and selections",
+          "enum": ["rainbow", "pastel", "vibrant", "monochrome"],
+          "default": "rainbow"
+        },
+        "statusBarPosition": {
+          "type": "string",
+          "title": "Status Bar Position",
+          "description": "Position of the collaboration status bar",
+          "enum": ["top", "bottom", "hidden"],
+          "default": "bottom"
+        },
+        "compactMode": {
+          "type": "boolean",
+          "title": "Compact Mode",
+          "description": "Use compact layout for collaboration UI elements",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "performanceSettings": {
+      "type": "object",
+      "title": "Performance Settings",
+      "description": "Configuration for collaboration performance optimization",
+      "properties": {
+        "enableBatchUpdates": {
+          "type": "boolean",
+          "title": "Enable Batch Updates",
+          "description": "Batch multiple updates together for better performance",
+          "default": true
+        },
+        "batchUpdateInterval": {
+          "type": "integer",
+          "title": "Batch Update Interval (ms)",
+          "description": "Interval for batching updates when batch mode is enabled",
+          "default": 50,
+          "minimum": 10,
+          "maximum": 500
+        },
+        "enableCompressionUpdates": {
+          "type": "boolean",
+          "title": "Enable Compression",
+          "description": "Compress update payloads for better network performance",
+          "default": true
+        },
+        "maxUpdateHistory": {
+          "type": "integer",
+          "title": "Maximum Update History",
+          "description": "Maximum number of updates to keep in memory for conflict resolution",
+          "default": 1000,
+          "minimum": 100,
+          "maximum": 10000
+        }
+      },
+      "additionalProperties": false
+    },
+    "debugSettings": {
+      "type": "object",
+      "title": "Debug Settings",
+      "description": "Configuration for debugging collaboration features",
+      "properties": {
+        "enableDebugMode": {
+          "type": "boolean",
+          "title": "Enable Debug Mode",
+          "description": "Enable detailed logging for collaboration events",
+          "default": false
+        },
+        "logLevel": {
+          "type": "string",
+          "title": "Log Level",
+          "description": "Logging level for collaboration debug information",
+          "enum": ["error", "warn", "info", "debug", "trace"],
+          "default": "info"
+        },
+        "showConnectionMetrics": {
+          "type": "boolean",
+          "title": "Show Connection Metrics",
+          "description": "Display connection performance metrics in the status bar",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "type": "object"
+}
