@@ -4,7 +4,6 @@
 import { JupyterFrontEnd } from '@jupyterlab/application';
 import { DocumentRegistry } from '@jupyterlab/docregistry';
 import { ITranslator, nullTranslator } from '@jupyterlab/translation';
-import { ReactWidget } from '@jupyterlab/apputils';
 
 import { find } from '@lumino/algorithm';
 import { JSONExt, PromiseDelegate, Token } from '@lumino/coreutils';
@@ -20,8 +19,6 @@ import {
 } from '@lumino/widgets';
 import { PanelHandler, SidePanelHandler } from './panelhandler';
 import { TabPanelSvg } from '@jupyterlab/ui-components';
-import { CollaborationStatusBar } from '../../notebook-extension/src/components/collaborationBar';
-import { UserPresence } from '../../notebook-extension/src/components/userPresence';
 import { ICollaborationManager } from './tokens';
 
 /**
@@ -609,7 +606,8 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
     }
     
     // Remove from collaboration widgets map
-    for (const [type, storedWidget] of this._collaborationWidgets.entries()) {
+    const entries = Array.from(this._collaborationWidgets.entries());
+    for (const [type, storedWidget] of entries) {
       if (storedWidget === widget) {
         this._collaborationWidgets.delete(type);
         break;
