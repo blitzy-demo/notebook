@@ -1,6 +1,7 @@
 {
   "title": "Jupyter Notebook Comment and Review System",
   "description": "Configuration schema for collaborative comment and review system in Jupyter Notebook v7 with real-time synchronization, threaded discussions, and review workflow management",
+  "type": "object",
   "jupyter.lab.menus": {
     "main": [
       {
@@ -519,6 +520,5 @@
       "additionalProperties": false
     }
   },
-  "additionalProperties": false,
-  "type": "object"
+  "additionalProperties": false
 }
