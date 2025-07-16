@@ -8,11 +8,9 @@ import { IDisposable } from '@lumino/disposable';
 import { UUID } from '@lumino/coreutils';
 import { Time } from '@jupyterlab/coreutils';
 import { ServerConnection } from '@jupyterlab/services';
-import { ICellModel } from '@jupyterlab/cells';
-import { INotebookContent } from '@jupyterlab/nbformat';
 import { IDocumentUpdateEvent } from './provider';
 import { IPermissionsManager } from './permissions';
-import { UserAwareness } from './awareness';
+import UserAwareness from './awareness';
 
 /**
  * Enumeration of change types for history tracking
@@ -609,7 +607,9 @@ export default class ChangeHistory implements IChangeHistory, IVersionProvider, 
       }
 
       // Calculate the diff between versions
-      const diff = Y.diffUpdate(toData, Y.encodeStateVector(fromData));
+      const fromDoc = new Y.Doc();
+      Y.applyUpdate(fromDoc, fromData);
+      const diff = Y.diffUpdate(toData, Y.encodeStateVector(fromDoc));
       
       return {
         from: fromVersion,
@@ -846,16 +846,16 @@ export default class ChangeHistory implements IChangeHistory, IVersionProvider, 
 
     // Check for cell operations
     for (const change of changes) {
-      if (change.type === 'cells') {
+      if (change.target && change.target.constructor.name === 'YArray') {
         if (change.keys && change.keys.has('length')) {
           return ChangeType.CELL_ADDED;
         }
         return ChangeType.CELL_MOVED;
       }
-      if (change.type === 'content') {
+      if (change.target && change.target.constructor.name === 'YText') {
         return ChangeType.CELL_CONTENT_CHANGED;
       }
-      if (change.type === 'metadata') {
+      if (change.target && change.target.constructor.name === 'YMap') {
         return ChangeType.CELL_METADATA_CHANGED;
       }
     }
@@ -894,15 +894,14 @@ export default class ChangeHistory implements IChangeHistory, IVersionProvider, 
     
     try {
       const cells = this._yNotebook.cells;
-      for (let i = 0; i < cells.length; i++) {
-        const cell = cells.get(i);
+      cells.forEach((cell: any) => {
         if (cell && cell.get) {
           const cellId = cell.get('id');
           if (cellId) {
             cellIds.push(cellId);
           }
         }
-      }
+      });
     } catch (error) {
       console.warn('Failed to get all cell IDs:', error);
     }
@@ -956,7 +955,6 @@ export default class ChangeHistory implements IChangeHistory, IVersionProvider, 
    */
   private async _createVersionFromChangeSet(changeSet: IChangeSet): Promise<string> {
     const versionId = this._generateVersionId();
-    const currentUser = this._awareness.getCurrentUser();
     
     // Create snapshot
     const stateUpdate = Y.encodeStateAsUpdate(this._yjsDocument);
@@ -995,11 +993,11 @@ export default class ChangeHistory implements IChangeHistory, IVersionProvider, 
     const now = Date.now();
     const cutoff = now - this._config.snapshotInterval;
 
-    for (const [id, changeSet] of this._changeSets.entries()) {
+    this._changeSets.forEach((changeSet, id) => {
       if (changeSet.timestamp >= cutoff) {
         recentChanges.push(id);
       }
-    }
+    });
 
     return recentChanges;
   }
