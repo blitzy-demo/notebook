@@ -13,8 +13,8 @@
  */
 
 // Core notebook components with collaboration capabilities
-export { NotebookModel } from './model';
-export { NotebookPanel } from './widget';
+export { default as NotebookModel } from './model';
+export { default as NotebookPanel } from './widget';
 
 // Collaboration service components
 export { default as YjsNotebookProvider } from './collab/provider';
@@ -43,11 +43,11 @@ export { CommentStatus, CommentPermission, CommentEventType } from './collab/com
 
 // Additional interfaces for external integration
 export { IDocumentUpdateEvent, IProviderConfig } from './collab/provider';
-export { ICursorPosition, ISelection, IUserInfo } from './collab/awareness';
+export { ICursorPosition, ISelection, IUser } from './collab/awareness';
 export { ICellLock, ILockEvent } from './collab/locks';
 export { IVersionMetadata, IChangeSet, IChangeEvent } from './collab/history';
 export { IPermissionGrant, IUserContext, IPermissionContext } from './collab/permissions';
-export { IComment, ICommentThread, ICommentEvent } from './collab/comments';
+export { IComment, ICommentThread, ICommentNotification } from './collab/comments';
 
 // Utility types for collaboration configuration
 export { ICollaborationState } from './model';
