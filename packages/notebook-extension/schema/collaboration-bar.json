@@ -1,0 +1,212 @@
+{
+  "title": "Collaboration Status Bar",
+  "description": "Configuration for the collaboration status bar component that displays active collaborators, connection status, and synchronization metrics for real-time collaborative editing sessions.",
+  "jupyter.lab.toolbars": {
+    "BottomBar": [
+      {
+        "name": "collaboration-status",
+        "rank": 10
+      }
+    ]
+  },
+  "properties": {
+    "showUserCount": {
+      "type": "boolean",
+      "title": "Show User Count",
+      "description": "Display the total number of active collaborators in the status bar",
+      "default": true
+    },
+    "showConnectionStatus": {
+      "type": "boolean",
+      "title": "Show Connection Status",
+      "description": "Display real-time connection status indicator with connection health metrics",
+      "default": true
+    },
+    "showSessionId": {
+      "type": "boolean",
+      "title": "Show Session ID",
+      "description": "Display the collaborative session identifier for troubleshooting and session management",
+      "default": false
+    },
+    "maxDisplayedUsers": {
+      "type": "integer",
+      "title": "Maximum Displayed Users",
+      "description": "Maximum number of user avatars to display individually before showing overflow count",
+      "default": 5,
+      "minimum": 1,
+      "maximum": 20
+    },
+    "compactMode": {
+      "type": "boolean",
+      "title": "Compact Mode",
+      "description": "Enable compact display mode for smaller screens or minimal interface preference",
+      "default": false
+    },
+    "showOptionsMenu": {
+      "type": "boolean",
+      "title": "Show Options Menu",
+      "description": "Display the collaboration options menu button for accessing sharing, permissions, and settings",
+      "default": true
+    },
+    "showUserAvatars": {
+      "type": "boolean",
+      "title": "Show User Avatars",
+      "description": "Display individual user avatars with presence indicators for active collaborators",
+      "default": true
+    },
+    "showUserNames": {
+      "type": "boolean",
+      "title": "Show User Names",
+      "description": "Display usernames alongside or instead of avatars in the user list",
+      "default": false
+    },
+    "avatarSize": {
+      "type": "integer",
+      "title": "Avatar Size",
+      "description": "Size of user avatars in pixels for presence indicators",
+      "default": 24,
+      "minimum": 16,
+      "maximum": 48
+    },
+    "updateInterval": {
+      "type": "integer",
+      "title": "Status Update Interval",
+      "description": "Time in milliseconds between status bar updates for connection health and user presence",
+      "default": 5000,
+      "minimum": 1000,
+      "maximum": 30000
+    },
+    "showConnectionQuality": {
+      "type": "boolean",
+      "title": "Show Connection Quality",
+      "description": "Display connection quality indicators (good, poor) alongside connection status",
+      "default": true
+    },
+    "showLastSyncTime": {
+      "type": "boolean",
+      "title": "Show Last Sync Time",
+      "description": "Display timestamp of the last successful synchronization with the server",
+      "default": false
+    },
+    "showCollaborationMetrics": {
+      "type": "boolean",
+      "title": "Show Collaboration Metrics",
+      "description": "Display collaboration statistics such as active editing sessions and recent changes",
+      "default": false
+    },
+    "alertOnDisconnection": {
+      "type": "boolean",
+      "title": "Alert on Disconnection",
+      "description": "Show visual alerts when connection to the collaboration server is lost",
+      "default": true
+    },
+    "showReconnectButton": {
+      "type": "boolean",
+      "title": "Show Reconnect Button",
+      "description": "Display a manual reconnect button when connection is lost",
+      "default": true
+    },
+    "positionInStatusBar": {
+      "type": "string",
+      "title": "Position in Status Bar",
+      "description": "Position of the collaboration status bar component within the bottom status bar",
+      "default": "left",
+      "enum": ["left", "center", "right"]
+    },
+    "showActiveCell": {
+      "type": "boolean",
+      "title": "Show Active Cell",
+      "description": "Display which cell each collaborator is currently editing",
+      "default": true
+    },
+    "showUserActivity": {
+      "type": "boolean",
+      "title": "Show User Activity",
+      "description": "Display activity indicators for users (typing, idle, active)",
+      "default": true
+    },
+    "hideInactiveUsers": {
+      "type": "boolean",
+      "title": "Hide Inactive Users",
+      "description": "Hide users who have been inactive for the configured timeout period",
+      "default": false
+    },
+    "inactivityTimeout": {
+      "type": "integer",
+      "title": "Inactivity Timeout",
+      "description": "Time in seconds after which inactive users are considered disconnected",
+      "default": 300,
+      "minimum": 60,
+      "maximum": 3600
+    },
+    "showSessionUptime": {
+      "type": "boolean",
+      "title": "Show Session Uptime",
+      "description": "Display how long the current collaboration session has been active",
+      "default": false
+    },
+    "enableStatusBarTooltips": {
+      "type": "boolean",
+      "title": "Enable Status Bar Tooltips",
+      "description": "Show detailed tooltips when hovering over status bar elements",
+      "default": true
+    },
+    "showPermissionLevel": {
+      "type": "boolean",
+      "title": "Show Permission Level",
+      "description": "Display the current user's permission level (view, edit, admin) in the status bar",
+      "default": false
+    },
+    "enableQuickActions": {
+      "type": "boolean",
+      "title": "Enable Quick Actions",
+      "description": "Show quick action buttons for common collaboration tasks (share, lock, comment)",
+      "default": true
+    },
+    "animatePresenceChanges": {
+      "type": "boolean",
+      "title": "Animate Presence Changes",
+      "description": "Enable smooth animations when users join, leave, or change activity status",
+      "default": true
+    },
+    "showNetworkLatency": {
+      "type": "boolean",
+      "title": "Show Network Latency",
+      "description": "Display network latency metrics for collaboration synchronization",
+      "default": false
+    },
+    "colorScheme": {
+      "type": "string",
+      "title": "Color Scheme",
+      "description": "Color scheme for user presence indicators and status elements",
+      "default": "auto",
+      "enum": ["auto", "light", "dark", "high-contrast"]
+    },
+    "showDocumentSyncStatus": {
+      "type": "boolean",
+      "title": "Show Document Sync Status",
+      "description": "Display synchronization status for the current document (synced, syncing, conflict)",
+      "default": true
+    },
+    "enableClickToFocus": {
+      "type": "boolean",
+      "title": "Enable Click to Focus",
+      "description": "Allow clicking on user avatars to focus on their current editing location",
+      "default": true
+    },
+    "showChangeCount": {
+      "type": "boolean",
+      "title": "Show Change Count",
+      "description": "Display the number of changes made in the current collaboration session",
+      "default": false
+    },
+    "enableMobileOptimization": {
+      "type": "boolean",
+      "title": "Enable Mobile Optimization",
+      "description": "Optimize status bar layout and interactions for mobile devices",
+      "default": true
+    }
+  },
+  "additionalProperties": false,
+  "type": "object"
+}
