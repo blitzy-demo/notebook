@@ -2,16 +2,14 @@
 // Distributed under the terms of the Modified BSD License.
 
 import * as React from 'react';
-import * as Y from 'yjs';
-import { YNotebook } from '@jupyter/ydoc';
+
 
 import { Widget } from '@lumino/widgets';
 import { Signal, ISignal } from '@lumino/signaling';
 
 import { NotebookPanel as BaseNotebookPanel } from '@jupyterlab/notebook';
 import { Cell } from '@jupyterlab/cells';
-import { Toolbar } from '@jupyterlab/apputils';
-import { LabIcon } from '@jupyterlab/ui-components';
+
 
 import NotebookModel from './model';
 import YjsNotebookProvider from './collab/provider';
@@ -19,7 +17,7 @@ import UserAwareness from './collab/awareness';
 import CellLocking from './collab/locks';
 import CommentSystem from './collab/comments';
 import { IChangeHistory } from './collab/history';
-import { ICollaborativeRole } from './collab/permissions';
+
 import { CollaborativeCell } from './default-cell';
 
 /**
@@ -618,7 +616,7 @@ export default class NotebookPanel extends BaseNotebookPanel implements INoteboo
     this._updateCollaborationStatus();
     this._onCellsChanged.emit();
     
-    return cellWidget || this.content.activeCell;
+    return cellWidget || this.content.activeCell || this.content.widgets[0];
   }
 
   /**
