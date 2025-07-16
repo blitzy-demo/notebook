@@ -1033,13 +1033,21 @@ export default class PermissionsSystem implements IPermissionsManager, IPermissi
       // Update user context if needed
       if (user.userId && this._currentUser?.userId === user.userId) {
         // Update current user context
-        this._currentUser = {
-          ...this._currentUser,
-          userId: this._currentUser.userId,
-          roles: user.roles || this._currentUser.roles,
-          groups: user.groups || this._currentUser.groups,
-          permissions: user.permissions || this._currentUser.permissions
-        };
+        const currentUser = this._currentUser;
+        if (currentUser) {
+          this._currentUser = {
+            userId: currentUser.userId,
+            username: currentUser.username || '',
+            email: currentUser.email || '',
+            displayName: currentUser.displayName || '',
+            roles: user.roles || currentUser.roles,
+            groups: user.groups || currentUser.groups,
+            permissions: user.permissions || currentUser.permissions,
+            isAuthenticated: currentUser.isAuthenticated || false,
+            authenticationMethod: currentUser.authenticationMethod || '',
+            sessionId: currentUser.sessionId || ''
+          };
+        }
       }
     });
   }
