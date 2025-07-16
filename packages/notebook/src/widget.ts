@@ -13,11 +13,11 @@ import { Cell } from '@jupyterlab/cells';
 import { Toolbar } from '@jupyterlab/apputils';
 import { LabIcon } from '@jupyterlab/ui-components';
 
-import { NotebookModel } from './model';
-import { YjsNotebookProvider } from './collab/provider';
-import { UserAwareness } from './collab/awareness';
-import { CellLocking } from './collab/locks';
-import { CommentSystem } from './collab/comments';
+import NotebookModel from './model';
+import YjsNotebookProvider from './collab/provider';
+import UserAwareness from './collab/awareness';
+import CellLocking from './collab/locks';
+import CommentSystem from './collab/comments';
 import { IChangeHistory } from './collab/history';
 import { ICollaborativeRole } from './collab/permissions';
 import { CollaborativeCell } from './default-cell';
@@ -459,10 +459,17 @@ export default class NotebookPanel extends BaseNotebookPanel implements INoteboo
   }
 
   /**
-   * Get the notebook model
+   * Get the collaborative notebook model
    */
-  get model(): NotebookModel {
+  get collaborativeModel(): NotebookModel {
     return this._model;
+  }
+
+  /**
+   * Get the notebook model (base class compatibility)
+   */
+  get model(): any {
+    return this._model as any;
   }
 
   /**
@@ -602,27 +609,25 @@ export default class NotebookPanel extends BaseNotebookPanel implements INoteboo
    * Add a cell to the notebook
    */
   addCell(type: string, index?: number): Cell {
-    const cell = this.content.model?.createCell(type, {}) as any;
-    if (index !== undefined) {
-      this.content.model?.cells.insert(index, cell);
-    } else {
-      this.content.model?.cells.push(cell);
-    }
+    const cellModel = this._model.createCell(type, {});
+    
+    // Find the corresponding cell widget
+    const cellWidget = this.content.widgets.find(w => (w as any).model?.id === cellModel.id);
     
     // Update collaboration status
     this._updateCollaborationStatus();
     this._onCellsChanged.emit();
     
-    return cell;
+    return cellWidget || this.content.activeCell;
   }
 
   /**
    * Delete a cell from the notebook
    */
   deleteCell(cell: Cell): void {
-    const index = this.content.widgets.indexOf(cell);
-    if (index !== -1) {
-      this.content.model?.cells.remove(index);
+    const cellId = (cell.model as any)?.id;
+    if (cellId) {
+      this._model.deleteCell(cellId);
       this._updateCollaborationStatus();
       this._onCellsChanged.emit();
     }
@@ -709,7 +714,7 @@ export default class NotebookPanel extends BaseNotebookPanel implements INoteboo
       return;
     }
 
-    const cellId = (cell.model as any).id;
+    const cellId = cell.model.id;
     
     // Set up user presence indicators
     this._setupUserPresenceIndicators(cellId, cell);
@@ -854,18 +859,18 @@ export default class NotebookPanel extends BaseNotebookPanel implements INoteboo
   private _setupCollaborativeCellFeatures(cell: CollaborativeCell): void {
     // Connect to cell collaboration signals
     cell.onLockStateChanged.connect((sender, lockStatus) => {
-      this._updateCellLockIndicator(cell.model.id);
-      this._onCellLockChanged.emit({ cellId: cell.model.id, lockStatus });
+      this._updateCellLockIndicator(cell.cellId);
+      this._onCellLockChanged.emit({ cellId: cell.cellId, lockStatus });
     });
 
     cell.onUserPresenceChanged.connect((sender, presence) => {
-      this._updateUserPresenceIndicators(cell.model.id);
-      this._onUserPresenceChanged.emit({ cellId: cell.model.id, presence });
+      this._updateUserPresenceIndicators(cell.cellId);
+      this._onUserPresenceChanged.emit({ cellId: cell.cellId, presence });
     });
 
     cell.onCommentAdded.connect((sender, comment) => {
-      this._updateCommentIndicator(cell.model.id);
-      this._onCommentChanged.emit({ cellId: cell.model.id, comment });
+      this._updateCommentIndicator(cell.cellId);
+      this._onCommentChanged.emit({ cellId: cell.cellId, comment });
     });
   }
 
@@ -957,23 +962,27 @@ export default class NotebookPanel extends BaseNotebookPanel implements INoteboo
       return;
     }
 
-    // Update connection health
-    if (this._collaborationProvider) {
-      const health = this._collaborationProvider.getConnectionHealth();
-      this._collaborationStatus.connectionHealth = health;
+    try {
+      // Update connection health
+      if (this._collaborationProvider) {
+        const health = this._collaborationProvider.getConnectionHealth();
+        this._collaborationStatus.connectionHealth = health;
+      }
+
+      // Update last sync time
+      this._collaborationStatus.lastSyncTime = Date.now();
+
+      // Update current user
+      this._collaborationStatus.currentUser = this._userAwareness?.getCurrentUser() || null;
+
+      // Emit status change
+      this._onCollaborationStatusChanged.emit(this._collaborationStatus);
+
+      // Re-render collaboration bar
+      this._renderCollaborationBar();
+    } catch (error) {
+      console.error('Failed to update collaboration status:', error);
     }
-
-    // Update last sync time
-    this._collaborationStatus.lastSyncTime = Date.now();
-
-    // Update current user
-    this._collaborationStatus.currentUser = this._userAwareness?.getCurrentUser() || null;
-
-    // Emit status change
-    this._onCollaborationStatusChanged.emit(this._collaborationStatus);
-
-    // Re-render collaboration bar
-    this._renderCollaborationBar();
   }
 
   /**
@@ -1032,7 +1041,7 @@ export default class NotebookPanel extends BaseNotebookPanel implements INoteboo
       this._userAwareness.trackUserActivity(currentUser.id, {
         userId: currentUser.id,
         activity: 'editing' as any,
-        cellId: (cell.model as any).id,
+        cellId: cell.model.id,
         timestamp: Date.now(),
         type: 'editing',
         isActive: true
@@ -1285,17 +1294,23 @@ export default class NotebookPanel extends BaseNotebookPanel implements INoteboo
    * Toggle collaboration
    */
   private async _toggleCollaboration(): Promise<void> {
-    if (this._collaborationStatus.enabled) {
-      await this._model.disableCollaboration();
-      this._collaborationStatus.enabled = false;
-      this._collaborationStatus.connectionState = CollaborationConnectionState.DISCONNECTED;
-    } else {
-      await this._model.enableCollaboration();
-      this._collaborationStatus.enabled = true;
-      this._initializeCollaborationSystems();
+    try {
+      if (this._collaborationStatus.enabled) {
+        await this._model.disableCollaboration();
+        this._collaborationStatus.enabled = false;
+        this._collaborationStatus.connectionState = CollaborationConnectionState.DISCONNECTED;
+      } else {
+        await this._model.enableCollaboration();
+        this._collaborationStatus.enabled = true;
+        this._initializeCollaborationSystems();
+      }
+      
+      this._updateCollaborationStatus();
+    } catch (error) {
+      console.error('Failed to toggle collaboration:', error);
+      this._collaborationStatus.connectionState = CollaborationConnectionState.ERROR;
+      this._updateCollaborationStatus();
     }
-    
-    this._updateCollaborationStatus();
   }
 
   /**
