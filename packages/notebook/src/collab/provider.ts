@@ -8,8 +8,7 @@ import { YNotebook } from '@jupyter/ydoc';
 import { ISignal, Signal } from '@lumino/signaling';
 import { IDisposable } from '@lumino/disposable';
 import { UUID } from '@lumino/coreutils';
-import { URLExt } from '@jupyterlab/coreutils';
-import { ServerConnection } from '@jupyterlab/services';
+
 
 /**
  * Connection status enumeration for collaboration state tracking
@@ -398,7 +397,7 @@ export default class YjsNotebookProvider implements IDisposable {
         {
           // Configure WebSocket options
           connect: true,
-          awareness: this._config.enableAwareness ? undefined : null,
+          awareness: this._config.enableAwareness ? undefined : undefined,
           params: {
             sessionId: this._sessionId
           }
