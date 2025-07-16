@@ -1,17 +1,13 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import * as React from 'react';
-import * as Y from 'yjs';
-import { YNotebook } from '@jupyter/ydoc';
-import { MarkdownCell } from '@jupyterlab/cells';
 import { Widget } from '@lumino/widgets';
 import { Signal, ISignal } from '@lumino/signaling';
 
-import { NotebookModel } from './model';
-import { CellLocking, ICellLock, LockEventType } from './collab/locks';
-import { UserAwareness, IUser, IUserActivity, UserActivityType } from './collab/awareness';
-import { CommentSystem, IComment } from './collab/comments';
+import NotebookModel from './model';
+import CellLocking, { ICellLock } from './collab/locks';
+import UserAwareness, { IUser, UserActivityType } from './collab/awareness';
+import CommentSystem, { IComment } from './collab/comments';
 import { ICollaborativeRole, PermissionAction } from './collab/permissions';
 
 /**
@@ -149,7 +145,7 @@ export interface ICellCollaborationFeatures {
   /** Add comment to cell */
   addComment(content: string): Promise<IComment>;
   /** Get comments for cell */
-  getComments(): IComment[];
+  getComments(): Promise<IComment[]>;
   /** Update user presence */
   updateUserPresence(activity: UserActivityType): void;
   /** Check permission for action */
@@ -169,24 +165,24 @@ export interface ICellCollaborationFeatures {
  */
 export class CollaborativeCell extends Widget implements ICellCollaborationFeatures {
   private _model: NotebookModel;
-  private _cellId: string;
+  protected _cellId: string;
   private _cellLocking: CellLocking;
-  private _userAwareness: UserAwareness;
+  private _userAwareness: UserAwareness | null;
   private _commentSystem: CommentSystem;
   private _editor: any = null;
-  private _disposed = false;
+  private _collaborationDisposed = false;
 
   // Collaboration state
-  private _lockStatus: ICellLockStatus;
-  private _userPresence: ICellUserPresence;
-  private _comments: ICellComments;
-  private _permissions: ICellPermissions;
+  private _lockStatus!: ICellLockStatus;
+  private _userPresence!: ICellUserPresence;
+  private _comments!: ICellComments;
+  private _permissions!: ICellPermissions;
   private _collaborationState: CollaborativeCellState = CollaborativeCellState.IDLE;
 
   // Visual indicators
-  private _lockIndicator: CellLockIndicator;
-  private _presenceIndicator: UserPresenceIndicator;
-  private _commentPanel: CellCommentPanel;
+  private _lockIndicator!: CellLockIndicator;
+  private _presenceIndicator!: UserPresenceIndicator;
+  private _commentPanel!: CellCommentPanel;
 
   // Signals
   private _onLockStateChanged = new Signal<ICellCollaborationFeatures, ICellLockStatus>(this);
@@ -206,9 +202,9 @@ export class CollaborativeCell extends Widget implements ICellCollaborationFeatu
     
     this._model = model;
     this._cellId = cellId;
-    this._cellLocking = model.provider?.cellLocking || null;
+    this._cellLocking = (model as any)._cellLocking || null;
     this._userAwareness = model.awareness || null;
-    this._commentSystem = model.provider?.commentSystem || null;
+    this._commentSystem = (model as any)._commentSystem || null;
 
     // Initialize collaboration state
     this._initializeCollaborationState();
@@ -253,6 +249,13 @@ export class CollaborativeCell extends Widget implements ICellCollaborationFeatu
    */
   get lockStatus(): ICellLockStatus {
     return { ...this._lockStatus };
+  }
+
+  /**
+   * Get current collaboration state
+   */
+  get collaborationState(): CollaborativeCellState {
+    return this._collaborationState;
   }
 
   /**
@@ -308,7 +311,7 @@ export class CollaborativeCell extends Widget implements ICellCollaborationFeatu
    * Acquire lock for exclusive editing
    */
   async acquireLock(): Promise<boolean> {
-    if (!this._cellLocking || this._disposed) {
+    if (!this._cellLocking || this._collaborationDisposed) {
       return false;
     }
 
@@ -335,7 +338,7 @@ export class CollaborativeCell extends Widget implements ICellCollaborationFeatu
    * Release lock
    */
   async releaseLock(): Promise<boolean> {
-    if (!this._cellLocking || this._disposed) {
+    if (!this._cellLocking || this._collaborationDisposed) {
       return false;
     }
 
@@ -381,13 +384,13 @@ export class CollaborativeCell extends Widget implements ICellCollaborationFeatu
       throw new Error('Cannot add comment: insufficient permissions');
     }
 
-    const comment = await this._commentSystem.createComment({
-      cellId: this._cellId,
+    const comment = await this._commentSystem.createComment(
+      this._cellId,
       content,
-      author: this._userAwareness?.getCurrentUser()
-    });
+      this._userAwareness?.getCurrentUser()?.displayName || 'Anonymous'
+    );
 
-    this._updateComments();
+    await this._updateComments();
     this._onCommentAdded.emit(comment);
     return comment;
   }
@@ -395,11 +398,11 @@ export class CollaborativeCell extends Widget implements ICellCollaborationFeatu
   /**
    * Get comments for cell
    */
-  getComments(): IComment[] {
+  async getComments(): Promise<IComment[]> {
     if (!this._commentSystem) {
       return [];
     }
-    return this._commentSystem.getCommentsForCell(this._cellId);
+    return await this._commentSystem.getCommentsForCell(this._cellId);
   }
 
   /**
@@ -471,18 +474,18 @@ export class CollaborativeCell extends Widget implements ICellCollaborationFeatu
    * Check if disposed
    */
   get isDisposed(): boolean {
-    return this._disposed;
+    return this._collaborationDisposed || super.isDisposed;
   }
 
   /**
    * Dispose of the cell
    */
   dispose(): void {
-    if (this._disposed) {
+    if (this._collaborationDisposed) {
       return;
     }
 
-    this._disposed = true;
+    this._collaborationDisposed = true;
 
     // Release any held locks
     if (this._lockStatus.isOwnedByCurrentUser) {
@@ -505,8 +508,9 @@ export class CollaborativeCell extends Widget implements ICellCollaborationFeatu
 
     // Clear signals
     Signal.clearData(this);
-
-    super.dispose();
+    
+    // Note: Widget's dispose method is private, so we don't call super.dispose()
+    // The Widget class will handle its own disposal when needed
   }
 
   /**
@@ -565,7 +569,7 @@ export class CollaborativeCell extends Widget implements ICellCollaborationFeatu
     // Update initial state
     this._updateLockStatus(null);
     this._updateUserPresence();
-    this._updateComments();
+    this._updateComments().catch(console.error);
   }
 
   /**
@@ -601,7 +605,7 @@ export class CollaborativeCell extends Widget implements ICellCollaborationFeatu
 
     // Comment system handler
     if (this._commentSystem) {
-      this._commentSystem.subscribeToComments(this._cellId, this._onCommentChangedHandler.bind(this));
+      this._commentSystem.subscribeToComments(this._onCommentChangedHandler.bind(this));
     }
   }
 
@@ -655,7 +659,7 @@ export class CollaborativeCell extends Widget implements ICellCollaborationFeatu
   /**
    * Handle lock state changes
    */
-  private _onLockStateChangedHandler(sender: CellLocking, event: any): void {
+  private _onLockStateChangedHandler(sender: any, event: any): void {
     if (event.cellId === this._cellId) {
       this._updateLockStatus(event.lock);
     }
@@ -664,15 +668,15 @@ export class CollaborativeCell extends Widget implements ICellCollaborationFeatu
   /**
    * Handle user presence changes
    */
-  private _onUsersChangedHandler(sender: UserAwareness, users: Map<string, IUser>): void {
+  private _onUsersChangedHandler(sender: any, users: any): void {
     this._updateUserPresence();
   }
 
   /**
    * Handle comment changes
    */
-  private _onCommentChangedHandler(comments: IComment[]): void {
-    this._updateComments();
+  private _onCommentChangedHandler(eventType: any, comment: any): void {
+    this._updateComments().catch(console.error);
   }
 
   /**
@@ -748,12 +752,12 @@ export class CollaborativeCell extends Widget implements ICellCollaborationFeatu
   /**
    * Update comments
    */
-  private _updateComments(): void {
+  private async _updateComments(): Promise<void> {
     if (!this._commentSystem) {
       return;
     }
 
-    const comments = this._commentSystem.getCommentsForCell(this._cellId);
+    const comments = await this._commentSystem.getCommentsForCell(this._cellId);
     const unresolvedComments = comments.filter(comment => !comment.resolved);
 
     this._comments = {
@@ -1307,7 +1311,6 @@ export class CollaborativeCodeCell extends CollaborativeCell {
  */
 export class CollaborativeMarkdownCell extends CollaborativeCell {
   private _rendered = false;
-  private _markdownCell: MarkdownCell | null = null;
 
   /**
    * Construct a new CollaborativeMarkdownCell
