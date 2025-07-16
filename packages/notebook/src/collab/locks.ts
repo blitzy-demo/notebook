@@ -2,12 +2,12 @@
 // Distributed under the terms of the Modified BSD License.
 
 import * as Y from 'yjs';
-import { YNotebook } from '@jupyter/ydoc';
+
 import { ISignal, Signal } from '@lumino/signaling';
 import { IDisposable } from '@lumino/disposable';
 import { UUID } from '@lumino/coreutils';
-import { ICellModel } from '@jupyterlab/cells';
-import { Time } from '@jupyterlab/coreutils';
+
+
 import YjsNotebookProvider from './provider';
 import UserAwareness from './awareness';
 
@@ -174,6 +174,7 @@ const DEFAULT_LOCK_CONFIG = {
   maxRetries: 3,
   retryDelay: 1000, // 1 second
   lockType: LockType.EXCLUSIVE,
+  metadata: {},
   autoRelease: true,
   enableVisualIndicators: true
 };
@@ -387,7 +388,7 @@ export default class CellLocking implements ICellLockManager, IDisposable {
         lock,
         LockState.PENDING,
         LockState.ERROR,
-        `Failed to acquire lock: ${error.message}`
+        `Failed to acquire lock: ${error instanceof Error ? error.message : String(error)}`
       );
       this._onLockStateChanged.emit(event);
       
@@ -447,7 +448,7 @@ export default class CellLocking implements ICellLockManager, IDisposable {
         lock,
         LockState.ACTIVE,
         LockState.ERROR,
-        `Failed to release lock: ${error.message}`
+        `Failed to release lock: ${error instanceof Error ? error.message : String(error)}`
       );
       this._onLockStateChanged.emit(event);
       
@@ -475,7 +476,8 @@ export default class CellLocking implements ICellLockManager, IDisposable {
    * Get lock by ID
    */
   getLockById(lockId: string): ICellLock | null {
-    for (const lock of this._activeLocks.values()) {
+    const locks = Array.from(this._activeLocks.values());
+    for (const lock of locks) {
       if (lock.id === lockId) {
         return lock;
       }
@@ -571,11 +573,13 @@ export default class CellLocking implements ICellLockManager, IDisposable {
     }
 
     // Clear all timers
-    for (const [lockId] of this._heartbeatTimers) {
+    const heartbeatEntries = Array.from(this._heartbeatTimers.entries());
+    for (const [lockId] of heartbeatEntries) {
       this.stopHeartbeat(lockId);
     }
     
-    for (const [lockId, timer] of this._lockTimeouts) {
+    const timeoutEntries = Array.from(this._lockTimeouts.entries());
+    for (const [, timer] of timeoutEntries) {
       clearTimeout(timer);
     }
     this._lockTimeouts.clear();
@@ -669,7 +673,8 @@ export default class CellLocking implements ICellLockManager, IDisposable {
    */
   private _handleLockRemoved(lockId: string): void {
     // Find and remove lock from local tracking
-    for (const [cellId, lock] of this._activeLocks.entries()) {
+    const entries = Array.from(this._activeLocks.entries());
+    for (const [cellId, lock] of entries) {
       if (lock.id === lockId) {
         this._activeLocks.delete(cellId);
         this._clearLockTimers(lockId);
@@ -702,7 +707,7 @@ export default class CellLocking implements ICellLockManager, IDisposable {
   /**
    * Handle users changed
    */
-  private _onUsersChanged(sender: UserAwareness, users: Map<string, any>): void {
+  private _onUsersChanged(sender: import('./awareness').IUserAwareness, users: Map<string, import('./awareness').IUser>): void {
     // Check for inactive users and clean up their locks
     this._cleanupInactiveUserLocks(users);
   }
@@ -869,7 +874,8 @@ export default class CellLocking implements ICellLockManager, IDisposable {
   private _cleanupInactiveUserLocks(users: Map<string, any>): void {
     const activeUserIds = new Set(users.keys());
     
-    for (const [cellId, lock] of this._activeLocks.entries()) {
+    const entries = Array.from(this._activeLocks.entries());
+    for (const [cellId, lock] of entries) {
       if (!activeUserIds.has(lock.ownerId)) {
         // User is no longer active, remove their locks
         this._activeLocks.delete(cellId);
