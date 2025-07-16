@@ -32,18 +32,14 @@ import {
 } from './tokens';
 
 // Collaboration implementation imports
-import YjsNotebookProvider from '../notebook/src/collab/provider';
-import UserAwareness from '../notebook/src/collab/awareness';
-import CellLocking from '../notebook/src/collab/locks';
-import ChangeHistory from '../notebook/src/collab/history';
-import PermissionsSystem from '../notebook/src/collab/permissions';
-import CommentSystem from '../notebook/src/collab/comments';
+import YjsNotebookProvider from '../../notebook/src/collab/provider';
+import UserAwareness from '../../notebook/src/collab/awareness';
+import CellLocking from '../../notebook/src/collab/locks';
+import ChangeHistory from '../../notebook/src/collab/history';
+import PermissionsSystem from '../../notebook/src/collab/permissions';
+import CommentSystem from '../../notebook/src/collab/comments';
 
-// Yjs and external collaboration dependencies
-import * as Y from 'yjs';
-import { WebsocketProvider } from 'y-websocket';
-import { IndexeddbPersistence } from 'y-indexeddb';
-import { YNotebook } from '@jupyter/ydoc';
+// Yjs and external collaboration dependencies are imported by the specific collaboration components
 
 /**
  * App is the main application class. It is instantiated once and shared.
@@ -218,10 +214,11 @@ export class NotebookApp extends JupyterFrontEnd<INotebookShell> {
         id: '@jupyter-notebook/collaboration:yjs-provider',
         description: 'Yjs document provider for real-time collaboration',
         autoStart: true,
-        requires: [ICollaborationManager],
-        activate: (app: JupyterFrontEnd, collaborationManager: ICollaborationManager) => {
+        provides: ICollaborationManager,
+        activate: (app: JupyterFrontEnd) => {
           console.log('Yjs provider plugin activated');
-          return collaborationManager;
+          const notebookApp = app as NotebookApp;
+          return notebookApp.collaborationManager;
         }
       },
       
@@ -230,10 +227,11 @@ export class NotebookApp extends JupyterFrontEnd<INotebookShell> {
         id: '@jupyter-notebook/collaboration:user-awareness',
         description: 'User presence tracking for collaborative editing',
         autoStart: true,
-        requires: [IUserAwareness],
-        activate: (app: JupyterFrontEnd, userAwareness: IUserAwareness) => {
+        provides: IUserAwareness,
+        activate: (app: JupyterFrontEnd) => {
           console.log('User awareness plugin activated');
-          return userAwareness;
+          const notebookApp = app as NotebookApp;
+          return notebookApp.userAwareness;
         }
       },
       
@@ -242,10 +240,11 @@ export class NotebookApp extends JupyterFrontEnd<INotebookShell> {
         id: '@jupyter-notebook/collaboration:cell-locking',
         description: 'Cell-level locking for conflict prevention',
         autoStart: true,
-        requires: [ILockManager],
-        activate: (app: JupyterFrontEnd, lockManager: ILockManager) => {
+        provides: ILockManager,
+        activate: (app: JupyterFrontEnd) => {
           console.log('Cell locking plugin activated');
-          return lockManager;
+          const notebookApp = app as NotebookApp;
+          return notebookApp.lockManager;
         }
       },
       
@@ -254,10 +253,11 @@ export class NotebookApp extends JupyterFrontEnd<INotebookShell> {
         id: '@jupyter-notebook/collaboration:change-history',
         description: 'Change history and version tracking',
         autoStart: true,
-        requires: [IHistoryManager],
-        activate: (app: JupyterFrontEnd, historyManager: IHistoryManager) => {
+        provides: IHistoryManager,
+        activate: (app: JupyterFrontEnd) => {
           console.log('Change history plugin activated');
-          return historyManager;
+          const notebookApp = app as NotebookApp;
+          return notebookApp.historyManager;
         }
       },
       
@@ -266,10 +266,11 @@ export class NotebookApp extends JupyterFrontEnd<INotebookShell> {
         id: '@jupyter-notebook/collaboration:permissions',
         description: 'Access control for collaborative editing',
         autoStart: true,
-        requires: [IPermissionManager],
-        activate: (app: JupyterFrontEnd, permissionManager: IPermissionManager) => {
+        provides: IPermissionManager,
+        activate: (app: JupyterFrontEnd) => {
           console.log('Permissions plugin activated');
-          return permissionManager;
+          const notebookApp = app as NotebookApp;
+          return notebookApp.permissionManager;
         }
       },
       
@@ -278,10 +279,11 @@ export class NotebookApp extends JupyterFrontEnd<INotebookShell> {
         id: '@jupyter-notebook/collaboration:comments',
         description: 'Cell-level commenting system',
         autoStart: true,
-        requires: [ICommentManager],
-        activate: (app: JupyterFrontEnd, commentManager: ICommentManager) => {
+        provides: ICommentManager,
+        activate: (app: JupyterFrontEnd) => {
           console.log('Comment system plugin activated');
-          return commentManager;
+          const notebookApp = app as NotebookApp;
+          return notebookApp.commentManager;
         }
       },
       
@@ -296,16 +298,9 @@ export class NotebookApp extends JupyterFrontEnd<INotebookShell> {
           
           // Add collaboration status widget to the application shell
           if (app.shell && typeof app.shell.add === 'function') {
-            // Create collaboration status widget
-            const statusWidget = {
-              id: 'collaboration-status',
-              title: 'Collaboration Status',
-              collaborationManager,
-              userAwareness
-            };
-            
-            // Add to bottom area of the shell
-            app.shell.add(statusWidget, 'bottom');
+            // Create collaboration status widget placeholder
+            // The actual widget implementation will be provided by the collaboration status bar component
+            console.log('Collaboration status bar will be created by the notebook-extension plugin');
           }
           
           return { userAwareness, collaborationManager };
@@ -332,11 +327,11 @@ export class NotebookApp extends JupyterFrontEnd<INotebookShell> {
 
   // Collaboration services
   private _collaborationManager: ICollaborationManager | null = null;
-  private _userAwareness: IUserAwareness | null = null;
-  private _lockManager: ILockManager | null = null;
-  private _historyManager: IHistoryManager | null = null;
-  private _permissionManager: IPermissionManager | null = null;
-  private _commentManager: ICommentManager | null = null;
+  private _userAwareness: UserAwareness | null = null;
+  private _lockManager: CellLocking | null = null;
+  private _historyManager: ChangeHistory | null = null;
+  private _permissionManager: PermissionsSystem | null = null;
+  private _commentManager: CommentSystem | null = null;
   private _collaborationInitialized = false;
 
   /**
@@ -349,35 +344,35 @@ export class NotebookApp extends JupyterFrontEnd<INotebookShell> {
   /**
    * Get the user awareness service
    */
-  get userAwareness(): IUserAwareness | null {
+  get userAwareness(): UserAwareness | null {
     return this._userAwareness;
   }
 
   /**
    * Get the lock manager service
    */
-  get lockManager(): ILockManager | null {
+  get lockManager(): CellLocking | null {
     return this._lockManager;
   }
 
   /**
    * Get the history manager service
    */
-  get historyManager(): IHistoryManager | null {
+  get historyManager(): ChangeHistory | null {
     return this._historyManager;
   }
 
   /**
    * Get the permission manager service
    */
-  get permissionManager(): IPermissionManager | null {
+  get permissionManager(): PermissionsSystem | null {
     return this._permissionManager;
   }
 
   /**
    * Get the comment manager service
    */
-  get commentManager(): ICommentManager | null {
+  get commentManager(): CommentSystem | null {
     return this._commentManager;
   }
 
@@ -463,9 +458,9 @@ export class NotebookApp extends JupyterFrontEnd<INotebookShell> {
     // Create service instances with proper dependency injection
     this._userAwareness = new UserAwareness(yjsProvider, config);
     this._lockManager = new CellLocking(yjsProvider, this._userAwareness, config);
-    this._historyManager = new ChangeHistory(yjsProvider, config);
-    this._permissionManager = new PermissionsSystem(config);
-    this._commentManager = new CommentSystem(yjsProvider, this._userAwareness, config);
+    this._permissionManager = new PermissionsSystem(yjsProvider, this._userAwareness, config);
+    this._historyManager = new ChangeHistory(yjsProvider, this._permissionManager, this._userAwareness, config);
+    this._commentManager = new CommentSystem(yjsProvider, this._userAwareness, this._permissionManager, config);
 
     // Create collaboration manager to coordinate all services
     this._collaborationManager = {
@@ -527,28 +522,14 @@ export class NotebookApp extends JupyterFrontEnd<INotebookShell> {
     // Register services in the application's service registry
     try {
       // Register collaboration services as singletons using token-based registration
-      if (this.serviceManager && typeof this.serviceManager.addService === 'function') {
-        this.serviceManager.addService(ICollaborationManager, this._collaborationManager);
-        this.serviceManager.addService(IUserAwareness, this._userAwareness);
-        this.serviceManager.addService(ILockManager, this._lockManager);
-        this.serviceManager.addService(IHistoryManager, this._historyManager);
-        this.serviceManager.addService(IPermissionManager, this._permissionManager);
-        this.serviceManager.addService(ICommentManager, this._commentManager);
-
-        console.info('Collaboration services registered in application service registry');
-      } else {
-        // Alternative registration using the application registry directly
-        this.serviceManager.set(ICollaborationManager, this._collaborationManager);
-        this.serviceManager.set(IUserAwareness, this._userAwareness);
-        this.serviceManager.set(ILockManager, this._lockManager);
-        this.serviceManager.set(IHistoryManager, this._historyManager);
-        this.serviceManager.set(IPermissionManager, this._permissionManager);
-        this.serviceManager.set(ICommentManager, this._commentManager);
-
-        console.info('Collaboration services registered using direct service manager');
-      }
+      // Note: The JupyterLab application doesn't have a traditional service registry
+      // Services are provided through the plugin system dependency injection
+      console.info('Collaboration services initialized and ready for plugin dependency injection');
+      
+      // Services will be available through the application instance getters
+      // and can be accessed by plugins that declare the appropriate tokens as dependencies
     } catch (error) {
-      console.error('Failed to register collaboration services:', error);
+      console.error('Failed to initialize collaboration services:', error);
       throw error;
     }
   }
@@ -562,7 +543,22 @@ export class NotebookApp extends JupyterFrontEnd<INotebookShell> {
     }
 
     try {
-      return this.serviceManager.get(token);
+      // Map tokens to service instances
+      if (token === ICollaborationManager) {
+        return this._collaborationManager as T;
+      } else if (token === IUserAwareness) {
+        return this._userAwareness as T;
+      } else if (token === ILockManager) {
+        return this._lockManager as T;
+      } else if (token === IHistoryManager) {
+        return this._historyManager as T;
+      } else if (token === IPermissionManager) {
+        return this._permissionManager as T;
+      } else if (token === ICommentManager) {
+        return this._commentManager as T;
+      }
+      
+      return null;
     } catch (error) {
       console.error('Failed to get collaboration service:', error);
       return null;
