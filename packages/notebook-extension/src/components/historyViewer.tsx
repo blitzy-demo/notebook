@@ -1,14 +1,15 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import * as React from 'react';
+const { useState, useEffect, useCallback, useMemo } = React;
 import { ReactWidget } from '@jupyterlab/apputils';
 import { ITranslator } from '@jupyterlab/translation';
 import { closeIcon } from '@jupyterlab/ui-components';
 import { Time } from '@jupyterlab/coreutils';
-import { diffLines } from 'diff';
+import { diffLines as createDiffLines } from 'diff';
 import { IVersionMetadata } from '../../../notebook/src/collab/history';
-import { YjsNotebookProvider } from '../../../notebook/src/collab/provider';
+import YjsNotebookProvider from '../../../notebook/src/collab/provider';
 
 // Import CSS styles
 import '../style/historyViewer.css';
@@ -292,7 +293,7 @@ const HistoryViewerComponent: React.FC<IHistoryViewerProps> = ({
       const result = await onVersionCompare(fromVersion, toVersion);
       
       // Process diff result for visualization
-      const diffLines = result.diff ? diffLines(
+      const diffLines = result.diff ? createDiffLines(
         result.fromContent || '',
         result.toContent || ''
       ) : [];
