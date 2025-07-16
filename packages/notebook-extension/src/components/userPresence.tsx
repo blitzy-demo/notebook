@@ -1,13 +1,13 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import React, { useState, useEffect, useCallback } from 'react';
+import * as React from 'react';
 import { ReactWidget } from '@jupyterlab/apputils';
 import { ITranslator } from '@jupyterlab/translation';
 import { Button } from '@jupyterlab/ui-components';
 import { Time } from '@jupyterlab/coreutils';
-import { UserAwareness, IUser, ConnectionStatus, UserActivityType } from '../../notebook/src/collab/awareness';
-import { YjsNotebookProvider } from '../../notebook/src/collab/provider';
+import UserAwareness, { IUser, ConnectionStatus, UserActivityType } from '../../../notebook/src/collab/awareness';
+import YjsNotebookProvider from '../../../notebook/src/collab/provider';
 
 // CSS styles for the UserPresence component
 const USER_PRESENCE_STYLES = `
@@ -394,7 +394,7 @@ interface IUserPresenceState {
  * and cell focus locations. It provides real-time visualization of user activity with
  * user-specific colors for cursors and selections.
  */
-export default class UserPresence extends React.Component<IUserPresenceProps, IUserPresenceState> {
+export class UserPresence extends React.Component<IUserPresenceProps, IUserPresenceState> {
   private _awareness: UserAwareness | null = null;
   private _provider: YjsNotebookProvider | null = null;
   private _activityTimeoutId: number | null = null;
@@ -850,7 +850,6 @@ export default class UserPresence extends React.Component<IUserPresenceProps, IU
             className="jp-UserPresence-controlButton"
             onClick={this._handleToggleInactiveUsers}
             minimal={true}
-            size="small"
           >
             {this.props.showInactiveUsers 
               ? trans.__('Hide inactive users') 
@@ -864,42 +863,39 @@ export default class UserPresence extends React.Component<IUserPresenceProps, IU
 }
 
 /**
- * Namespace for UserPresence component functionality
+ * Default visual settings for the presence display
  */
-export namespace UserPresence {
-  /**
-   * Create a new UserPresence widget
-   */
-  export const create = (props: IUserPresenceProps): ReactWidget => {
-    return ReactWidget.create(<UserPresence {...props} />);
-  };
+export const defaultVisualSettings: IPresenceVisualSettings = {
+  showCursors: true,
+  showSelections: true,
+  showAvatars: true,
+  showActivityStatus: true,
+  colorScheme: 'vibrant',
+  animateChanges: true,
+  maxDisplayedUsers: 50
+};
 
-  /**
-   * Default visual settings for the presence display
-   */
-  export const defaultVisualSettings: IPresenceVisualSettings = {
-    showCursors: true,
-    showSelections: true,
-    showAvatars: true,
-    showActivityStatus: true,
-    colorScheme: 'vibrant',
-    animateChanges: true,
-    maxDisplayedUsers: 50
-  };
+/**
+ * Create a new UserPresence widget
+ */
+export const createUserPresenceWidget = (props: IUserPresenceProps): ReactWidget => {
+  return ReactWidget.create(<UserPresence {...props} />);
+};
 
-  /**
-   * Create default props for the UserPresence component
-   */
-  export const createDefaultProps = (translator: ITranslator): Partial<IUserPresenceProps> => {
-    return {
-      users: [],
-      visualSettings: defaultVisualSettings,
-      isCollapsed: false,
-      showInactiveUsers: false,
-      translator,
-      onToggleSidebar: () => {},
-      onToggleInactiveUsers: () => {},
-      onUserSelect: () => {}
-    };
+/**
+ * Create default props for the UserPresence component
+ */
+export const createDefaultProps = (translator: ITranslator): Partial<IUserPresenceProps> => {
+  return {
+    users: [],
+    visualSettings: defaultVisualSettings,
+    isCollapsed: false,
+    showInactiveUsers: false,
+    translator,
+    onToggleSidebar: () => {},
+    onToggleInactiveUsers: () => {},
+    onUserSelect: () => {}
   };
-}
+};
+
+export default UserPresence;
