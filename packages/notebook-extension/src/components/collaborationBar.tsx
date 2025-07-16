@@ -1,14 +1,14 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import React from 'react';
+import * as React from 'react';
 import { ReactWidget } from '@jupyterlab/apputils';
-import { CommandRegistry } from '@jupyterlab/apputils';
+import { CommandRegistry } from '@lumino/commands';
 import { ITranslator } from '@jupyterlab/translation';
-import { Menu } from '@jupyterlab/ui-components';
+import { Menu } from '@lumino/widgets';
 import { Time } from '@jupyterlab/coreutils';
-import { UserAwareness, IUser, ConnectionStatus } from 'packages/notebook/src/collab/awareness';
-import { YjsNotebookProvider } from 'packages/notebook/src/collab/provider';
+import UserAwareness, { IUser, ConnectionStatus } from '../../../notebook/src/collab/awareness';
+import YjsNotebookProvider from '../../../notebook/src/collab/provider';
 
 /**
  * Interface for connection status information
@@ -299,38 +299,32 @@ export default class CollaborationStatusBar extends React.Component<
     // Register menu commands
     commands.addCommand('collaboration:share', {
       label: this._trans.__('Share Notebook'),
-      icon: 'jp-ShareIcon',
       execute: () => this._handleShareClick()
     });
 
     commands.addCommand('collaboration:permissions', {
       label: this._trans.__('Manage Permissions'),
-      icon: 'jp-PermissionsIcon',
       execute: () => this._handlePermissionsClick()
     });
 
     commands.addCommand('collaboration:history', {
       label: this._trans.__('View History'),
-      icon: 'jp-HistoryIcon',
       execute: () => this._showHistoryDialog()
     });
 
     commands.addCommand('collaboration:reconnect', {
       label: this._trans.__('Reconnect'),
-      icon: 'jp-RefreshIcon',
       execute: () => this._handleReconnect(),
       isEnabled: () => this.state.connectionStatus !== ConnectionStatus.CONNECTED
     });
 
     commands.addCommand('collaboration:session-info', {
       label: this._trans.__('Session Info'),
-      icon: 'jp-InfoIcon',
       execute: () => this._showSessionInfo()
     });
 
     commands.addCommand('collaboration:settings', {
       label: this._trans.__('Collaboration Settings'),
-      icon: 'jp-SettingsIcon',
       execute: () => this._handleSettingsClick()
     });
 
@@ -362,7 +356,7 @@ export default class CollaborationStatusBar extends React.Component<
 
     try {
       const menu = this._createOptionsMenu();
-      menu.open(event.currentTarget as HTMLElement);
+      menu.open(event.clientX, event.clientY);
     } catch (error) {
       console.error('Failed to open collaboration options menu:', error);
     }
