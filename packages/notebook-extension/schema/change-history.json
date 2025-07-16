@@ -1,0 +1,236 @@
+{
+  "title": "Jupyter Notebook Change History",
+  "description": "Configuration for notebook change history and versioning including version tracking settings, history retention policies, change attribution preferences, and version comparison display options.",
+  "jupyter.lab.menus": {
+    "main": [
+      {
+        "id": "jp-mainmenu-view",
+        "items": [
+          {
+            "command": "notebook:open-history",
+            "rank": 15
+          },
+          {
+            "command": "notebook:view-version-diff",
+            "rank": 16
+          },
+          {
+            "type": "separator",
+            "rank": 17
+          }
+        ]
+      },
+      {
+        "id": "jp-mainmenu-edit",
+        "items": [
+          {
+            "command": "notebook:revert-to-version",
+            "rank": 9
+          },
+          {
+            "type": "separator",
+            "rank": 9.5
+          }
+        ]
+      },
+      {
+        "id": "jp-mainmenu-collaboration",
+        "items": [
+          {
+            "command": "notebook:open-history",
+            "rank": 20
+          },
+          {
+            "command": "notebook:export-version-history",
+            "rank": 21
+          },
+          {
+            "command": "notebook:manage-version-snapshots",
+            "rank": 22
+          }
+        ]
+      }
+    ]
+  },
+  "properties": {
+    "enableChangeHistory": {
+      "type": "boolean",
+      "title": "Enable Change History",
+      "description": "Enable tracking of notebook changes and version history",
+      "default": true
+    },
+    "versionTrackingGranularity": {
+      "type": "string",
+      "title": "Version Tracking Granularity",
+      "description": "Granularity level for version tracking and change attribution",
+      "enum": [
+        "cell",
+        "line",
+        "character"
+      ],
+      "default": "cell"
+    },
+    "historyRetentionDays": {
+      "type": "integer",
+      "title": "History Retention Period",
+      "description": "Number of days to retain notebook revision history",
+      "default": 30,
+      "minimum": 1,
+      "maximum": 365
+    },
+    "maxVersionSnapshots": {
+      "type": "integer",
+      "title": "Maximum Version Snapshots",
+      "description": "Maximum number of version snapshots to retain per notebook",
+      "default": 100,
+      "minimum": 10,
+      "maximum": 1000
+    },
+    "autoSnapshotInterval": {
+      "type": "integer",
+      "title": "Auto Snapshot Interval",
+      "description": "Time in minutes between automatic version snapshots (0 to disable)",
+      "default": 15,
+      "minimum": 0,
+      "maximum": 1440
+    },
+    "changeAttributionEnabled": {
+      "type": "boolean",
+      "title": "Enable Change Attribution",
+      "description": "Track and display which user made specific changes",
+      "default": true
+    },
+    "showUserAvatars": {
+      "type": "boolean",
+      "title": "Show User Avatars",
+      "description": "Display user avatars in change history and version comparison views",
+      "default": true
+    },
+    "displayTimestamps": {
+      "type": "boolean",
+      "title": "Display Timestamps",
+      "description": "Show timestamps for each change in history views",
+      "default": true
+    },
+    "timestampFormat": {
+      "type": "string",
+      "title": "Timestamp Format",
+      "description": "Format for displaying timestamps in history views",
+      "enum": [
+        "relative",
+        "absolute",
+        "both"
+      ],
+      "default": "relative"
+    },
+    "historyVisualizationStyle": {
+      "type": "string",
+      "title": "History Visualization Style",
+      "description": "Visual style for displaying version history",
+      "enum": [
+        "timeline",
+        "tree",
+        "list"
+      ],
+      "default": "timeline"
+    },
+    "versionComparisonMode": {
+      "type": "string",
+      "title": "Version Comparison Mode",
+      "description": "Default mode for comparing notebook versions",
+      "enum": [
+        "side-by-side",
+        "inline",
+        "unified"
+      ],
+      "default": "side-by-side"
+    },
+    "highlightChanges": {
+      "type": "boolean",
+      "title": "Highlight Changes",
+      "description": "Highlight additions, deletions, and modifications in version comparisons",
+      "default": true
+    },
+    "showChangeStatistics": {
+      "type": "boolean",
+      "title": "Show Change Statistics",
+      "description": "Display statistics about changes (lines added/removed, cells modified)",
+      "default": true
+    },
+    "enableVersionComments": {
+      "type": "boolean",
+      "title": "Enable Version Comments",
+      "description": "Allow users to add comments to version snapshots",
+      "default": true
+    },
+    "historyQueryCacheSize": {
+      "type": "integer",
+      "title": "History Query Cache Size",
+      "description": "Maximum number of history queries to cache for performance optimization",
+      "default": 50,
+      "minimum": 10,
+      "maximum": 200
+    },
+    "enableHistorySearch": {
+      "type": "boolean",
+      "title": "Enable History Search",
+      "description": "Allow searching through version history by content, author, or timestamp",
+      "default": true
+    },
+    "historySearchIndexing": {
+      "type": "boolean",
+      "title": "History Search Indexing",
+      "description": "Enable indexing of history content for faster search performance",
+      "default": true
+    },
+    "exportFormats": {
+      "type": "array",
+      "title": "Export Formats",
+      "description": "Available formats for exporting version history",
+      "items": {
+        "type": "string",
+        "enum": [
+          "json",
+          "csv",
+          "html",
+          "pdf"
+        ]
+      },
+      "default": ["json", "csv", "html"]
+    },
+    "enableVersionBranching": {
+      "type": "boolean",
+      "title": "Enable Version Branching",
+      "description": "Allow creating branches from previous versions for parallel development",
+      "default": false
+    },
+    "enableVersionMerging": {
+      "type": "boolean",
+      "title": "Enable Version Merging",
+      "description": "Allow merging changes from different version branches",
+      "default": false
+    },
+    "enableVersionTags": {
+      "type": "boolean",
+      "title": "Enable Version Tags",
+      "description": "Allow tagging specific versions with custom labels",
+      "default": true
+    },
+    "compressionEnabled": {
+      "type": "boolean",
+      "title": "Enable History Compression",
+      "description": "Compress version history data to reduce storage requirements",
+      "default": true
+    },
+    "compressionThreshold": {
+      "type": "integer",
+      "title": "Compression Threshold",
+      "description": "Minimum age in days before version history is compressed",
+      "default": 7,
+      "minimum": 1,
+      "maximum": 30
+    }
+  },
+  "additionalProperties": false,
+  "type": "object"
+}

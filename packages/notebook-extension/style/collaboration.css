@@ -1,0 +1,1298 @@
+/*-----------------------------------------------------------------------------
+| Copyright (c) Jupyter Development Team.
+|
+| Distributed under the terms of the Modified BSD License.
+|----------------------------------------------------------------------------*/
+
+/*
+ * Comprehensive CSS module for collaboration UI components in Jupyter Notebook v7
+ * Provides styling for real-time collaborative editing features including:
+ * - User presence indicators and cursors
+ * - Cell locking mechanism and visual feedback
+ * - Comment system with threads and badges
+ * - History viewer and version comparison
+ * - Permission management interface
+ * - Collaboration status bar and notifications
+ * 
+ * All styles follow the .jp-Collab-{ComponentName} naming convention
+ * and support responsive design, accessibility, and theming.
+ */
+
+@import './variables.css';
+@import './base.css';
+
+/* =============================================================================
+   COLLABORATION STATUS BAR
+   ============================================================================= */
+
+.jp-Collab-StatusBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  background: var(--jp-collab-background-secondary-light);
+  border-bottom: 1px solid var(--jp-collab-border-color-light);
+  font-size: 12px;
+  font-family: var(--jp-ui-font-family);
+  color: var(--jp-collab-text-secondary-light);
+  min-height: 28px;
+  position: relative;
+  z-index: var(--jp-collab-notification-z-index);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-StatusBar {
+  background: var(--jp-collab-background-secondary-dark);
+  border-bottom-color: var(--jp-collab-border-color-dark);
+  color: var(--jp-collab-text-secondary-dark);
+}
+
+.jp-Collab-StatusBar-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 12px;
+  background: var(--jp-collab-background-tertiary-light);
+  transition: background var(--jp-collab-animation-timing);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-StatusBar-indicator {
+  background: var(--jp-collab-background-tertiary-dark);
+}
+
+.jp-Collab-StatusBar-indicator.jp-mod-connected {
+  background: rgba(40, 167, 69, 0.1);
+  color: #28a745;
+}
+
+.jp-Collab-StatusBar-indicator.jp-mod-disconnected {
+  background: rgba(220, 53, 69, 0.1);
+  color: #dc3545;
+}
+
+.jp-Collab-StatusBar-indicator.jp-mod-syncing {
+  background: rgba(255, 193, 7, 0.1);
+  color: #ffc107;
+}
+
+.jp-Collab-StatusBar-userCount {
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+.jp-Collab-StatusBar-connectionStatus {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.jp-Collab-StatusBar-connectionStatus::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse var(--jp-collab-pulse-duration) infinite;
+}
+
+/* =============================================================================
+   USER PRESENCE INDICATORS
+   ============================================================================= */
+
+.jp-Collab-UserPresence {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.jp-Collab-PresencePanel {
+  display: flex;
+  flex-direction: column;
+  background: var(--jp-collab-background-primary-light);
+  border: 1px solid var(--jp-collab-border-color-light);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px var(--jp-collab-shadow-light);
+  padding: 8px;
+  min-width: var(--jp-collab-presence-panel-width);
+  max-height: var(--jp-collab-presence-panel-max-height);
+  overflow-y: auto;
+  z-index: var(--jp-collab-modal-z-index);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-PresencePanel {
+  background: var(--jp-collab-background-primary-dark);
+  border-color: var(--jp-collab-border-color-dark);
+  box-shadow: 0 4px 12px var(--jp-collab-shadow-dark);
+}
+
+.jp-Collab-PresencePanel-header {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--jp-collab-text-primary-light);
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--jp-collab-border-color-light);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-PresencePanel-header {
+  color: var(--jp-collab-text-primary-dark);
+  border-bottom-color: var(--jp-collab-border-color-dark);
+}
+
+.jp-Collab-PresencePanel-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-radius: 4px;
+  transition: background var(--jp-collab-animation-timing);
+}
+
+.jp-Collab-PresencePanel-user:hover {
+  background: var(--jp-collab-background-tertiary-light);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-PresencePanel-user:hover {
+  background: var(--jp-collab-background-tertiary-dark);
+}
+
+.jp-Collab-PresencePanel-avatar {
+  width: var(--jp-collab-avatar-size);
+  height: var(--jp-collab-avatar-size);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: white;
+  text-transform: uppercase;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.jp-Collab-PresencePanel-avatar::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: var(--jp-collab-status-indicator-size);
+  height: var(--jp-collab-status-indicator-size);
+  border-radius: 50%;
+  background: #28a745;
+  border: 2px solid var(--jp-collab-background-primary-light);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-PresencePanel-avatar::after {
+  border-color: var(--jp-collab-background-primary-dark);
+}
+
+.jp-Collab-PresencePanel-userInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.jp-Collab-PresencePanel-userName {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--jp-collab-text-primary-light);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-PresencePanel-userName {
+  color: var(--jp-collab-text-primary-dark);
+}
+
+.jp-Collab-PresencePanel-userActivity {
+  font-size: 12px;
+  color: var(--jp-collab-text-secondary-light);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-PresencePanel-userActivity {
+  color: var(--jp-collab-text-secondary-dark);
+}
+
+.jp-Collab-UserCursor {
+  position: absolute;
+  width: var(--jp-collab-cursor-width);
+  height: var(--jp-collab-cursor-height);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: var(--jp-collab-cursor-z-index);
+  animation: blink 1s infinite;
+}
+
+.jp-Collab-UserCursor::after {
+  content: attr(data-user-name);
+  position: absolute;
+  top: -20px;
+  left: 0;
+  background: inherit;
+  color: white;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 2px;
+  white-space: nowrap;
+  font-weight: 500;
+  box-shadow: 0 2px 4px var(--jp-collab-cursor-shadow-light);
+  opacity: 0;
+  transition: opacity var(--jp-collab-animation-timing);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-UserCursor::after {
+  box-shadow: 0 2px 4px var(--jp-collab-cursor-shadow-dark);
+}
+
+.jp-Collab-UserCursor:hover::after {
+  opacity: 1;
+}
+
+.jp-Collab-UserSelection {
+  position: absolute;
+  pointer-events: none;
+  z-index: var(--jp-collab-selection-z-index);
+  border: var(--jp-collab-selection-border-width) solid;
+  border-radius: 2px;
+  opacity: var(--jp-collab-selection-opacity-light);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-UserSelection {
+  opacity: var(--jp-collab-selection-opacity-dark);
+}
+
+/* =============================================================================
+   CELL LOCKING INDICATORS
+   ============================================================================= */
+
+.jp-Collab-CellLockIndicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border: var(--jp-collab-lock-border-width) var(--jp-collab-lock-border-style) var(--jp-collab-lock-icon-color);
+  border-radius: var(--jp-collab-lock-border-radius);
+  background: rgba(74, 144, 226, var(--jp-collab-lock-overlay-opacity));
+  pointer-events: none;
+  z-index: var(--jp-collab-lock-overlay-z-index);
+  transition: all var(--jp-collab-animation-timing) var(--jp-collab-animation-easing);
+}
+
+.jp-Collab-CellLockIndicator.jp-mod-active {
+  animation: lockPulse var(--jp-collab-pulse-duration) infinite;
+}
+
+.jp-Collab-LockIcon {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: var(--jp-collab-lock-icon-size);
+  height: var(--jp-collab-lock-icon-size);
+  background: var(--jp-collab-lock-icon-color);
+  border-radius: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 10px;
+  cursor: help;
+  z-index: calc(var(--jp-collab-lock-overlay-z-index) + 1);
+  transition: all var(--jp-collab-animation-timing);
+}
+
+.jp-Collab-LockIcon:hover {
+  background: var(--jp-collab-lock-icon-color-hover);
+  transform: scale(1.1);
+}
+
+.jp-Collab-LockIcon::before {
+  content: '🔒';
+  font-size: 10px;
+}
+
+.jp-Collab-LockTooltip {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: var(--jp-collab-background-primary-light);
+  border: 1px solid var(--jp-collab-border-color-light);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--jp-collab-text-primary-light);
+  white-space: nowrap;
+  box-shadow: 0 2px 8px var(--jp-collab-shadow-light);
+  z-index: var(--jp-collab-tooltip-z-index);
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: all var(--jp-collab-animation-timing) var(--jp-collab-animation-easing);
+  pointer-events: none;
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-LockTooltip {
+  background: var(--jp-collab-background-primary-dark);
+  border-color: var(--jp-collab-border-color-dark);
+  color: var(--jp-collab-text-primary-dark);
+  box-shadow: 0 2px 8px var(--jp-collab-shadow-dark);
+}
+
+.jp-Collab-LockIcon:hover .jp-Collab-LockTooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* =============================================================================
+   COMMENT SYSTEM
+   ============================================================================= */
+
+.jp-Collab-CommentSystem {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--jp-collab-background-primary-light);
+  border: 1px solid var(--jp-collab-border-color-light);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px var(--jp-collab-shadow-light);
+  overflow: hidden;
+  z-index: var(--jp-collab-modal-z-index);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-CommentSystem {
+  background: var(--jp-collab-background-primary-dark);
+  border-color: var(--jp-collab-border-color-dark);
+  box-shadow: 0 4px 12px var(--jp-collab-shadow-dark);
+}
+
+.jp-Collab-CommentSystem-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--jp-collab-background-secondary-light);
+  border-bottom: 1px solid var(--jp-collab-border-color-light);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--jp-collab-text-primary-light);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-CommentSystem-header {
+  background: var(--jp-collab-background-secondary-dark);
+  border-bottom-color: var(--jp-collab-border-color-dark);
+  color: var(--jp-collab-text-primary-dark);
+}
+
+.jp-Collab-CommentSystem-closeButton {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  color: var(--jp-collab-text-secondary-light);
+  transition: all var(--jp-collab-animation-timing);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-CommentSystem-closeButton {
+  color: var(--jp-collab-text-secondary-dark);
+}
+
+.jp-Collab-CommentSystem-closeButton:hover {
+  background: var(--jp-collab-background-tertiary-light);
+  color: var(--jp-collab-text-primary-light);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-CommentSystem-closeButton:hover {
+  background: var(--jp-collab-background-tertiary-dark);
+  color: var(--jp-collab-text-primary-dark);
+}
+
+.jp-Collab-CommentThread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.jp-Collab-CommentThread-item {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  background: var(--jp-collab-background-secondary-light);
+  border-radius: 8px;
+  border-left: 3px solid transparent;
+  transition: all var(--jp-collab-animation-timing);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-CommentThread-item {
+  background: var(--jp-collab-background-secondary-dark);
+}
+
+.jp-Collab-CommentThread-item.jp-mod-unread {
+  border-left-color: var(--jp-collab-comment-unread-color);
+}
+
+.jp-Collab-CommentThread-item.jp-mod-resolved {
+  opacity: 0.6;
+  border-left-color: var(--jp-collab-comment-resolved-color);
+}
+
+.jp-Collab-CommentThread-avatar {
+  width: var(--jp-collab-avatar-size-small);
+  height: var(--jp-collab-avatar-size-small);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: white;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.jp-Collab-CommentThread-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.jp-Collab-CommentThread-author {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--jp-collab-text-primary-light);
+  margin-bottom: 4px;
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-CommentThread-author {
+  color: var(--jp-collab-text-primary-dark);
+}
+
+.jp-Collab-CommentThread-timestamp {
+  font-size: 11px;
+  color: var(--jp-collab-text-muted-light);
+  margin-left: 8px;
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-CommentThread-timestamp {
+  color: var(--jp-collab-text-muted-dark);
+}
+
+.jp-Collab-CommentThread-text {
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--jp-collab-text-primary-light);
+  word-wrap: break-word;
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-CommentThread-text {
+  color: var(--jp-collab-text-primary-dark);
+}
+
+.jp-Collab-CommentThread-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.jp-Collab-CommentThread-button {
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--jp-collab-animation-timing);
+}
+
+.jp-Collab-CommentThread-button.jp-mod-resolve {
+  background: var(--jp-collab-comment-resolved-color);
+  color: white;
+}
+
+.jp-Collab-CommentThread-button.jp-mod-resolve:hover {
+  background: #218838;
+}
+
+.jp-Collab-CommentThread-button.jp-mod-reply {
+  background: var(--jp-collab-background-tertiary-light);
+  color: var(--jp-collab-text-primary-light);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-CommentThread-button.jp-mod-reply {
+  background: var(--jp-collab-background-tertiary-dark);
+  color: var(--jp-collab-text-primary-dark);
+}
+
+.jp-Collab-CommentThread-button.jp-mod-reply:hover {
+  background: var(--jp-collab-border-color-light);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-CommentThread-button.jp-mod-reply:hover {
+  background: var(--jp-collab-border-color-dark);
+}
+
+.jp-Collab-CommentBadge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--jp-collab-comment-badge-color);
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: calc(var(--jp-collab-notification-z-index) + 1);
+  animation: commentBadgeArrival var(--jp-collab-animation-timing) var(--jp-collab-animation-easing-bounce);
+  cursor: pointer;
+  transition: all var(--jp-collab-animation-timing);
+}
+
+.jp-Collab-CommentBadge:hover {
+  background: var(--jp-collab-comment-badge-color-hover);
+  transform: scale(1.1);
+}
+
+.jp-Collab-CommentBadge.jp-mod-unread {
+  animation: pulse var(--jp-collab-pulse-duration) infinite;
+}
+
+.jp-Collab-CommentBadge.jp-mod-resolved {
+  background: var(--jp-collab-comment-resolved-color);
+}
+
+/* =============================================================================
+   HISTORY VIEWER
+   ============================================================================= */
+
+.jp-Collab-HistoryViewer {
+  display: flex;
+  flex-direction: column;
+  background: var(--jp-collab-background-primary-light);
+  border: 1px solid var(--jp-collab-border-color-light);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px var(--jp-collab-shadow-light);
+  overflow: hidden;
+  z-index: var(--jp-collab-modal-z-index);
+  width: 600px;
+  max-width: 90vw;
+  max-height: 80vh;
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-HistoryViewer {
+  background: var(--jp-collab-background-primary-dark);
+  border-color: var(--jp-collab-border-color-dark);
+  box-shadow: 0 4px 12px var(--jp-collab-shadow-dark);
+}
+
+.jp-Collab-HistoryViewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  background: var(--jp-collab-background-secondary-light);
+  border-bottom: 1px solid var(--jp-collab-border-color-light);
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--jp-collab-text-primary-light);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-HistoryViewer-header {
+  background: var(--jp-collab-background-secondary-dark);
+  border-bottom-color: var(--jp-collab-border-color-dark);
+  color: var(--jp-collab-text-primary-dark);
+}
+
+.jp-Collab-HistoryViewer-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.jp-Collab-Timeline {
+  display: flex;
+  flex-direction: column;
+  width: 200px;
+  background: var(--jp-collab-background-secondary-light);
+  border-right: 1px solid var(--jp-collab-border-color-light);
+  overflow-y: auto;
+  padding: 16px;
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-Timeline {
+  background: var(--jp-collab-background-secondary-dark);
+  border-right-color: var(--jp-collab-border-color-dark);
+}
+
+.jp-Collab-Timeline-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--jp-collab-animation-timing);
+  position: relative;
+}
+
+.jp-Collab-Timeline-item:hover {
+  background: var(--jp-collab-background-tertiary-light);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-Timeline-item:hover {
+  background: var(--jp-collab-background-tertiary-dark);
+}
+
+.jp-Collab-Timeline-item.jp-mod-selected {
+  background: var(--jp-collab-background-tertiary-light);
+  border-left: var(--jp-collab-history-timeline-width) solid var(--jp-collab-lock-icon-color);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-Timeline-item.jp-mod-selected {
+  background: var(--jp-collab-background-tertiary-dark);
+}
+
+.jp-Collab-Timeline-node {
+  width: var(--jp-collab-history-node-size);
+  height: var(--jp-collab-history-node-size);
+  border-radius: 50%;
+  background: var(--jp-collab-lock-icon-color);
+  flex-shrink: 0;
+  position: relative;
+}
+
+.jp-Collab-Timeline-node::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  background: white;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.jp-Collab-Timeline-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.jp-Collab-Timeline-author {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--jp-collab-text-primary-light);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-Timeline-author {
+  color: var(--jp-collab-text-primary-dark);
+}
+
+.jp-Collab-Timeline-timestamp {
+  font-size: 11px;
+  color: var(--jp-collab-text-muted-light);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-Timeline-timestamp {
+  color: var(--jp-collab-text-muted-dark);
+}
+
+.jp-Collab-Timeline-description {
+  font-size: 12px;
+  color: var(--jp-collab-text-secondary-light);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-Timeline-description {
+  color: var(--jp-collab-text-secondary-dark);
+}
+
+.jp-Collab-DiffView {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.jp-Collab-DiffView-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--jp-collab-background-secondary-light);
+  border-bottom: 1px solid var(--jp-collab-border-color-light);
+  font-size: 14px;
+  color: var(--jp-collab-text-primary-light);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-DiffView-header {
+  background: var(--jp-collab-background-secondary-dark);
+  border-bottom-color: var(--jp-collab-border-color-dark);
+  color: var(--jp-collab-text-primary-dark);
+}
+
+.jp-Collab-DiffView-content {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  font-family: var(--jp-code-font-family);
+  font-size: var(--jp-code-font-size);
+  line-height: var(--jp-code-line-height);
+}
+
+.jp-Collab-DiffView-line {
+  display: block;
+  padding: 2px 8px;
+  margin: 1px 0;
+  border-radius: 2px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.jp-Collab-DiffView-line.jp-mod-added {
+  background: rgba(40, 167, 69, var(--jp-collab-history-diff-background-opacity));
+  border-left: 3px solid var(--jp-collab-history-diff-added-color);
+}
+
+.jp-Collab-DiffView-line.jp-mod-removed {
+  background: rgba(220, 53, 69, var(--jp-collab-history-diff-background-opacity));
+  border-left: 3px solid var(--jp-collab-history-diff-removed-color);
+}
+
+.jp-Collab-DiffView-line.jp-mod-modified {
+  background: rgba(255, 193, 7, var(--jp-collab-history-diff-background-opacity));
+  border-left: 3px solid var(--jp-collab-history-diff-modified-color);
+}
+
+.jp-Collab-DiffView-lineNumber {
+  display: inline-block;
+  width: 40px;
+  text-align: right;
+  color: var(--jp-collab-text-muted-light);
+  margin-right: 8px;
+  user-select: none;
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-DiffView-lineNumber {
+  color: var(--jp-collab-text-muted-dark);
+}
+
+/* =============================================================================
+   PERMISSIONS DIALOG
+   ============================================================================= */
+
+.jp-Collab-PermissionsDialog {
+  display: flex;
+  flex-direction: column;
+  background: var(--jp-collab-background-primary-light);
+  border: 1px solid var(--jp-collab-border-color-light);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px var(--jp-collab-shadow-light);
+  overflow: hidden;
+  z-index: var(--jp-collab-modal-z-index);
+  width: 500px;
+  max-width: 90vw;
+  max-height: 80vh;
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-PermissionsDialog {
+  background: var(--jp-collab-background-primary-dark);
+  border-color: var(--jp-collab-border-color-dark);
+  box-shadow: 0 4px 12px var(--jp-collab-shadow-dark);
+}
+
+.jp-Collab-PermissionsDialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  background: var(--jp-collab-background-secondary-light);
+  border-bottom: 1px solid var(--jp-collab-border-color-light);
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--jp-collab-text-primary-light);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-PermissionsDialog-header {
+  background: var(--jp-collab-background-secondary-dark);
+  border-bottom-color: var(--jp-collab-border-color-dark);
+  color: var(--jp-collab-text-primary-dark);
+}
+
+.jp-Collab-PermissionsDialog-content {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.jp-Collab-AccessControl {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.jp-Collab-AccessControl-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.jp-Collab-AccessControl-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--jp-collab-text-primary-light);
+  margin-bottom: 4px;
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-AccessControl-title {
+  color: var(--jp-collab-text-primary-dark);
+}
+
+.jp-Collab-AccessControl-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--jp-collab-background-secondary-light);
+  border-radius: 8px;
+  border: 1px solid var(--jp-collab-border-color-light);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-AccessControl-user {
+  background: var(--jp-collab-background-secondary-dark);
+  border-color: var(--jp-collab-border-color-dark);
+}
+
+.jp-Collab-AccessControl-avatar {
+  width: var(--jp-collab-avatar-size);
+  height: var(--jp-collab-avatar-size);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: white;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.jp-Collab-AccessControl-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.jp-Collab-AccessControl-name {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--jp-collab-text-primary-light);
+  margin-bottom: 2px;
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-AccessControl-name {
+  color: var(--jp-collab-text-primary-dark);
+}
+
+.jp-Collab-AccessControl-email {
+  font-size: 12px;
+  color: var(--jp-collab-text-secondary-light);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-AccessControl-email {
+  color: var(--jp-collab-text-secondary-dark);
+}
+
+.jp-Collab-AccessControl-role {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.jp-Collab-AccessControl-select {
+  padding: 6px 12px;
+  border: 1px solid var(--jp-collab-border-color-light);
+  border-radius: 4px;
+  background: var(--jp-collab-background-primary-light);
+  color: var(--jp-collab-text-primary-light);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all var(--jp-collab-animation-timing);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-AccessControl-select {
+  border-color: var(--jp-collab-border-color-dark);
+  background: var(--jp-collab-background-primary-dark);
+  color: var(--jp-collab-text-primary-dark);
+}
+
+.jp-Collab-AccessControl-select:hover {
+  border-color: var(--jp-collab-lock-icon-color);
+}
+
+.jp-Collab-AccessControl-select:focus {
+  outline: none;
+  border-color: var(--jp-collab-lock-icon-color);
+  box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.2);
+}
+
+.jp-Collab-AccessControl-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--jp-collab-border-color-light);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-AccessControl-actions {
+  border-top-color: var(--jp-collab-border-color-dark);
+}
+
+.jp-Collab-AccessControl-button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--jp-collab-animation-timing);
+}
+
+.jp-Collab-AccessControl-button.jp-mod-primary {
+  background: var(--jp-collab-lock-icon-color);
+  color: white;
+}
+
+.jp-Collab-AccessControl-button.jp-mod-primary:hover {
+  background: var(--jp-collab-lock-icon-color-hover);
+}
+
+.jp-Collab-AccessControl-button.jp-mod-secondary {
+  background: var(--jp-collab-background-tertiary-light);
+  color: var(--jp-collab-text-primary-light);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-AccessControl-button.jp-mod-secondary {
+  background: var(--jp-collab-background-tertiary-dark);
+  color: var(--jp-collab-text-primary-dark);
+}
+
+.jp-Collab-AccessControl-button.jp-mod-secondary:hover {
+  background: var(--jp-collab-border-color-light);
+}
+
+[data-jp-theme-name="JupyterLab Dark"] .jp-Collab-AccessControl-button.jp-mod-secondary:hover {
+  background: var(--jp-collab-border-color-dark);
+}
+
+/* =============================================================================
+   RESPONSIVE DESIGN
+   ============================================================================= */
+
+@media only screen and (max-width: 760px) {
+  /* Collapse presence panel into a pop-over menu */
+  .jp-Collab-PresencePanel {
+    position: fixed;
+    top: 50px;
+    right: 10px;
+    width: calc(100vw - 20px);
+    max-width: 300px;
+    box-shadow: 0 8px 24px var(--jp-collab-shadow-light);
+  }
+
+  [data-jp-theme-name="JupyterLab Dark"] .jp-Collab-PresencePanel {
+    box-shadow: 0 8px 24px var(--jp-collab-shadow-dark);
+  }
+
+  /* Hide non-essential collaboration controls */
+  .jp-Collab-StatusBar-indicator:not(.jp-mod-connected):not(.jp-mod-disconnected) {
+    display: none;
+  }
+
+  /* Full-screen overlays for comment panels */
+  .jp-Collab-CommentSystem {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    height: 100vh;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .jp-Collab-CommentThread {
+    padding: var(--jp-collab-mobile-padding);
+  }
+
+  /* Full-screen modal interface for history viewer */
+  .jp-Collab-HistoryViewer {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    height: 100vh;
+    max-width: none;
+    max-height: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .jp-Collab-HistoryViewer-content {
+    flex-direction: column;
+  }
+
+  .jp-Collab-Timeline {
+    width: 100%;
+    max-height: 150px;
+    border-right: none;
+    border-bottom: 1px solid var(--jp-collab-border-color-light);
+  }
+
+  [data-jp-theme-name="JupyterLab Dark"] .jp-Collab-Timeline {
+    border-bottom-color: var(--jp-collab-border-color-dark);
+  }
+
+  /* Permissions dialog full-screen on mobile */
+  .jp-Collab-PermissionsDialog {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    height: 100vh;
+    max-width: none;
+    max-height: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  /* Adjust font sizes for mobile */
+  .jp-Collab-PresencePanel-userName,
+  .jp-Collab-CommentThread-text,
+  .jp-Collab-AccessControl-name {
+    font-size: var(--jp-collab-mobile-font-size);
+  }
+
+  /* Larger touch targets */
+  .jp-Collab-CommentBadge {
+    width: 20px;
+    height: 20px;
+    font-size: 12px;
+  }
+
+  .jp-Collab-LockIcon {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* Reduce padding and margins */
+  .jp-Collab-StatusBar {
+    padding: var(--jp-collab-mobile-padding);
+  }
+
+  .jp-Collab-CommentThread-item {
+    padding: var(--jp-collab-mobile-padding);
+    margin-bottom: var(--jp-collab-mobile-margin);
+  }
+}
+
+/* =============================================================================
+   ACCESSIBILITY FEATURES
+   ============================================================================= */
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .jp-Collab-UserCursor {
+    border: 1px solid currentColor;
+  }
+
+  .jp-Collab-UserSelection {
+    border-width: 2px;
+  }
+
+  .jp-Collab-CellLockIndicator {
+    border-width: 3px;
+  }
+
+  .jp-Collab-CommentBadge {
+    border: 2px solid var(--jp-collab-background-primary-light);
+  }
+
+  [data-jp-theme-name="JupyterLab Dark"] .jp-Collab-CommentBadge {
+    border-color: var(--jp-collab-background-primary-dark);
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .jp-Collab-UserCursor {
+    animation: none;
+  }
+
+  .jp-Collab-CommentBadge {
+    animation: none;
+  }
+
+  .jp-Collab-CellLockIndicator {
+    animation: none;
+  }
+
+  .jp-Collab-StatusBar-connectionStatus::before {
+    animation: none;
+  }
+
+  * {
+    transition: none !important;
+  }
+}
+
+/* Focus indicators for keyboard navigation */
+.jp-Collab-PresencePanel-user:focus,
+.jp-Collab-CommentThread-button:focus,
+.jp-Collab-Timeline-item:focus,
+.jp-Collab-AccessControl-button:focus {
+  outline: 2px solid var(--jp-collab-lock-icon-color);
+  outline-offset: 2px;
+}
+
+/* Screen reader labels */
+.jp-Collab-StatusBar[aria-label],
+.jp-Collab-PresencePanel[aria-label],
+.jp-Collab-CommentBadge[aria-label],
+.jp-Collab-LockIcon[aria-label] {
+  /* Screen reader accessible labels are provided via aria-label attributes */
+}
+
+/* =============================================================================
+   ANIMATIONS
+   ============================================================================= */
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes blink {
+  0%, 50% {
+    opacity: 1;
+  }
+  51%, 100% {
+    opacity: 0;
+  }
+}
+
+@keyframes lockPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(74, 144, 226, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(74, 144, 226, 0.1);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(74, 144, 226, 0);
+  }
+}
+
+@keyframes commentBadgeArrival {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* =============================================================================
+   UTILITY CLASSES
+   ============================================================================= */
+
+.jp-Collab-hidden {
+  display: none !important;
+}
+
+.jp-Collab-fadeIn {
+  animation: fadeIn var(--jp-collab-fade-duration) var(--jp-collab-animation-easing);
+}
+
+.jp-Collab-fadeOut {
+  animation: fadeOut var(--jp-collab-fade-duration) var(--jp-collab-animation-easing);
+}
+
+.jp-Collab-slideUp {
+  animation: slideUp var(--jp-collab-animation-timing) var(--jp-collab-animation-easing);
+}
+
+.jp-Collab-slideDown {
+  animation: slideDown var(--jp-collab-animation-timing) var(--jp-collab-animation-easing);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}

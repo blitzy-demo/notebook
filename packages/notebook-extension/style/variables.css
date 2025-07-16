@@ -3,4 +3,112 @@
   --jp-notebook-padding-offset: 20px;
 
   --jp-kernel-status-padding: 5px;
+
+  /* Collaboration - Presence Colors */
+  /* Generated palette for collaborator identity colors based on user IDs */
+  --jp-collab-presence-color-1: #e74c3c;
+  --jp-collab-presence-color-2: #3498db;
+  --jp-collab-presence-color-3: #2ecc71;
+  --jp-collab-presence-color-4: #f39c12;
+  --jp-collab-presence-color-5: #9b59b6;
+  --jp-collab-presence-color-6: #1abc9c;
+  --jp-collab-presence-color-7: #e67e22;
+  --jp-collab-presence-color-8: #34495e;
+  --jp-collab-presence-color-9: #e91e63;
+  --jp-collab-presence-color-10: #00bcd4;
+  --jp-collab-presence-color-11: #4caf50;
+  --jp-collab-presence-color-12: #ff9800;
+  --jp-collab-presence-color-13: #673ab7;
+  --jp-collab-presence-color-14: #009688;
+  --jp-collab-presence-color-15: #795548;
+  --jp-collab-presence-color-16: #607d8b;
+
+  /* Collaboration - Lock Status Indicators */
+  --jp-collab-lock-icon-color: #4a90e2;
+  --jp-collab-lock-icon-color-hover: #357abd;
+  --jp-collab-lock-icon-background: rgba(74, 144, 226, 0.1);
+  --jp-collab-lock-icon-background-hover: rgba(74, 144, 226, 0.2);
+
+  /* Collaboration - Comment Badge Colors */
+  --jp-collab-comment-badge-color: #ffb400;
+  --jp-collab-comment-badge-color-hover: #e69900;
+  --jp-collab-comment-badge-background: rgba(255, 180, 0, 0.1);
+  --jp-collab-comment-badge-background-hover: rgba(255, 180, 0, 0.2);
+  --jp-collab-comment-resolved-color: #28a745;
+  --jp-collab-comment-unread-color: #dc3545;
+
+  /* Collaboration - Animation Timing */
+  --jp-collab-animation-timing: 0.3s;
+  --jp-collab-animation-timing-fast: 0.15s;
+  --jp-collab-animation-timing-slow: 0.5s;
+  --jp-collab-animation-easing: cubic-bezier(0.4, 0, 0.2, 1);
+  --jp-collab-animation-easing-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  --jp-collab-pulse-duration: 1.5s;
+  --jp-collab-fade-duration: 0.4s;
+
+  /* Collaboration - Theme Light Mode */
+  --jp-collab-background-primary-light: #ffffff;
+  --jp-collab-background-secondary-light: #f8f9fa;
+  --jp-collab-background-tertiary-light: #e9ecef;
+  --jp-collab-text-primary-light: #212529;
+  --jp-collab-text-secondary-light: #6c757d;
+  --jp-collab-text-muted-light: #adb5bd;
+  --jp-collab-border-color-light: #dee2e6;
+  --jp-collab-shadow-light: rgba(0, 0, 0, 0.1);
+  --jp-collab-cursor-shadow-light: rgba(0, 0, 0, 0.15);
+  --jp-collab-selection-opacity-light: 0.2;
+  --jp-collab-highlight-opacity-light: 0.1;
+
+  /* Collaboration - Theme Dark Mode */
+  --jp-collab-background-primary-dark: #212529;
+  --jp-collab-background-secondary-dark: #343a40;
+  --jp-collab-background-tertiary-dark: #495057;
+  --jp-collab-text-primary-dark: #f8f9fa;
+  --jp-collab-text-secondary-dark: #ced4da;
+  --jp-collab-text-muted-dark: #6c757d;
+  --jp-collab-border-color-dark: #495057;
+  --jp-collab-shadow-dark: rgba(255, 255, 255, 0.1);
+  --jp-collab-cursor-shadow-dark: rgba(255, 255, 255, 0.15);
+  --jp-collab-selection-opacity-dark: 0.25;
+  --jp-collab-highlight-opacity-dark: 0.15;
+
+  /* Collaboration - Presence Awareness */
+  --jp-collab-cursor-width: 2px;
+  --jp-collab-cursor-height: 20px;
+  --jp-collab-selection-border-width: 1px;
+  --jp-collab-presence-panel-width: 200px;
+  --jp-collab-presence-panel-max-height: 400px;
+  --jp-collab-avatar-size: 32px;
+  --jp-collab-avatar-size-small: 24px;
+  --jp-collab-status-indicator-size: 8px;
+
+  /* Collaboration - Cell Locking */
+  --jp-collab-lock-border-width: 2px;
+  --jp-collab-lock-border-style: solid;
+  --jp-collab-lock-border-radius: 4px;
+  --jp-collab-lock-overlay-opacity: 0.05;
+  --jp-collab-lock-icon-size: 16px;
+  --jp-collab-lock-tooltip-delay: 0.5s;
+
+  /* Collaboration - History and Versioning */
+  --jp-collab-history-timeline-width: 4px;
+  --jp-collab-history-node-size: 12px;
+  --jp-collab-history-diff-added-color: #28a745;
+  --jp-collab-history-diff-removed-color: #dc3545;
+  --jp-collab-history-diff-modified-color: #ffc107;
+  --jp-collab-history-diff-background-opacity: 0.1;
+
+  /* Collaboration - Responsive Design */
+  --jp-collab-mobile-breakpoint: 760px;
+  --jp-collab-mobile-padding: 10px;
+  --jp-collab-mobile-margin: 8px;
+  --jp-collab-mobile-font-size: 14px;
+
+  /* Collaboration - Z-Index Layers */
+  --jp-collab-cursor-z-index: 100;
+  --jp-collab-selection-z-index: 99;
+  --jp-collab-lock-overlay-z-index: 101;
+  --jp-collab-tooltip-z-index: 102;
+  --jp-collab-modal-z-index: 103;
+  --jp-collab-notification-z-index: 104;
 }

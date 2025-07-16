@@ -1,0 +1,379 @@
+{
+  "title": "User Awareness",
+  "description": "User presence awareness configuration for real-time collaborative editing including cursor display, selection highlighting, avatar rendering, and collaborator visualization preferences",
+  "jupyter.lab.menus": {
+    "main": [
+      {
+        "id": "jp-mainmenu-view",
+        "items": [
+          {
+            "command": "notebook:toggle-presence-indicators",
+            "rank": 35
+          },
+          {
+            "command": "notebook:toggle-cursor-tracking",
+            "rank": 36
+          }
+        ]
+      }
+    ]
+  },
+  "properties": {
+    "enablePresenceIndicators": {
+      "type": "boolean",
+      "title": "Enable Presence Indicators",
+      "description": "Show visual indicators for collaborator presence, including cursors, selections, and activity status",
+      "default": true
+    },
+    "enableCursorTracking": {
+      "type": "boolean",
+      "title": "Enable Cursor Tracking",
+      "description": "Track and display cursor positions of all collaborators in real-time",
+      "default": true
+    },
+    "enableSelectionTracking": {
+      "type": "boolean",
+      "title": "Enable Selection Tracking",
+      "description": "Track and display text selections made by all collaborators",
+      "default": true
+    },
+    "enableActivityTracking": {
+      "type": "boolean",
+      "title": "Enable Activity Tracking",
+      "description": "Track and display user activity status (editing, viewing, executing, etc.)",
+      "default": true
+    },
+    "updateThrottleMs": {
+      "type": "integer",
+      "title": "Update Throttle (ms)",
+      "description": "Time in milliseconds to throttle awareness updates to prevent excessive network traffic",
+      "default": 100,
+      "minimum": 50,
+      "maximum": 199
+    },
+    "heartbeatInterval": {
+      "type": "integer",
+      "title": "Heartbeat Interval (ms)",
+      "description": "Time in milliseconds between heartbeat signals to maintain user presence",
+      "default": 30000,
+      "minimum": 10000,
+      "maximum": 60000
+    },
+    "inactivityTimeout": {
+      "type": "integer",
+      "title": "Inactivity Timeout (ms)",
+      "description": "Time in milliseconds after which a user is considered inactive",
+      "default": 300000,
+      "minimum": 60000,
+      "maximum": 900000
+    },
+    "presenceTimeout": {
+      "type": "integer",
+      "title": "Presence Timeout (ms)",
+      "description": "Time in milliseconds after which user presence information expires",
+      "default": 60000,
+      "minimum": 30000,
+      "maximum": 120000
+    },
+    "maxUsers": {
+      "type": "integer",
+      "title": "Maximum Users",
+      "description": "Maximum number of users to track simultaneously in awareness system",
+      "default": 100,
+      "minimum": 10,
+      "maximum": 500
+    },
+    "colorPalette": {
+      "type": "array",
+      "title": "User Color Palette",
+      "description": "Array of colors used for user presence indicators (cursors, selections, avatars)",
+      "default": [
+        "#FF6B6B",
+        "#4ECDC4",
+        "#45B7D1",
+        "#96CEB4",
+        "#FFEAA7",
+        "#DDA0DD",
+        "#98D8C8",
+        "#F7DC6F",
+        "#BB8FCE",
+        "#85C1E9",
+        "#F8C471",
+        "#82E0AA",
+        "#AED6F1",
+        "#F1C40F",
+        "#E74C3C",
+        "#3498DB",
+        "#2ECC71",
+        "#9B59B6",
+        "#E67E22",
+        "#1ABC9C"
+      ],
+      "items": {
+        "type": "string",
+        "pattern": "^#[0-9A-Fa-f]{6}$"
+      },
+      "minItems": 5,
+      "maxItems": 50
+    },
+    "cursorDisplaySettings": {
+      "type": "object",
+      "title": "Cursor Display Settings",
+      "description": "Configuration for cursor position display and behavior",
+      "properties": {
+        "showCursorLabel": {
+          "type": "boolean",
+          "title": "Show Cursor Label",
+          "description": "Display user name next to cursor position",
+          "default": true
+        },
+        "cursorFadeTimeout": {
+          "type": "integer",
+          "title": "Cursor Fade Timeout (ms)",
+          "description": "Time in milliseconds before cursor fades out when inactive",
+          "default": 5000,
+          "minimum": 1000,
+          "maximum": 30000
+        },
+        "cursorBlinkRate": {
+          "type": "integer",
+          "title": "Cursor Blink Rate (ms)",
+          "description": "Time in milliseconds between cursor blinks for active users",
+          "default": 530,
+          "minimum": 200,
+          "maximum": 2000
+        },
+        "cursorWidth": {
+          "type": "integer",
+          "title": "Cursor Width (px)",
+          "description": "Width of cursor indicator in pixels",
+          "default": 2,
+          "minimum": 1,
+          "maximum": 5
+        },
+        "cursorHeight": {
+          "type": "integer",
+          "title": "Cursor Height (px)",
+          "description": "Height of cursor indicator in pixels",
+          "default": 20,
+          "minimum": 10,
+          "maximum": 40
+        }
+      },
+      "additionalProperties": false
+    },
+    "selectionDisplaySettings": {
+      "type": "object",
+      "title": "Selection Display Settings",
+      "description": "Configuration for text selection highlighting and display",
+      "properties": {
+        "selectionOpacity": {
+          "type": "number",
+          "title": "Selection Opacity",
+          "description": "Opacity level for selection highlighting (0.0 to 1.0)",
+          "default": 0.3,
+          "minimum": 0.1,
+          "maximum": 1.0
+        },
+        "selectionBorderWidth": {
+          "type": "integer",
+          "title": "Selection Border Width (px)",
+          "description": "Width of selection border in pixels",
+          "default": 1,
+          "minimum": 0,
+          "maximum": 3
+        },
+        "showSelectionLabel": {
+          "type": "boolean",
+          "title": "Show Selection Label",
+          "description": "Display user name for text selections",
+          "default": true
+        },
+        "selectionFadeTimeout": {
+          "type": "integer",
+          "title": "Selection Fade Timeout (ms)",
+          "description": "Time in milliseconds before selection fades out when inactive",
+          "default": 10000,
+          "minimum": 3000,
+          "maximum": 60000
+        }
+      },
+      "additionalProperties": false
+    },
+    "avatarDisplaySettings": {
+      "type": "object",
+      "title": "Avatar Display Settings",
+      "description": "Configuration for user avatar rendering and display",
+      "properties": {
+        "showAvatars": {
+          "type": "boolean",
+          "title": "Show Avatars",
+          "description": "Display user avatars in presence indicators",
+          "default": true
+        },
+        "avatarSize": {
+          "type": "integer",
+          "title": "Avatar Size (px)",
+          "description": "Size of user avatars in pixels",
+          "default": 24,
+          "minimum": 16,
+          "maximum": 48
+        },
+        "avatarBorderWidth": {
+          "type": "integer",
+          "title": "Avatar Border Width (px)",
+          "description": "Width of avatar border in pixels",
+          "default": 2,
+          "minimum": 0,
+          "maximum": 4
+        },
+        "showOnlineStatus": {
+          "type": "boolean",
+          "title": "Show Online Status",
+          "description": "Display online/offline status indicator on avatars",
+          "default": true
+        },
+        "fallbackToInitials": {
+          "type": "boolean",
+          "title": "Fallback to Initials",
+          "description": "Use user initials when avatar image is not available",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "collaboratorVisualizationSettings": {
+      "type": "object",
+      "title": "Collaborator Visualization Settings",
+      "description": "Configuration for overall collaborator visualization preferences",
+      "properties": {
+        "showCollaboratorList": {
+          "type": "boolean",
+          "title": "Show Collaborator List",
+          "description": "Display list of active collaborators in the UI",
+          "default": true
+        },
+        "collaboratorListPosition": {
+          "type": "string",
+          "title": "Collaborator List Position",
+          "description": "Position of collaborator list in the interface",
+          "default": "top-right",
+          "enum": ["top-left", "top-right", "bottom-left", "bottom-right", "sidebar"]
+        },
+        "maxCollaboratorsShown": {
+          "type": "integer",
+          "title": "Maximum Collaborators Shown",
+          "description": "Maximum number of collaborators to display in the list",
+          "default": 10,
+          "minimum": 3,
+          "maximum": 50
+        },
+        "showActivityIcons": {
+          "type": "boolean",
+          "title": "Show Activity Icons",
+          "description": "Display activity icons next to collaborator names",
+          "default": true
+        },
+        "showLastSeenTime": {
+          "type": "boolean",
+          "title": "Show Last Seen Time",
+          "description": "Display last seen timestamp for inactive users",
+          "default": true
+        },
+        "animatePresenceChanges": {
+          "type": "boolean",
+          "title": "Animate Presence Changes",
+          "description": "Use animations for presence change indicators",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "performanceSettings": {
+      "type": "object",
+      "title": "Performance Settings",
+      "description": "Configuration for awareness system performance optimization",
+      "properties": {
+        "awarenessUpdateInterval": {
+          "type": "integer",
+          "title": "Awareness Update Interval (ms)",
+          "description": "Time in milliseconds between awareness state updates (must be <200ms per F-025-RQ-001)",
+          "default": 100,
+          "minimum": 50,
+          "maximum": 199
+        },
+        "renderingThrottleMs": {
+          "type": "integer",
+          "title": "Rendering Throttle (ms)",
+          "description": "Time in milliseconds to throttle UI rendering updates",
+          "default": 50,
+          "minimum": 16,
+          "maximum": 100
+        },
+        "maxConcurrentUpdates": {
+          "type": "integer",
+          "title": "Max Concurrent Updates",
+          "description": "Maximum number of concurrent awareness updates to process",
+          "default": 10,
+          "minimum": 5,
+          "maximum": 50
+        },
+        "enableUpdateBatching": {
+          "type": "boolean",
+          "title": "Enable Update Batching",
+          "description": "Batch multiple awareness updates for improved performance",
+          "default": true
+        },
+        "batchUpdateSize": {
+          "type": "integer",
+          "title": "Batch Update Size",
+          "description": "Number of updates to batch together when batching is enabled",
+          "default": 5,
+          "minimum": 2,
+          "maximum": 20
+        }
+      },
+      "additionalProperties": false
+    },
+    "reconnectionSettings": {
+      "type": "object",
+      "title": "Reconnection Settings",
+      "description": "Configuration for awareness system reconnection behavior",
+      "properties": {
+        "reconnectDelay": {
+          "type": "integer",
+          "title": "Reconnect Delay (ms)",
+          "description": "Time in milliseconds to wait before attempting reconnection",
+          "default": 1000,
+          "minimum": 500,
+          "maximum": 10000
+        },
+        "maxReconnectAttempts": {
+          "type": "integer",
+          "title": "Max Reconnect Attempts",
+          "description": "Maximum number of reconnection attempts before giving up",
+          "default": 10,
+          "minimum": 3,
+          "maximum": 50
+        },
+        "exponentialBackoff": {
+          "type": "boolean",
+          "title": "Exponential Backoff",
+          "description": "Use exponential backoff for reconnection attempts",
+          "default": true
+        },
+        "maxBackoffDelay": {
+          "type": "integer",
+          "title": "Max Backoff Delay (ms)",
+          "description": "Maximum delay for exponential backoff in milliseconds",
+          "default": 30000,
+          "minimum": 5000,
+          "maximum": 300000
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "type": "object"
+}

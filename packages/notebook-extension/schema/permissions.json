@@ -1,0 +1,607 @@
+{
+  "title": "Jupyter Notebook Permissions and Access Control",
+  "description": "Configuration schema for permissions, access control, and collaborative notebook sharing settings",
+  "jupyter.lab.menus": {
+    "main": [
+      {
+        "id": "jp-mainmenu-file",
+        "items": [
+          {
+            "type": "separator",
+            "rank": 9.5
+          },
+          {
+            "command": "notebook:manage-permissions",
+            "rank": 9.6
+          },
+          {
+            "command": "notebook:share-notebook",
+            "rank": 9.7
+          },
+          {
+            "type": "separator",
+            "rank": 9.8
+          }
+        ]
+      },
+      {
+        "id": "jp-mainmenu-edit",
+        "items": [
+          {
+            "type": "separator",
+            "rank": 9.5
+          },
+          {
+            "command": "notebook:edit-permissions",
+            "rank": 9.6
+          },
+          {
+            "command": "notebook:view-access-log",
+            "rank": 9.7
+          },
+          {
+            "type": "separator",
+            "rank": 9.8
+          }
+        ]
+      },
+      {
+        "id": "jp-mainmenu-settings",
+        "items": [
+          {
+            "type": "separator",
+            "rank": 5.5
+          },
+          {
+            "command": "notebook:configure-access-control",
+            "rank": 5.6
+          },
+          {
+            "command": "notebook:permissions-settings",
+            "rank": 5.7
+          },
+          {
+            "type": "separator",
+            "rank": 5.8
+          }
+        ]
+      }
+    ]
+  },
+  "properties": {
+    "permissionSystem": {
+      "type": "object",
+      "title": "Permission System Configuration",
+      "description": "Core settings for the collaborative notebook permission system",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable Permission System",
+          "description": "Enable or disable the permission system for collaborative notebooks",
+          "default": true
+        },
+        "strictMode": {
+          "type": "boolean",
+          "title": "Strict Permission Mode",
+          "description": "Enforce strict permission checks for all operations",
+          "default": true
+        },
+        "permissionCacheTimeout": {
+          "type": "number",
+          "title": "Permission Cache Timeout (ms)",
+          "description": "Cache timeout for permission checks to meet <100ms requirement",
+          "minimum": 50,
+          "maximum": 5000,
+          "default": 300
+        },
+        "fallbackPermission": {
+          "type": "string",
+          "title": "Fallback Permission Level",
+          "description": "Default permission level when user permissions cannot be determined",
+          "enum": ["none", "read", "write", "execute"],
+          "default": "none"
+        }
+      },
+      "additionalProperties": false
+    },
+    "accessLevels": {
+      "type": "object",
+      "title": "Access Level Definitions",
+      "description": "Define permission levels and their capabilities",
+      "properties": {
+        "none": {
+          "type": "object",
+          "title": "No Access",
+          "description": "No access to notebook or cells",
+          "properties": {
+            "canView": {
+              "type": "boolean",
+              "default": false
+            },
+            "canEdit": {
+              "type": "boolean",
+              "default": false
+            },
+            "canExecute": {
+              "type": "boolean",
+              "default": false
+            },
+            "canComment": {
+              "type": "boolean",
+              "default": false
+            },
+            "canShare": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "read": {
+          "type": "object",
+          "title": "Read Access",
+          "description": "View-only access to notebook content",
+          "properties": {
+            "canView": {
+              "type": "boolean",
+              "default": true
+            },
+            "canEdit": {
+              "type": "boolean",
+              "default": false
+            },
+            "canExecute": {
+              "type": "boolean",
+              "default": false
+            },
+            "canComment": {
+              "type": "boolean",
+              "default": true
+            },
+            "canShare": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "write": {
+          "type": "object",
+          "title": "Write Access",
+          "description": "Edit notebook content but cannot execute code",
+          "properties": {
+            "canView": {
+              "type": "boolean",
+              "default": true
+            },
+            "canEdit": {
+              "type": "boolean",
+              "default": true
+            },
+            "canExecute": {
+              "type": "boolean",
+              "default": false
+            },
+            "canComment": {
+              "type": "boolean",
+              "default": true
+            },
+            "canShare": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "execute": {
+          "type": "object",
+          "title": "Execute Access",
+          "description": "Full access including code execution",
+          "properties": {
+            "canView": {
+              "type": "boolean",
+              "default": true
+            },
+            "canEdit": {
+              "type": "boolean",
+              "default": true
+            },
+            "canExecute": {
+              "type": "boolean",
+              "default": true
+            },
+            "canComment": {
+              "type": "boolean",
+              "default": true
+            },
+            "canShare": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "admin": {
+          "type": "object",
+          "title": "Admin Access",
+          "description": "Full access including permission management",
+          "properties": {
+            "canView": {
+              "type": "boolean",
+              "default": true
+            },
+            "canEdit": {
+              "type": "boolean",
+              "default": true
+            },
+            "canExecute": {
+              "type": "boolean",
+              "default": true
+            },
+            "canComment": {
+              "type": "boolean",
+              "default": true
+            },
+            "canShare": {
+              "type": "boolean",
+              "default": true
+            },
+            "canManagePermissions": {
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "sharingSettings": {
+      "type": "object",
+      "title": "Sharing and Collaboration Settings",
+      "description": "Configuration for notebook sharing and collaborative access",
+      "properties": {
+        "defaultSharingLevel": {
+          "type": "string",
+          "title": "Default Sharing Level",
+          "description": "Default permission level for new shared notebooks",
+          "enum": ["none", "read", "write", "execute"],
+          "default": "read"
+        },
+        "allowPublicSharing": {
+          "type": "boolean",
+          "title": "Allow Public Sharing",
+          "description": "Allow notebooks to be shared publicly without authentication",
+          "default": false
+        },
+        "requireInvitation": {
+          "type": "boolean",
+          "title": "Require Invitation",
+          "description": "Require explicit invitation for notebook access",
+          "default": true
+        },
+        "shareUrlExpiration": {
+          "type": "number",
+          "title": "Share URL Expiration (hours)",
+          "description": "Hours after which shared URLs expire (0 = no expiration)",
+          "minimum": 0,
+          "maximum": 8760,
+          "default": 72
+        },
+        "maxCollaborators": {
+          "type": "number",
+          "title": "Maximum Collaborators",
+          "description": "Maximum number of simultaneous collaborators per notebook",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 20
+        }
+      },
+      "additionalProperties": false
+    },
+    "roleBasedAccess": {
+      "type": "object",
+      "title": "Role-Based Access Control",
+      "description": "Configure role-based permissions for different user groups",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable Role-Based Access",
+          "description": "Enable role-based access control system",
+          "default": true
+        },
+        "defaultRole": {
+          "type": "string",
+          "title": "Default User Role",
+          "description": "Default role assigned to new users",
+          "enum": ["viewer", "editor", "collaborator", "admin"],
+          "default": "viewer"
+        },
+        "roles": {
+          "type": "object",
+          "title": "Role Definitions",
+          "description": "Define roles and their associated permissions",
+          "properties": {
+            "viewer": {
+              "type": "object",
+              "properties": {
+                "permissionLevel": {
+                  "type": "string",
+                  "enum": ["read"],
+                  "default": "read"
+                },
+                "canCreateNotebooks": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "canDeleteNotebooks": {
+                  "type": "boolean",
+                  "default": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "editor": {
+              "type": "object",
+              "properties": {
+                "permissionLevel": {
+                  "type": "string",
+                  "enum": ["write"],
+                  "default": "write"
+                },
+                "canCreateNotebooks": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "canDeleteNotebooks": {
+                  "type": "boolean",
+                  "default": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "collaborator": {
+              "type": "object",
+              "properties": {
+                "permissionLevel": {
+                  "type": "string",
+                  "enum": ["execute"],
+                  "default": "execute"
+                },
+                "canCreateNotebooks": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "canDeleteNotebooks": {
+                  "type": "boolean",
+                  "default": true
+                }
+              },
+              "additionalProperties": false
+            },
+            "admin": {
+              "type": "object",
+              "properties": {
+                "permissionLevel": {
+                  "type": "string",
+                  "enum": ["admin"],
+                  "default": "admin"
+                },
+                "canCreateNotebooks": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "canDeleteNotebooks": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "canManageUsers": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "canManageRoles": {
+                  "type": "boolean",
+                  "default": true
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "authenticationIntegration": {
+      "type": "object",
+      "title": "Authentication Integration",
+      "description": "Settings for integrating with JupyterHub and other authentication systems",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "title": "Authentication Provider",
+          "description": "Authentication provider to use for user validation",
+          "enum": ["jupyterhub", "oauth", "ldap", "custom"],
+          "default": "jupyterhub"
+        },
+        "tokenValidationEndpoint": {
+          "type": "string",
+          "title": "Token Validation Endpoint",
+          "description": "URL endpoint for validating authentication tokens",
+          "format": "uri",
+          "default": "/hub/api/user"
+        },
+        "userInfoEndpoint": {
+          "type": "string",
+          "title": "User Info Endpoint",
+          "description": "URL endpoint for retrieving user information",
+          "format": "uri",
+          "default": "/hub/api/user"
+        },
+        "groupsEndpoint": {
+          "type": "string",
+          "title": "Groups Endpoint",
+          "description": "URL endpoint for retrieving user group memberships",
+          "format": "uri",
+          "default": "/hub/api/groups"
+        },
+        "tokenCacheTimeout": {
+          "type": "number",
+          "title": "Token Cache Timeout (ms)",
+          "description": "Cache timeout for authentication tokens to improve performance",
+          "minimum": 100,
+          "maximum": 30000,
+          "default": 5000
+        }
+      },
+      "additionalProperties": false
+    },
+    "validationSettings": {
+      "type": "object",
+      "title": "Permission Validation Settings",
+      "description": "Configuration for permission validation and enforcement",
+      "properties": {
+        "validateOnLoad": {
+          "type": "boolean",
+          "title": "Validate on Notebook Load",
+          "description": "Validate permissions when loading notebooks",
+          "default": true
+        },
+        "validateOnEdit": {
+          "type": "boolean",
+          "title": "Validate on Edit",
+          "description": "Validate permissions before allowing edits",
+          "default": true
+        },
+        "validateOnExecute": {
+          "type": "boolean",
+          "title": "Validate on Execute",
+          "description": "Validate permissions before code execution",
+          "default": true
+        },
+        "validateOnShare": {
+          "type": "boolean",
+          "title": "Validate on Share",
+          "description": "Validate permissions before sharing notebooks",
+          "default": true
+        },
+        "showPermissionErrors": {
+          "type": "boolean",
+          "title": "Show Permission Errors",
+          "description": "Display detailed permission error messages to users",
+          "default": true
+        },
+        "logPermissionChecks": {
+          "type": "boolean",
+          "title": "Log Permission Checks",
+          "description": "Log permission checks for auditing purposes",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "cellLevelPermissions": {
+      "type": "object",
+      "title": "Cell-Level Permission Settings",
+      "description": "Configuration for cell-level access control",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Enable Cell-Level Permissions",
+          "description": "Enable fine-grained cell-level permission control",
+          "default": false
+        },
+        "inheritNotebookPermissions": {
+          "type": "boolean",
+          "title": "Inherit Notebook Permissions",
+          "description": "Cells inherit permissions from notebook by default",
+          "default": true
+        },
+        "allowCellOverrides": {
+          "type": "boolean",
+          "title": "Allow Cell Permission Overrides",
+          "description": "Allow individual cells to override notebook permissions",
+          "default": true
+        },
+        "restrictedCellMarker": {
+          "type": "string",
+          "title": "Restricted Cell Marker",
+          "description": "Visual marker for cells with restricted permissions",
+          "enum": ["lock", "warning", "badge", "border"],
+          "default": "lock"
+        }
+      },
+      "additionalProperties": false
+    },
+    "performanceSettings": {
+      "type": "object",
+      "title": "Performance Optimization Settings",
+      "description": "Settings to optimize permission system performance",
+      "properties": {
+        "enablePermissionCaching": {
+          "type": "boolean",
+          "title": "Enable Permission Caching",
+          "description": "Cache permission results to improve performance",
+          "default": true
+        },
+        "permissionCheckTimeout": {
+          "type": "number",
+          "title": "Permission Check Timeout (ms)",
+          "description": "Maximum time for permission checks to meet <100ms requirement",
+          "minimum": 50,
+          "maximum": 100,
+          "default": 100
+        },
+        "batchPermissionChecks": {
+          "type": "boolean",
+          "title": "Batch Permission Checks",
+          "description": "Batch multiple permission checks for efficiency",
+          "default": true
+        },
+        "preloadPermissions": {
+          "type": "boolean",
+          "title": "Preload Permissions",
+          "description": "Preload permissions on session start",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "auditAndLogging": {
+      "type": "object",
+      "title": "Audit and Logging Settings",
+      "description": "Configuration for permission auditing and logging",
+      "properties": {
+        "enableAuditLog": {
+          "type": "boolean",
+          "title": "Enable Audit Logging",
+          "description": "Enable detailed audit logging of permission changes",
+          "default": false
+        },
+        "logPermissionChanges": {
+          "type": "boolean",
+          "title": "Log Permission Changes",
+          "description": "Log all permission modifications",
+          "default": true
+        },
+        "logAccessAttempts": {
+          "type": "boolean",
+          "title": "Log Access Attempts",
+          "description": "Log all access attempts including failures",
+          "default": false
+        },
+        "auditLogRetention": {
+          "type": "number",
+          "title": "Audit Log Retention (days)",
+          "description": "Number of days to retain audit logs",
+          "minimum": 1,
+          "maximum": 365,
+          "default": 90
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "type": "object"
+}

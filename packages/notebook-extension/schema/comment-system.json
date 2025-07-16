@@ -1,0 +1,524 @@
+{
+  "title": "Jupyter Notebook Comment and Review System",
+  "description": "Configuration schema for collaborative comment and review system in Jupyter Notebook v7 with real-time synchronization, threaded discussions, and review workflow management",
+  "type": "object",
+  "jupyter.lab.menus": {
+    "main": [
+      {
+        "id": "jp-mainmenu-edit",
+        "items": [
+          {
+            "type": "separator",
+            "rank": 10.5
+          },
+          {
+            "command": "notebook:toggle-comment-panel",
+            "rank": 10.6
+          },
+          {
+            "command": "notebook:add-comment",
+            "rank": 10.7
+          },
+          {
+            "command": "notebook:resolve-all-comments",
+            "rank": 10.8
+          },
+          {
+            "type": "separator",
+            "rank": 10.9
+          }
+        ]
+      },
+      {
+        "id": "jp-mainmenu-view",
+        "items": [
+          {
+            "command": "notebook:show-comment-sidebar",
+            "rank": 8.5
+          },
+          {
+            "command": "notebook:toggle-comment-notifications",
+            "rank": 8.6
+          }
+        ]
+      },
+      {
+        "id": "jp-mainmenu-help",
+        "items": [
+          {
+            "command": "notebook:comment-system-help",
+            "rank": 15.0
+          }
+        ]
+      }
+    ]
+  },
+  "properties": {
+    "commentThreading": {
+      "type": "object",
+      "title": "Comment Threading Configuration",
+      "description": "Settings for comment thread behavior and hierarchy",
+      "properties": {
+        "maxDepth": {
+          "type": "integer",
+          "title": "Maximum Thread Depth",
+          "description": "Maximum depth for threaded discussions (default: 5)",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 10
+        },
+        "enableThreadCollapse": {
+          "type": "boolean",
+          "title": "Enable Thread Collapse",
+          "description": "Allow collapsing and expanding comment threads",
+          "default": true
+        },
+        "showThreadIndicators": {
+          "type": "boolean",
+          "title": "Show Thread Indicators",
+          "description": "Display visual indicators for threaded comment hierarchy",
+          "default": true
+        },
+        "defaultThreadState": {
+          "type": "string",
+          "title": "Default Thread State",
+          "description": "Initial display state for comment threads",
+          "default": "expanded",
+          "enum": ["expanded", "collapsed", "auto"]
+        },
+        "threadSortOrder": {
+          "type": "string",
+          "title": "Thread Sort Order",
+          "description": "Default sorting order for comments within threads",
+          "default": "chronological",
+          "enum": ["chronological", "reverse-chronological", "author", "resolved-status"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "notificationPreferences": {
+      "type": "object",
+      "title": "Notification Preferences",
+      "description": "Configuration for comment notification behavior",
+      "properties": {
+        "enableNotifications": {
+          "type": "boolean",
+          "title": "Enable Notifications",
+          "description": "Enable real-time notifications for comment activities",
+          "default": true
+        },
+        "notifyOnNewComment": {
+          "type": "boolean",
+          "title": "Notify on New Comment",
+          "description": "Send notifications when new comments are added",
+          "default": true
+        },
+        "notifyOnReply": {
+          "type": "boolean",
+          "title": "Notify on Reply",
+          "description": "Send notifications when someone replies to your comment",
+          "default": true
+        },
+        "notifyOnResolve": {
+          "type": "boolean",
+          "title": "Notify on Resolve",
+          "description": "Send notifications when comments are resolved or unresolved",
+          "default": true
+        },
+        "notifyOnMention": {
+          "type": "boolean",
+          "title": "Notify on Mention",
+          "description": "Send notifications when you are mentioned in a comment",
+          "default": true
+        },
+        "notificationDelay": {
+          "type": "integer",
+          "title": "Notification Delay (ms)",
+          "description": "Delay before showing notifications to prevent spam (default: 1000ms)",
+          "default": 1000,
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "showDesktopNotifications": {
+          "type": "boolean",
+          "title": "Show Desktop Notifications",
+          "description": "Display browser desktop notifications for comments",
+          "default": false
+        },
+        "soundNotifications": {
+          "type": "boolean",
+          "title": "Sound Notifications",
+          "description": "Play sound alerts for comment notifications",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "reviewWorkflow": {
+      "type": "object",
+      "title": "Review Workflow Configuration",
+      "description": "Settings for comment review and resolution workflow",
+      "properties": {
+        "enableReviewMode": {
+          "type": "boolean",
+          "title": "Enable Review Mode",
+          "description": "Enable structured review workflow with approval states",
+          "default": false
+        },
+        "autoResolveTimeout": {
+          "type": "integer",
+          "title": "Auto-Resolve Timeout (ms)",
+          "description": "Automatically resolve comments after specified timeout (0 to disable)",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 86400000
+        },
+        "requireResolutionPermission": {
+          "type": "boolean",
+          "title": "Require Resolution Permission",
+          "description": "Require specific permission to resolve comments",
+          "default": false
+        },
+        "showResolvedComments": {
+          "type": "boolean",
+          "title": "Show Resolved Comments",
+          "description": "Display resolved comments in the interface",
+          "default": true
+        },
+        "resolvedCommentOpacity": {
+          "type": "number",
+          "title": "Resolved Comment Opacity",
+          "description": "Visual opacity for resolved comments (0.0 to 1.0)",
+          "default": 0.6,
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "enableCommentStatus": {
+          "type": "boolean",
+          "title": "Enable Comment Status",
+          "description": "Enable status tracking for comments (draft, active, resolved, deleted)",
+          "default": true
+        },
+        "defaultCommentStatus": {
+          "type": "string",
+          "title": "Default Comment Status",
+          "description": "Initial status for new comments",
+          "default": "active",
+          "enum": ["draft", "active", "resolved", "deleted"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "discussionManagement": {
+      "type": "object",
+      "title": "Discussion Management Settings",
+      "description": "Configuration for comment organization and management",
+      "properties": {
+        "pageSize": {
+          "type": "integer",
+          "title": "Page Size",
+          "description": "Number of comments to display per page",
+          "default": 20,
+          "minimum": 5,
+          "maximum": 100
+        },
+        "maxCommentLength": {
+          "type": "integer",
+          "title": "Maximum Comment Length",
+          "description": "Maximum number of characters allowed in a comment",
+          "default": 5000,
+          "minimum": 100,
+          "maximum": 50000
+        },
+        "enableSearch": {
+          "type": "boolean",
+          "title": "Enable Comment Search",
+          "description": "Enable search functionality for comments",
+          "default": true
+        },
+        "enableFiltering": {
+          "type": "boolean",
+          "title": "Enable Comment Filtering",
+          "description": "Enable filtering options for comments",
+          "default": true
+        },
+        "defaultFilter": {
+          "type": "string",
+          "title": "Default Filter",
+          "description": "Default filter applied to comment display",
+          "default": "all",
+          "enum": ["all", "unresolved", "resolved", "my-comments", "mentions"]
+        },
+        "enableCommentExport": {
+          "type": "boolean",
+          "title": "Enable Comment Export",
+          "description": "Allow exporting comments to JSON format",
+          "default": true
+        },
+        "enableCommentImport": {
+          "type": "boolean",
+          "title": "Enable Comment Import",
+          "description": "Allow importing comments from JSON format",
+          "default": true
+        },
+        "showCommentCount": {
+          "type": "boolean",
+          "title": "Show Comment Count",
+          "description": "Display total comment count in the interface",
+          "default": true
+        },
+        "showAuthorAvatars": {
+          "type": "boolean",
+          "title": "Show Author Avatars",
+          "description": "Display user avatars in comment threads",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "displaySettings": {
+      "type": "object",
+      "title": "Comment Display Settings",
+      "description": "Visual appearance and layout configuration for comments",
+      "properties": {
+        "enableMarkdownRendering": {
+          "type": "boolean",
+          "title": "Enable Markdown Rendering",
+          "description": "Render markdown formatting in comment content",
+          "default": true
+        },
+        "allowedMarkdownFeatures": {
+          "type": "array",
+          "title": "Allowed Markdown Features",
+          "description": "Markdown features enabled in comment content",
+          "default": ["emphasis", "strong", "code", "codeBlock", "link", "list"],
+          "items": {
+            "type": "string",
+            "enum": ["emphasis", "strong", "code", "codeBlock", "link", "list", "image", "table", "blockquote", "strikethrough"]
+          }
+        },
+        "isDockable": {
+          "type": "boolean",
+          "title": "Dockable Comment Panel",
+          "description": "Allow docking comment panel as sidebar",
+          "default": true
+        },
+        "showTimestamps": {
+          "type": "boolean",
+          "title": "Show Timestamps",
+          "description": "Display creation and modification timestamps",
+          "default": true
+        },
+        "timestampFormat": {
+          "type": "string",
+          "title": "Timestamp Format",
+          "description": "Format for displaying timestamps",
+          "default": "relative",
+          "enum": ["relative", "absolute", "both"]
+        },
+        "showEditHistory": {
+          "type": "boolean",
+          "title": "Show Edit History",
+          "description": "Display edit history for comments",
+          "default": false
+        },
+        "enableSyntaxHighlighting": {
+          "type": "boolean",
+          "title": "Enable Syntax Highlighting",
+          "description": "Enable syntax highlighting in code blocks within comments",
+          "default": true
+        },
+        "commentBubbleStyle": {
+          "type": "string",
+          "title": "Comment Bubble Style",
+          "description": "Visual style for comment bubbles",
+          "default": "modern",
+          "enum": ["classic", "modern", "minimal", "compact"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "realtimeSync": {
+      "type": "object",
+      "title": "Real-time Synchronization Settings",
+      "description": "Configuration for real-time comment synchronization",
+      "properties": {
+        "enableRealtimeSync": {
+          "type": "boolean",
+          "title": "Enable Real-time Sync",
+          "description": "Enable real-time synchronization of comments across clients",
+          "default": true
+        },
+        "syncInterval": {
+          "type": "integer",
+          "title": "Sync Interval (ms)",
+          "description": "Interval for synchronization updates (default: 100ms for <200ms requirement)",
+          "default": 100,
+          "minimum": 50,
+          "maximum": 1000
+        },
+        "conflictResolution": {
+          "type": "string",
+          "title": "Conflict Resolution Strategy",
+          "description": "Strategy for resolving comment conflicts",
+          "default": "last-write-wins",
+          "enum": ["last-write-wins", "merge", "user-prompt"]
+        },
+        "enableOfflineMode": {
+          "type": "boolean",
+          "title": "Enable Offline Mode",
+          "description": "Allow commenting in offline mode with sync on reconnection",
+          "default": true
+        },
+        "connectionRetryAttempts": {
+          "type": "integer",
+          "title": "Connection Retry Attempts",
+          "description": "Number of retry attempts for connection failures",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 10
+        },
+        "connectionRetryDelay": {
+          "type": "integer",
+          "title": "Connection Retry Delay (ms)",
+          "description": "Delay between connection retry attempts",
+          "default": 1000,
+          "minimum": 500,
+          "maximum": 10000
+        }
+      },
+      "additionalProperties": false
+    },
+    "accessControl": {
+      "type": "object",
+      "title": "Access Control Settings",
+      "description": "Permission and access control configuration for comments",
+      "properties": {
+        "enablePermissions": {
+          "type": "boolean",
+          "title": "Enable Permissions",
+          "description": "Enable permission-based access control for comments",
+          "default": true
+        },
+        "defaultPermissions": {
+          "type": "array",
+          "title": "Default Permissions",
+          "description": "Default permissions for new comments",
+          "default": ["read", "create", "update", "delete"],
+          "items": {
+            "type": "string",
+            "enum": ["read", "create", "update", "delete", "resolve", "reply"]
+          }
+        },
+        "allowGuestComments": {
+          "type": "boolean",
+          "title": "Allow Guest Comments",
+          "description": "Allow unauthenticated users to create comments",
+          "default": false
+        },
+        "requireApprovalForGuests": {
+          "type": "boolean",
+          "title": "Require Approval for Guest Comments",
+          "description": "Require approval for comments from guest users",
+          "default": true
+        },
+        "enableCommentModerationQueue": {
+          "type": "boolean",
+          "title": "Enable Comment Moderation Queue",
+          "description": "Enable moderation queue for comment approval",
+          "default": false
+        },
+        "autoApproveFromTrustedUsers": {
+          "type": "boolean",
+          "title": "Auto-approve from Trusted Users",
+          "description": "Automatically approve comments from trusted users",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "keyboardShortcuts": {
+      "type": "object",
+      "title": "Keyboard Shortcuts",
+      "description": "Keyboard shortcuts for comment system operations",
+      "properties": {
+        "enableKeyboardShortcuts": {
+          "type": "boolean",
+          "title": "Enable Keyboard Shortcuts",
+          "description": "Enable keyboard shortcuts for comment operations",
+          "default": true
+        },
+        "shortcutAddComment": {
+          "type": "string",
+          "title": "Add Comment Shortcut",
+          "description": "Keyboard shortcut to add a comment",
+          "default": "Ctrl+Shift+C"
+        },
+        "shortcutResolveComment": {
+          "type": "string",
+          "title": "Resolve Comment Shortcut",
+          "description": "Keyboard shortcut to resolve a comment",
+          "default": "Ctrl+Shift+R"
+        },
+        "shortcutToggleCommentPanel": {
+          "type": "string",
+          "title": "Toggle Comment Panel Shortcut",
+          "description": "Keyboard shortcut to toggle comment panel",
+          "default": "Ctrl+Shift+P"
+        },
+        "shortcutNextComment": {
+          "type": "string",
+          "title": "Next Comment Shortcut",
+          "description": "Keyboard shortcut to navigate to next comment",
+          "default": "Ctrl+Alt+N"
+        },
+        "shortcutPreviousComment": {
+          "type": "string",
+          "title": "Previous Comment Shortcut",
+          "description": "Keyboard shortcut to navigate to previous comment",
+          "default": "Ctrl+Alt+P"
+        }
+      },
+      "additionalProperties": false
+    },
+    "performance": {
+      "type": "object",
+      "title": "Performance Settings",
+      "description": "Performance optimization settings for comment system",
+      "properties": {
+        "enableVirtualization": {
+          "type": "boolean",
+          "title": "Enable Virtualization",
+          "description": "Enable virtual scrolling for large comment lists",
+          "default": true
+        },
+        "commentRenderThreshold": {
+          "type": "integer",
+          "title": "Comment Render Threshold",
+          "description": "Minimum number of comments before enabling virtualization",
+          "default": 50,
+          "minimum": 10,
+          "maximum": 1000
+        },
+        "debounceSearchDelay": {
+          "type": "integer",
+          "title": "Debounce Search Delay (ms)",
+          "description": "Delay for debouncing search input",
+          "default": 300,
+          "minimum": 100,
+          "maximum": 1000
+        },
+        "cacheExpiration": {
+          "type": "integer",
+          "title": "Cache Expiration (ms)",
+          "description": "Cache expiration time for comment data",
+          "default": 300000,
+          "minimum": 60000,
+          "maximum": 3600000
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
