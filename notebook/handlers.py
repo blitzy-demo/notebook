@@ -34,7 +34,8 @@ from threading import Lock, RLock, Event, local, Timer
 
 # External dependencies
 from tornado import web
-from tornado.web import WebSocketHandler, authenticated, HTTPError
+from tornado.websocket import WebSocketHandler
+from tornado.web import authenticated, HTTPError
 from jupyter_server.utils import url_path_join, url_escape, ensure_async
 from jupyter_server.base.handlers import JupyterHandler
 from ypy import YDoc
