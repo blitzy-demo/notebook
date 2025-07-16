@@ -18,12 +18,12 @@ import { PageConfig } from '@jupyterlab/coreutils';
 import { IRenderMime } from '@jupyterlab/rendermime-interfaces';
 
 import { Throttler } from '@lumino/polling';
+import { ISignal } from '@lumino/signaling';
 
 import { INotebookShell, NotebookShell } from './shell';
 
 // Collaboration service imports
 import {
-  ICollaborationManager,
   IUserAwareness,
   ILockManager,
   IHistoryManager,
@@ -32,12 +32,17 @@ import {
 } from './tokens';
 
 // Collaboration implementation imports
-import YjsNotebookProvider from '../../notebook/src/collab/provider';
-import UserAwareness from '../../notebook/src/collab/awareness';
-import CellLocking from '../../notebook/src/collab/locks';
-import ChangeHistory from '../../notebook/src/collab/history';
-import PermissionsSystem from '../../notebook/src/collab/permissions';
-import CommentSystem from '../../notebook/src/collab/comments';
+import { 
+  YjsNotebookProvider, 
+  ICollaborationManager, 
+  IConnectionState, 
+  ISyncStatus,
+  UserAwareness,
+  CellLocking,
+  ChangeHistory,
+  PermissionsSystem,
+  CommentSystem
+} from '@jupyter-notebook/notebook';
 
 // Yjs and external collaboration dependencies are imported by the specific collaboration components
 
@@ -467,6 +472,50 @@ export class NotebookApp extends JupyterFrontEnd<INotebookShell> {
       isEnabled: true,
       currentSession: null,
       
+      async connect(): Promise<void> {
+        await yjsProvider.connect();
+      },
+      
+      async disconnect(): Promise<void> {
+        await yjsProvider.disconnect();
+      },
+      
+      get isConnected(): boolean {
+        return yjsProvider.isConnected;
+      },
+      
+      getActiveUsers(): any[] {
+        return this._userAwareness?.getActiveUsers() || [];
+      },
+      
+      getUserAwareness(): any {
+        return this._userAwareness;
+      },
+      
+      getChangeHistory(): any[] {
+        return this._historyManager?.getVersionHistory() || [];
+      },
+      
+      getProvider(): YjsNotebookProvider {
+        return yjsProvider;
+      },
+      
+      get connectionState(): IConnectionState {
+        return yjsProvider.connectionState;
+      },
+      
+      get syncStatus(): ISyncStatus {
+        return yjsProvider.syncStatus;
+      },
+      
+      get onConnectionStateChanged(): ISignal<ICollaborationManager, IConnectionState> {
+        return yjsProvider.onConnectionStateChanged;
+      },
+      
+      get onSyncStateChanged(): ISignal<ICollaborationManager, ISyncStatus> {
+        return yjsProvider.onSyncStateChanged;
+      },
+      
       async initializeSession(options: any): Promise<any> {
         try {
           // Connect the provider
@@ -474,11 +523,8 @@ export class NotebookApp extends JupyterFrontEnd<INotebookShell> {
           
           // Initialize services
           await Promise.all([
-            this._userAwareness?.trackUserActivity(),
-            this._lockManager?.initialize?.(),
-            this._historyManager?.initialize?.(),
-            this._permissionManager?.initialize?.(),
-            this._commentManager?.initialize?.()
+            // Initialize collaboration services through provider
+            yjsProvider.connect()
           ]);
 
           const session = {
