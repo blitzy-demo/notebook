@@ -1,0 +1,317 @@
+{
+  "title": "Jupyter Notebook Cell Locking Configuration",
+  "description": "Configuration schema for cell-level locking mechanism during collaborative editing, including lock timeout settings, visual indicators, conflict resolution behavior, and user preferences for exclusive cell editing.",
+  "jupyter.lab.menus": {
+    "main": [
+      {
+        "id": "jp-mainmenu-edit",
+        "items": [
+          {
+            "type": "separator",
+            "rank": 9.0
+          },
+          {
+            "command": "notebook:acquire-cell-lock",
+            "rank": 9.1
+          },
+          {
+            "command": "notebook:release-cell-lock",
+            "rank": 9.2
+          },
+          {
+            "command": "notebook:toggle-cell-lock",
+            "rank": 9.3
+          },
+          {
+            "type": "separator",
+            "rank": 9.4
+          }
+        ]
+      },
+      {
+        "id": "jp-mainmenu-view",
+        "items": [
+          {
+            "command": "notebook:show-lock-indicators",
+            "rank": 5.0
+          },
+          {
+            "command": "notebook:hide-lock-indicators",
+            "rank": 5.1
+          }
+        ]
+      },
+      {
+        "id": "jp-mainmenu-help",
+        "items": [
+          {
+            "command": "notebook:cell-locking-help",
+            "rank": 10.0
+          }
+        ]
+      }
+    ],
+    "context": [
+      {
+        "command": "notebook:acquire-cell-lock",
+        "selector": ".jp-Cell",
+        "rank": 1
+      },
+      {
+        "command": "notebook:release-cell-lock",
+        "selector": ".jp-Cell",
+        "rank": 2
+      },
+      {
+        "command": "notebook:toggle-cell-lock",
+        "selector": ".jp-Cell",
+        "rank": 3
+      }
+    ]
+  },
+  "properties": {
+    "lockTimeout": {
+      "type": "number",
+      "title": "Lock Timeout (milliseconds)",
+      "description": "Maximum duration a cell lock can be held before automatic expiration. Must be at least 60000ms (1 minute) for stability.",
+      "default": 300000,
+      "minimum": 60000,
+      "maximum": 3600000
+    },
+    "lockAcquisitionTimeout": {
+      "type": "number",
+      "title": "Lock Acquisition Timeout (milliseconds)",
+      "description": "Maximum time to wait for acquiring a cell lock before giving up. Must be under 200ms per technical specifications.",
+      "default": 150,
+      "minimum": 50,
+      "maximum": 200
+    },
+    "heartbeatInterval": {
+      "type": "number",
+      "title": "Heartbeat Interval (milliseconds)",
+      "description": "Interval between heartbeat signals to maintain active locks. Should be significantly less than lockTimeout.",
+      "default": 30000,
+      "minimum": 5000,
+      "maximum": 120000
+    },
+    "maxRetries": {
+      "type": "number",
+      "title": "Maximum Lock Acquisition Retries",
+      "description": "Number of times to retry acquiring a lock before failing.",
+      "default": 3,
+      "minimum": 1,
+      "maximum": 10
+    },
+    "retryDelay": {
+      "type": "number",
+      "title": "Retry Delay (milliseconds)",
+      "description": "Delay between lock acquisition retry attempts.",
+      "default": 1000,
+      "minimum": 100,
+      "maximum": 5000
+    },
+    "autoRelease": {
+      "type": "boolean",
+      "title": "Auto-release Lock on Inactivity",
+      "description": "Whether to automatically release locks when user becomes inactive or leaves the cell.",
+      "default": true
+    },
+    "enableVisualIndicators": {
+      "type": "boolean",
+      "title": "Enable Visual Lock Indicators",
+      "description": "Whether to display visual indicators showing cell lock status and ownership.",
+      "default": true
+    },
+    "visualSettings": {
+      "type": "object",
+      "title": "Visual Lock Indicator Settings",
+      "description": "Configuration for visual appearance of lock indicators.",
+      "properties": {
+        "lockIndicatorColor": {
+          "type": "string",
+          "title": "Lock Indicator Color",
+          "description": "Color for lock indicators (CSS color format).",
+          "default": "#ff6b6b",
+          "pattern": "^#[0-9a-fA-F]{6}$|^#[0-9a-fA-F]{3}$|^rgb\\(\\d+,\\s*\\d+,\\s*\\d+\\)$|^rgba\\(\\d+,\\s*\\d+,\\s*\\d+,\\s*[0-9.]+\\)$"
+        },
+        "lockIndicatorOpacity": {
+          "type": "number",
+          "title": "Lock Indicator Opacity",
+          "description": "Opacity level for lock indicators (0.0 to 1.0).",
+          "default": 0.3,
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "lockBorderWidth": {
+          "type": "number",
+          "title": "Lock Border Width (pixels)",
+          "description": "Width of border around locked cells.",
+          "default": 2,
+          "minimum": 1,
+          "maximum": 10
+        },
+        "lockBorderStyle": {
+          "type": "string",
+          "title": "Lock Border Style",
+          "description": "CSS border style for locked cells.",
+          "default": "solid",
+          "enum": ["solid", "dashed", "dotted", "double"]
+        },
+        "showOwnerAvatar": {
+          "type": "boolean",
+          "title": "Show Lock Owner Avatar",
+          "description": "Whether to display avatar/icon of lock owner.",
+          "default": true
+        },
+        "showLockTimer": {
+          "type": "boolean",
+          "title": "Show Lock Timer",
+          "description": "Whether to display countdown timer for lock expiration.",
+          "default": false
+        },
+        "animateTransitions": {
+          "type": "boolean",
+          "title": "Animate Lock Transitions",
+          "description": "Whether to animate lock acquisition and release transitions.",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "conflictResolution": {
+      "type": "object",
+      "title": "Conflict Resolution Settings",
+      "description": "Configuration for handling lock conflicts and simultaneous access attempts.",
+      "properties": {
+        "showConflictNotifications": {
+          "type": "boolean",
+          "title": "Show Conflict Notifications",
+          "description": "Whether to display notifications when lock conflicts occur.",
+          "default": true
+        },
+        "notificationDuration": {
+          "type": "number",
+          "title": "Notification Duration (milliseconds)",
+          "description": "How long to display conflict notifications.",
+          "default": 5000,
+          "minimum": 1000,
+          "maximum": 30000
+        },
+        "allowForceUnlock": {
+          "type": "boolean",
+          "title": "Allow Force Unlock",
+          "description": "Whether to allow users to forcefully unlock cells (with appropriate permissions).",
+          "default": false
+        },
+        "conflictStrategy": {
+          "type": "string",
+          "title": "Conflict Resolution Strategy",
+          "description": "Strategy for handling lock conflicts when multiple users try to access the same cell.",
+          "default": "queue",
+          "enum": ["queue", "reject", "notify"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "userPreferences": {
+      "type": "object",
+      "title": "User Preference Settings",
+      "description": "User-specific preferences for cell locking behavior.",
+      "properties": {
+        "autoLockOnEdit": {
+          "type": "boolean",
+          "title": "Auto-lock on Edit",
+          "description": "Whether to automatically acquire lock when user starts editing a cell.",
+          "default": true
+        },
+        "releaseOnCellChange": {
+          "type": "boolean",
+          "title": "Release Lock on Cell Change",
+          "description": "Whether to release lock when user moves to a different cell.",
+          "default": false
+        },
+        "showLockStatusInToolbar": {
+          "type": "boolean",
+          "title": "Show Lock Status in Toolbar",
+          "description": "Whether to display lock status information in notebook toolbar.",
+          "default": true
+        },
+        "enableKeyboardShortcuts": {
+          "type": "boolean",
+          "title": "Enable Keyboard Shortcuts",
+          "description": "Whether to enable keyboard shortcuts for lock operations.",
+          "default": true
+        },
+        "lockOnFocus": {
+          "type": "boolean",
+          "title": "Lock on Cell Focus",
+          "description": "Whether to acquire lock when cell receives focus (not just on edit).",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "permissions": {
+      "type": "object",
+      "title": "Permission Settings",
+      "description": "Configuration for lock-related permissions and access controls.",
+      "properties": {
+        "requirePermissionForLock": {
+          "type": "boolean",
+          "title": "Require Permission for Lock",
+          "description": "Whether users need specific permission to acquire locks.",
+          "default": false
+        },
+        "adminCanForceUnlock": {
+          "type": "boolean",
+          "title": "Admin Can Force Unlock",
+          "description": "Whether users with admin privileges can force unlock any cell.",
+          "default": true
+        },
+        "ownerCanExtendLock": {
+          "type": "boolean",
+          "title": "Owner Can Extend Lock",
+          "description": "Whether lock owners can extend lock duration beyond default timeout.",
+          "default": true
+        },
+        "maxLocksPerUser": {
+          "type": "number",
+          "title": "Maximum Locks per User",
+          "description": "Maximum number of simultaneous locks one user can hold. 0 means unlimited.",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 100
+        }
+      },
+      "additionalProperties": false
+    },
+    "debugging": {
+      "type": "object",
+      "title": "Debugging and Logging Settings",
+      "description": "Configuration for debugging and logging lock operations.",
+      "properties": {
+        "enableDebugLogging": {
+          "type": "boolean",
+          "title": "Enable Debug Logging",
+          "description": "Whether to enable detailed logging of lock operations for debugging.",
+          "default": false
+        },
+        "logLockEvents": {
+          "type": "boolean",
+          "title": "Log Lock Events",
+          "description": "Whether to log lock acquisition, release, and conflict events.",
+          "default": false
+        },
+        "trackLockMetrics": {
+          "type": "boolean",
+          "title": "Track Lock Metrics",
+          "description": "Whether to collect metrics on lock performance and usage.",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "type": "object"
+}
