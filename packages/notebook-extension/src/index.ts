@@ -39,6 +39,28 @@ import { Widget } from '@lumino/widgets';
 
 import { TrustedComponent } from './trusted';
 
+// External collaboration dependencies
+import { Doc } from 'yjs';
+import { WebsocketProvider } from 'y-websocket';
+import { IndexeddbPersistence } from 'y-indexeddb';
+import { YNotebook } from '@jupyter/ydoc';
+
+// Internal collaboration components
+import { YjsNotebookProvider } from '../../notebook/src/collab/provider';
+import { UserAwareness } from '../../notebook/src/collab/awareness';
+import { CellLocking } from '../../notebook/src/collab/locks';
+import { ChangeHistory } from '../../notebook/src/collab/history';
+import { PermissionsSystem } from '../../notebook/src/collab/permissions';
+import { CommentSystem } from '../../notebook/src/collab/comments';
+
+// UI components for collaboration
+import { CollaborationStatusBar } from './components/collaborationBar';
+import { UserPresence } from './components/userPresence';
+import { CellLockIndicator } from './components/cellLockIndicator';
+import { HistoryViewer } from './components/historyViewer';
+import { PermissionsDialog } from './components/permissionsDialog';
+import { CommentSystem as CommentSystemUI } from './components/commentSystem';
+
 /**
  * The class for kernel status errors.
  */
@@ -678,6 +700,591 @@ const editNotebookMetadata: JupyterFrontEndPlugin<void> = {
 };
 
 /**
+ * Plugin to initialize collaboration settings and configurations
+ */
+export const collaborationSettingsPlugin: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:collaboration-settings',
+  description: 'Plugin to initialize collaboration settings and configurations',
+  autoStart: true,
+  requires: [ITranslator],
+  optional: [ISettingRegistry],
+  activate: (
+    app: JupyterFrontEnd,
+    translator: ITranslator,
+    settings: ISettingRegistry | null
+  ) => {
+    const trans = translator.load('notebook');
+    console.log(trans.__('Collaboration settings initialized'));
+    
+    // Initialize collaboration settings
+    if (settings) {
+      const loadSettings = settings.load(collaborationSettingsPlugin.id);
+      loadSettings
+        .then((settings) => {
+          console.log('Collaboration settings loaded:', settings);
+        })
+        .catch((reason: Error) => {
+          console.warn('Failed to load collaboration settings:', reason.message);
+        });
+    }
+  }
+};
+
+/**
+ * Plugin to provide Yjs document synchronization for collaborative editing
+ */
+export const yjsNotebookProviderPlugin: JupyterFrontEndPlugin<YjsNotebookProvider> = {
+  id: '@jupyter-notebook/notebook-extension:yjs-notebook-provider',
+  description: 'Plugin to provide Yjs document synchronization for collaborative editing',
+  autoStart: true,
+  requires: [INotebookTracker, ITranslator],
+  optional: [ISettingRegistry],
+  activate: (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    translator: ITranslator,
+    settings: ISettingRegistry | null
+  ): YjsNotebookProvider => {
+    const trans = translator.load('notebook');
+    console.log(trans.__('YjsNotebookProvider initialized'));
+    
+    const provider = new YjsNotebookProvider();
+    
+    // Initialize connection management
+    provider.connect();
+    
+    // Monitor connection state changes
+    provider.onConnectionStateChanged.connect((sender, connectionState) => {
+      console.log('Connection state changed:', connectionState);
+    });
+    
+    // Handle notebook changes
+    tracker.currentChanged.connect((sender, panel) => {
+      if (panel) {
+        console.log('Notebook changed, synchronizing with Yjs');
+        // Synchronize with the new notebook
+        provider.synchronizationStatus;
+      }
+    });
+    
+    return provider;
+  }
+};
+
+/**
+ * Plugin to track and display user presence in collaborative editing
+ */
+export const userAwarenessPlugin: JupyterFrontEndPlugin<UserAwareness> = {
+  id: '@jupyter-notebook/notebook-extension:user-awareness',
+  description: 'Plugin to track and display user presence in collaborative editing',
+  autoStart: true,
+  requires: [INotebookTracker, ITranslator],
+  optional: [ISettingRegistry],
+  activate: (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    translator: ITranslator,
+    settings: ISettingRegistry | null
+  ): UserAwareness => {
+    const trans = translator.load('notebook');
+    console.log(trans.__('UserAwareness initialized'));
+    
+    const awareness = new UserAwareness();
+    
+    // Monitor user changes
+    awareness.onUsersChanged.connect((sender, users) => {
+      console.log('Users changed:', users);
+    });
+    
+    // Track connection status
+    awareness.onConnectionStatusChanged.connect((sender, status) => {
+      console.log('Awareness connection status changed:', status);
+    });
+    
+    // Update user count when notebooks change
+    tracker.currentChanged.connect((sender, panel) => {
+      if (panel) {
+        console.log('Active users:', awareness.userCount);
+      }
+    });
+    
+    return awareness;
+  }
+};
+
+/**
+ * Plugin to manage cell locking for exclusive editing access
+ */
+export const cellLockingPlugin: JupyterFrontEndPlugin<CellLocking> = {
+  id: '@jupyter-notebook/notebook-extension:cell-locking',
+  description: 'Plugin to manage cell locking for exclusive editing access',
+  autoStart: true,
+  requires: [INotebookTracker, ITranslator],
+  optional: [ISettingRegistry],
+  activate: (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    translator: ITranslator,
+    settings: ISettingRegistry | null
+  ): CellLocking => {
+    const trans = translator.load('notebook');
+    console.log(trans.__('CellLocking initialized'));
+    
+    const cellLocking = new CellLocking();
+    
+    // Monitor lock state changes
+    cellLocking.onLockStateChanged.connect((sender, lockState) => {
+      console.log('Lock state changed:', lockState);
+    });
+    
+    // Handle cell acquisition timeouts
+    const timeout = cellLocking.lockAcquisitionTimeout;
+    if (timeout > 0) {
+      console.log('Lock acquisition timeout set to:', timeout);
+    }
+    
+    // Add commands for lock management
+    const { commands } = app;
+    commands.addCommand('notebook:acquire-cell-lock', {
+      label: trans.__('Acquire Cell Lock'),
+      execute: async (args: any) => {
+        const cellId = args.cellId;
+        if (cellId) {
+          await cellLocking.acquireLock(cellId);
+        }
+      }
+    });
+    
+    commands.addCommand('notebook:release-cell-lock', {
+      label: trans.__('Release Cell Lock'),
+      execute: async (args: any) => {
+        const cellId = args.cellId;
+        if (cellId) {
+          await cellLocking.releaseLock(cellId);
+        }
+      }
+    });
+    
+    return cellLocking;
+  }
+};
+
+/**
+ * Plugin to track change history and provide version control
+ */
+export const changeHistoryPlugin: JupyterFrontEndPlugin<ChangeHistory> = {
+  id: '@jupyter-notebook/notebook-extension:change-history',
+  description: 'Plugin to track change history and provide version control',
+  autoStart: true,
+  requires: [INotebookTracker, ITranslator],
+  optional: [ISettingRegistry],
+  activate: (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    translator: ITranslator,
+    settings: ISettingRegistry | null
+  ): ChangeHistory => {
+    const trans = translator.load('notebook');
+    console.log(trans.__('ChangeHistory initialized'));
+    
+    const history = new ChangeHistory();
+    
+    // Subscribe to changes
+    history.subscribeToChanges((changes) => {
+      console.log('Changes detected:', changes);
+    });
+    
+    // Add commands for history management
+    const { commands } = app;
+    commands.addCommand('notebook:view-version-history', {
+      label: trans.__('View Version History'),
+      execute: async () => {
+        const versionHistory = await history.getVersionHistory();
+        console.log('Version history:', versionHistory);
+      }
+    });
+    
+    commands.addCommand('notebook:rollback-version', {
+      label: trans.__('Rollback to Version'),
+      execute: async (args: any) => {
+        const version = args.version;
+        if (version) {
+          await history.rollbackToVersion(version);
+        }
+      }
+    });
+    
+    return history;
+  }
+};
+
+/**
+ * Plugin to manage permissions for collaborative editing
+ */
+export const permissionsSystemPlugin: JupyterFrontEndPlugin<PermissionsSystem> = {
+  id: '@jupyter-notebook/notebook-extension:permissions-system',
+  description: 'Plugin to manage permissions for collaborative editing',
+  autoStart: true,
+  requires: [INotebookTracker, ITranslator],
+  optional: [ISettingRegistry],
+  activate: (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    translator: ITranslator,
+    settings: ISettingRegistry | null
+  ): PermissionsSystem => {
+    const trans = translator.load('notebook');
+    console.log(trans.__('PermissionsSystem initialized'));
+    
+    const permissions = new PermissionsSystem();
+    
+    // Monitor permission changes
+    permissions.onPermissionChanged.connect((sender, permission) => {
+      console.log('Permission changed:', permission);
+    });
+    
+    // Add commands for permission management
+    const { commands } = app;
+    commands.addCommand('notebook:check-permissions', {
+      label: trans.__('Check Permissions'),
+      execute: async (args: any) => {
+        const action = args.action;
+        if (action) {
+          const hasPermission = await permissions.checkPermission(action);
+          console.log('Permission check result:', hasPermission);
+        }
+      }
+    });
+    
+    commands.addCommand('notebook:manage-permissions', {
+      label: trans.__('Manage Permissions'),
+      execute: async () => {
+        const userPermissions = await permissions.getUserPermissions();
+        console.log('User permissions:', userPermissions);
+      }
+    });
+    
+    return permissions;
+  }
+};
+
+/**
+ * Plugin to provide comment system for collaborative discussions
+ */
+export const commentSystemPlugin: JupyterFrontEndPlugin<CommentSystem> = {
+  id: '@jupyter-notebook/notebook-extension:comment-system',
+  description: 'Plugin to provide comment system for collaborative discussions',
+  autoStart: true,
+  requires: [INotebookTracker, ITranslator],
+  optional: [ISettingRegistry],
+  activate: (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    translator: ITranslator,
+    settings: ISettingRegistry | null
+  ): CommentSystem => {
+    const trans = translator.load('notebook');
+    console.log(trans.__('CommentSystem initialized'));
+    
+    const commentSystem = new CommentSystem();
+    
+    // Subscribe to comment changes
+    commentSystem.subscribeToComments((comments) => {
+      console.log('Comments updated:', comments);
+    });
+    
+    // Add commands for comment management
+    const { commands } = app;
+    commands.addCommand('notebook:create-comment', {
+      label: trans.__('Create Comment'),
+      execute: async (args: any) => {
+        const { cellId, content } = args;
+        if (cellId && content) {
+          await commentSystem.createComment(cellId, content);
+        }
+      }
+    });
+    
+    commands.addCommand('notebook:resolve-comment', {
+      label: trans.__('Resolve Comment'),
+      execute: async (args: any) => {
+        const commentId = args.commentId;
+        if (commentId) {
+          await commentSystem.resolveComment(commentId);
+        }
+      }
+    });
+    
+    return commentSystem;
+  }
+};
+
+/**
+ * Plugin to display collaboration status bar
+ */
+export const collaborationStatusBarPlugin: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:collaboration-status-bar',
+  description: 'Plugin to display collaboration status bar',
+  autoStart: true,
+  requires: [INotebookShell, ITranslator],
+  optional: [ISettingRegistry],
+  activate: (
+    app: JupyterFrontEnd,
+    shell: INotebookShell,
+    translator: ITranslator,
+    settings: ISettingRegistry | null
+  ) => {
+    const trans = translator.load('notebook');
+    console.log(trans.__('CollaborationStatusBar initialized'));
+    
+    const statusBar = new CollaborationStatusBar();
+    
+    // Add status bar to shell
+    shell.add(statusBar, 'bottom', { rank: 1000 });
+    
+    // Update connection status
+    statusBar.updateConnectionStatus('connected');
+    
+    // Monitor notebook changes
+    shell.currentChanged.connect((sender, panel) => {
+      if (panel) {
+        statusBar.updateUserCount(1);
+      }
+    });
+  }
+};
+
+/**
+ * Plugin to display user presence indicators
+ */
+export const userPresencePlugin: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:user-presence',
+  description: 'Plugin to display user presence indicators',
+  autoStart: true,
+  requires: [INotebookTracker, ITranslator],
+  optional: [ISettingRegistry],
+  activate: (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    translator: ITranslator,
+    settings: ISettingRegistry | null
+  ) => {
+    const trans = translator.load('notebook');
+    console.log(trans.__('UserPresence initialized'));
+    
+    const presence = new UserPresence();
+    
+    // Show presence indicators
+    presence.showPresence();
+    
+    // Update user activity
+    tracker.currentChanged.connect((sender, panel) => {
+      if (panel) {
+        presence.updateUserActivity(panel.id);
+      }
+    });
+  }
+};
+
+/**
+ * Plugin to display cell lock indicators
+ */
+export const cellLockIndicatorPlugin: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:cell-lock-indicator',
+  description: 'Plugin to display cell lock indicators',
+  autoStart: true,
+  requires: [INotebookTracker, ITranslator],
+  optional: [ISettingRegistry],
+  activate: (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    translator: ITranslator,
+    settings: ISettingRegistry | null
+  ) => {
+    const trans = translator.load('notebook');
+    console.log(trans.__('CellLockIndicator initialized'));
+    
+    const indicator = new CellLockIndicator();
+    
+    // Show lock status
+    indicator.showLockStatus();
+    
+    // Update lock state
+    tracker.currentChanged.connect((sender, panel) => {
+      if (panel) {
+        indicator.updateLockState(false, '');
+      }
+    });
+  }
+};
+
+/**
+ * Plugin to provide history viewer interface
+ */
+export const historyViewerPlugin: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:history-viewer',
+  description: 'Plugin to provide history viewer interface',
+  autoStart: true,
+  requires: [INotebookTracker, ITranslator],
+  optional: [ISettingRegistry],
+  activate: (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    translator: ITranslator,
+    settings: ISettingRegistry | null
+  ) => {
+    const trans = translator.load('notebook');
+    console.log(trans.__('HistoryViewer initialized'));
+    
+    const viewer = new HistoryViewer();
+    
+    // Add commands for history viewing
+    const { commands } = app;
+    commands.addCommand('notebook:show-history', {
+      label: trans.__('Show History'),
+      execute: async () => {
+        viewer.showHistory();
+      }
+    });
+    
+    commands.addCommand('notebook:compare-versions', {
+      label: trans.__('Compare Versions'),
+      execute: async (args: any) => {
+        const { version1, version2 } = args;
+        if (version1 && version2) {
+          viewer.compareVersions(version1, version2);
+        }
+      }
+    });
+    
+    commands.addCommand('notebook:revert-to-version', {
+      label: trans.__('Revert to Version'),
+      execute: async (args: any) => {
+        const version = args.version;
+        if (version) {
+          await viewer.revertToVersion(version);
+        }
+      }
+    });
+  }
+};
+
+/**
+ * Plugin to provide permissions management dialog
+ */
+export const permissionsDialogPlugin: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:permissions-dialog',
+  description: 'Plugin to provide permissions management dialog',
+  autoStart: true,
+  requires: [INotebookTracker, ITranslator],
+  optional: [ISettingRegistry],
+  activate: (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    translator: ITranslator,
+    settings: ISettingRegistry | null
+  ) => {
+    const trans = translator.load('notebook');
+    console.log(trans.__('PermissionsDialog initialized'));
+    
+    const dialog = new PermissionsDialog();
+    
+    // Add commands for permissions management
+    const { commands } = app;
+    commands.addCommand('notebook:show-permissions-dialog', {
+      label: trans.__('Manage Permissions'),
+      execute: async () => {
+        dialog.showDialog();
+      }
+    });
+    
+    commands.addCommand('notebook:update-permissions', {
+      label: trans.__('Update Permissions'),
+      execute: async (args: any) => {
+        const { userId, permissions } = args;
+        if (userId && permissions) {
+          await dialog.updatePermissions(userId, permissions);
+        }
+      }
+    });
+    
+    commands.addCommand('notebook:invite-user', {
+      label: trans.__('Invite User'),
+      execute: async (args: any) => {
+        const { email, permissions } = args;
+        if (email && permissions) {
+          await dialog.inviteUser(email, permissions);
+        }
+      }
+    });
+  }
+};
+
+/**
+ * Plugin to provide comment system user interface
+ */
+export const commentSystemUIPlugin: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:comment-system-ui',
+  description: 'Plugin to provide comment system user interface',
+  autoStart: true,
+  requires: [INotebookTracker, ITranslator],
+  optional: [ISettingRegistry],
+  activate: (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    translator: ITranslator,
+    settings: ISettingRegistry | null
+  ) => {
+    const trans = translator.load('notebook');
+    console.log(trans.__('CommentSystemUI initialized'));
+    
+    const commentUI = new CommentSystemUI();
+    
+    // Add commands for comment UI
+    const { commands } = app;
+    commands.addCommand('notebook:show-comments', {
+      label: trans.__('Show Comments'),
+      execute: async (args: any) => {
+        const cellId = args.cellId;
+        if (cellId) {
+          commentUI.render();
+        }
+      }
+    });
+    
+    commands.addCommand('notebook:create-comment-ui', {
+      label: trans.__('Create Comment'),
+      execute: async (args: any) => {
+        const { cellId, content } = args;
+        if (cellId && content) {
+          await commentUI.createComment(cellId, content);
+        }
+      }
+    });
+    
+    commands.addCommand('notebook:reply-to-comment', {
+      label: trans.__('Reply to Comment'),
+      execute: async (args: any) => {
+        const { commentId, reply } = args;
+        if (commentId && reply) {
+          await commentUI.replyToComment(commentId, reply);
+        }
+      }
+    });
+    
+    commands.addCommand('notebook:resolve-comment-ui', {
+      label: trans.__('Resolve Comment'),
+      execute: async (args: any) => {
+        const commentId = args.commentId;
+        if (commentId) {
+          await commentUI.resolveComment(commentId);
+        }
+      }
+    });
+  }
+};
+
+/**
  * Export the plugins as default.
  */
 const plugins: JupyterFrontEndPlugin<any>[] = [
@@ -692,6 +1299,20 @@ const plugins: JupyterFrontEndPlugin<any>[] = [
   scrollOutput,
   tabIcon,
   trusted,
+  // Collaboration plugins - loaded after notebook-extension but before UI rendering
+  collaborationSettingsPlugin,
+  yjsNotebookProviderPlugin,
+  userAwarenessPlugin,
+  cellLockingPlugin,
+  changeHistoryPlugin,
+  permissionsSystemPlugin,
+  commentSystemPlugin,
+  collaborationStatusBarPlugin,
+  userPresencePlugin,
+  cellLockIndicatorPlugin,
+  historyViewerPlugin,
+  permissionsDialogPlugin,
+  commentSystemUIPlugin,
 ];
 
 export default plugins;
