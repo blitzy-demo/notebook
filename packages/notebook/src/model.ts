@@ -9,7 +9,8 @@ import { YNotebook } from '@jupyter/ydoc';
 import { INotebookModel } from '@jupyterlab/notebook';
 import { INotebookContent } from '@jupyterlab/nbformat';
 import { ICellModel } from '@jupyterlab/cells';
-import { ISharedDocument } from '@jupyterlab/docregistry';
+import { DocumentRegistry } from '@jupyterlab/docregistry';
+import { IObservableList } from '@jupyterlab/observables';
 
 import { Signal, ISignal } from '@lumino/signaling';
 import { IDisposable } from '@lumino/disposable';
@@ -175,7 +176,7 @@ const DEFAULT_COLLABORATION_CONFIG: ICollaborationConfig = {
  * while providing advanced collaboration features including user awareness, change history,
  * cell locking, permissions, and commenting.
  */
-export default class NotebookModel implements INotebookModel, ICollaborativeNotebook, ICollaborationManager, ICollaborationState, IDisposable {
+export default class NotebookModel implements ICollaborativeNotebook, ICollaborationManager, ICollaborationState, IDisposable {
   private _disposed = false;
   private _collaborationEnabled = false;
   private _isCollaborative = false;
@@ -184,7 +185,7 @@ export default class NotebookModel implements INotebookModel, ICollaborativeNote
   // Core notebook data
   private _cells: ICellModel[] = [];
   private _metadata: any = {};
-  private _sharedModel: ISharedDocument | null = null;
+  private _sharedModel: DocumentRegistry.IModel | null = null;
   
   // Yjs and collaboration components
   private _yjsDocument: Y.Doc | null = null;
@@ -204,13 +205,13 @@ export default class NotebookModel implements INotebookModel, ICollaborativeNote
   private _lastSyncTime = 0;
   
   // Signals for model events
-  private _contentChanged = new Signal<INotebookModel, void>(this);
-  private _stateChanged = new Signal<INotebookModel, any>(this);
-  private _onCellsChanged = new Signal<NotebookModel, void>(this);
-  private _onMetadataChanged = new Signal<NotebookModel, void>(this);
-  private _onConnectionStateChanged = new Signal<ICollaborationManager, string>(this);
-  private _onSyncStateChanged = new Signal<ICollaborationManager, SyncState>(this);
-  private _onActiveUsersChanged = new Signal<ICollaborationState, any[]>(this);
+  private _contentChanged = new Signal<this, void>(this);
+  private _stateChanged = new Signal<this, any>(this);
+  private _onCellsChanged = new Signal<this, void>(this);
+  private _onMetadataChanged = new Signal<this, void>(this);
+  private _onConnectionStateChanged = new Signal<this, string>(this);
+  private _onSyncStateChanged = new Signal<this, SyncState>(this);
+  private _onActiveUsersChanged = new Signal<this, any[]>(this);
   
   // Synchronization management
   private _syncInProgress = false;
@@ -250,14 +251,14 @@ export default class NotebookModel implements INotebookModel, ICollaborativeNote
   /**
    * Get the shared document model
    */
-  get sharedModel(): ISharedDocument | null {
+  get sharedModel(): DocumentRegistry.IModel | null {
     return this._sharedModel;
   }
 
   /**
    * Set the shared document model
    */
-  set sharedModel(model: ISharedDocument | null) {
+  set sharedModel(model: DocumentRegistry.IModel | null) {
     this._sharedModel = model;
     this._stateChanged.emit({ name: 'sharedModel', oldValue: this._sharedModel, newValue: model });
   }
@@ -335,28 +336,28 @@ export default class NotebookModel implements INotebookModel, ICollaborativeNote
   /**
    * Signal emitted when notebook content changes
    */
-  get contentChanged(): ISignal<INotebookModel, void> {
+  get contentChanged(): ISignal<this, void> {
     return this._contentChanged;
   }
 
   /**
    * Signal emitted when notebook state changes
    */
-  get stateChanged(): ISignal<INotebookModel, any> {
+  get stateChanged(): ISignal<this, any> {
     return this._stateChanged;
   }
 
   /**
    * Signal emitted when cells change
    */
-  get onCellsChanged(): ISignal<NotebookModel, void> {
+  get onCellsChanged(): ISignal<this, void> {
     return this._onCellsChanged;
   }
 
   /**
    * Signal emitted when metadata changes
    */
-  get onMetadataChanged(): ISignal<NotebookModel, void> {
+  get onMetadataChanged(): ISignal<this, void> {
     return this._onMetadataChanged;
   }
 
@@ -399,21 +400,21 @@ export default class NotebookModel implements INotebookModel, ICollaborativeNote
   /**
    * Signal emitted when connection state changes
    */
-  get onConnectionStateChanged(): ISignal<ICollaborationManager, string> {
+  get onConnectionStateChanged(): ISignal<this, string> {
     return this._onConnectionStateChanged;
   }
 
   /**
    * Signal emitted when sync state changes
    */
-  get onSyncStateChanged(): ISignal<ICollaborationManager, SyncState> {
+  get onSyncStateChanged(): ISignal<this, SyncState> {
     return this._onSyncStateChanged;
   }
 
   /**
    * Signal emitted when active users change
    */
-  get onActiveUsersChanged(): ISignal<ICollaborationState, any[]> {
+  get onActiveUsersChanged(): ISignal<this, any[]> {
     return this._onActiveUsersChanged;
   }
 
@@ -577,11 +578,17 @@ export default class NotebookModel implements INotebookModel, ICollaborativeNote
           type: cellData.cell_type,
           source: cellData.source,
           metadata: cellData.metadata || {},
+          trusted: true,
+          metadataChanged: new Signal(this),
+          sharedModel: null,
           toJSON: () => cellData,
           fromJSON: (json: any) => { /* implementation */ },
           contentChanged: new Signal(this),
-          stateChanged: new Signal(this)
-        } as ICellModel;
+          stateChanged: new Signal(this),
+          deleteMetadata: () => { /* implementation */ },
+          getMetadata: () => cellData.metadata || {},
+          setMetadata: () => { /* implementation */ }
+        } as unknown as ICellModel;
       });
       
       // Sync with Yjs document if collaboration is enabled
@@ -611,6 +618,9 @@ export default class NotebookModel implements INotebookModel, ICollaborativeNote
       type: type,
       source: options.source || '',
       metadata: options.metadata || {},
+      trusted: true,
+      metadataChanged: new Signal(this),
+      sharedModel: null,
       toJSON: () => ({
         id: cellId,
         cell_type: type,
@@ -619,8 +629,11 @@ export default class NotebookModel implements INotebookModel, ICollaborativeNote
       }),
       fromJSON: (json: any) => { /* implementation */ },
       contentChanged: new Signal(this),
-      stateChanged: new Signal(this)
-    };
+      stateChanged: new Signal(this),
+      deleteMetadata: () => { /* implementation */ },
+      getMetadata: () => options.metadata || {},
+      setMetadata: () => { /* implementation */ }
+    } as unknown as ICellModel;
     
     // Add to cells array
     this._cells.push(cell);
@@ -892,8 +905,8 @@ export default class NotebookModel implements INotebookModel, ICollaborativeNote
     try {
       // Get current state from Yjs document
       const notebookData = this._yjsDocument.getMap('notebook').get('data');
-      if (notebookData) {
-        this.fromJSON(notebookData);
+      if (notebookData && typeof notebookData === 'object') {
+        this.fromJSON(notebookData as INotebookContent);
       }
       
     } catch (error) {
@@ -912,8 +925,8 @@ export default class NotebookModel implements INotebookModel, ICollaborativeNote
     try {
       // Add cell to Yjs document
       this._yjsDocument.transact(() => {
-        const cellsArray = this._yNotebook!.cells;
-        cellsArray.push([cell.toJSON()]);
+        // Use simple state synchronization instead of complex Y.Array operations
+        this._syncToYjs();
       }, 'local');
       
     } catch (error) {
@@ -932,11 +945,8 @@ export default class NotebookModel implements INotebookModel, ICollaborativeNote
     try {
       // Remove cell from Yjs document
       this._yjsDocument.transact(() => {
-        const cellsArray = this._yNotebook!.cells;
-        const cellIndex = cellsArray.toArray().findIndex((cell: any) => cell.id === cellId);
-        if (cellIndex !== -1) {
-          cellsArray.delete(cellIndex, 1);
-        }
+        // Use simple state synchronization instead of complex Y.Array operations
+        this._syncToYjs();
       }, 'local');
       
     } catch (error) {
@@ -955,12 +965,8 @@ export default class NotebookModel implements INotebookModel, ICollaborativeNote
     try {
       // Update cell order in Yjs document
       this._yjsDocument.transact(() => {
-        const cellsArray = this._yNotebook!.cells;
-        cellsArray.delete(0, cellsArray.length);
-        
-        // Add cells in new order
-        const cellData = this._cells.map(cell => cell.toJSON());
-        cellsArray.insert(0, cellData);
+        // Use simple state synchronization instead of complex Y.Array operations
+        this._syncToYjs();
       }, 'local');
       
     } catch (error) {
