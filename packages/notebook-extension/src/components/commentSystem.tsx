@@ -4,20 +4,28 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { ReactWidget } from '@jupyterlab/apputils';
 import { ITranslator } from '@jupyterlab/translation';
-import { MarkdownRenderer } from '@jupyterlab/rendermime';
+import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import { Button } from '@jupyterlab/ui-components';
 import { Time } from '@jupyterlab/coreutils';
 
-import { CommentSystem as CommentSystemCore } from '../../../notebook/src/collab/comments';
-import { YjsNotebookProvider } from '../../../notebook/src/collab/provider';
-import { UserAwareness } from '../../../notebook/src/collab/awareness';
-import { PermissionsSystem } from '../../../notebook/src/collab/permissions';
+import CommentSystemCore from '../../../notebook/src/collab/comments';
+import YjsNotebookProvider from '../../../notebook/src/collab/provider';
+import UserAwareness from '../../../notebook/src/collab/awareness';
+import PermissionsSystem from '../../../notebook/src/collab/permissions';
 import { 
   IComment, 
   ICommentFilter, 
   CommentEventType, 
   CommentStatus 
 } from '../../../notebook/src/collab/comments';
+
+/**
+ * Interface for comment display with resolved replies
+ */
+interface ICommentDisplay extends IComment {
+  /** Resolved reply comments */
+  resolvedReplies?: IComment[];
+}
 
 /**
  * Interface for comment thread display properties
@@ -34,7 +42,7 @@ interface ICommentThreadProps {
   canEdit: boolean;
   canDelete: boolean;
   canResolve: boolean;
-  markdownRenderer: MarkdownRenderer;
+  markdownRenderer: IRenderMimeRegistry;
   translator: ITranslator;
   maxDepth: number;
   currentDepth: number;
@@ -89,7 +97,7 @@ interface ICommentSystemProps {
   /** Permissions system */
   permissions: PermissionsSystem;
   /** Markdown renderer */
-  markdownRenderer: MarkdownRenderer;
+  markdownRenderer: IRenderMimeRegistry;
   /** Translator for internationalization */
   translator: ITranslator;
   /** Whether to show as dockable panel */
@@ -220,8 +228,9 @@ const CommentThread: React.FC<ICommentThreadProps> = ({
   useEffect(() => {
     const renderContent = async () => {
       try {
-        const rendered = await markdownRenderer.render(comment.content);
-        setRenderedContent(rendered);
+        // Simple markdown rendering - for now just use the content as-is
+        // TODO: Implement proper markdown rendering with renderMime registry
+        setRenderedContent(comment.content);
       } catch (error) {
         console.error('Failed to render comment content:', error);
         setRenderedContent(comment.content);
@@ -597,16 +606,14 @@ const CommentSystem: React.FC<ICommentSystemProps> = ({
 
     // Sort replies for each comment
     repliesMap.forEach(replies => {
-      replies.sort((a, b) => a.timestamp - b.timestamp);
+      replies.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
     });
 
-    // Add replies to tree structure
-    const addReplies = (comment: IComment): IComment => ({
+    // Return the tree structure
+    return tree.map(comment => ({
       ...comment,
-      replies: repliesMap.get(comment.id) || []
-    });
-
-    return tree.map(addReplies);
+      resolvedReplies: repliesMap.get(comment.id) || []
+    }));
   }, [filteredComments]);
 
   // Count resolved comments
@@ -757,7 +764,7 @@ const CommentSystem: React.FC<ICommentSystemProps> = ({
               <CommentThread
                 key={comment.id}
                 comment={comment}
-                replies={comment.replies || []}
+                replies={comment.resolvedReplies || []}
                 onReply={handleReplyToComment}
                 onEdit={handleEditComment}
                 onDelete={handleDeleteComment}
@@ -776,7 +783,7 @@ const CommentSystem: React.FC<ICommentSystemProps> = ({
           </div>
         )}
 
-        {filteredComments.length > 0 && (filter.offset || 0) + pageSize < filteredComments.length && (
+        {filteredComments.length >= pageSize && (
           <div className="jp-CommentSystem-loadMore">
             <Button
               onClick={loadMoreComments}
