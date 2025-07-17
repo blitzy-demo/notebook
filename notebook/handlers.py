@@ -26,9 +26,9 @@ from tornado.websocket import WebSocketHandler
 
 # Third-party imports
 from pycrdt import Doc
-from pycrdt_websocket import WebsocketServer
+from pycrdt.websocket import WebsocketServer
 from prometheus_client import Counter, Gauge, Histogram
-from jupyterhub import HubAuth
+from jupyterhub.services.auth import HubAuth
 from jsonschema import validate, ValidationError
 
 # Internal imports
