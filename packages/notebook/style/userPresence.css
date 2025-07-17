@@ -38,6 +38,34 @@
     padding: var(--jp-collab-bar-padding);
     min-height: var(--jp-collab-presence-bar-height-mobile);
   }
+  
+  .jp-UserAvatar {
+    width: var(--jp-collab-avatar-size-mobile);
+    height: var(--jp-collab-avatar-size-mobile);
+  }
+  
+  .jp-PresenceOverflow {
+    width: var(--jp-collab-avatar-size-mobile);
+    height: var(--jp-collab-avatar-size-mobile);
+  }
+}
+
+/* Responsive behavior for tablet devices */
+@media only screen and (min-width: 761px) and (max-width: 1024px) {
+  .jp-PresenceList {
+    gap: calc(var(--jp-collab-avatar-group-spacing) * 0.75);
+    padding: calc(var(--jp-collab-bar-padding) * 0.9);
+  }
+  
+  .jp-UserAvatar {
+    width: 22px;
+    height: 22px;
+  }
+  
+  .jp-PresenceOverflow {
+    width: 22px;
+    height: 22px;
+  }
 }
 
 /* =========================================================================
