@@ -21,12 +21,9 @@
 
 import { Doc } from 'yjs';
 import { Signal, ISignal } from '@lumino/signaling';
-import { DisposableSet, IDisposable } from '@lumino/disposable';
+import { DisposableSet, IDisposable, DisposableDelegate } from '@lumino/disposable';
 import { User } from '@jupyterlab/services';
-import { UUID } from '@lumino/coreutils';
-import { PageConfig } from '@jupyterlab/coreutils';
-import { ICellModel } from '@jupyterlab/cells';
-import { INotebookModel } from '@jupyterlab/notebook';
+
 
 import { AwarenessService } from './awareness';
 import { IPermissionService } from '../tokens';
@@ -44,6 +41,11 @@ export enum PermissionRole {
   /** Owner access - full control including deletion */
   OWNER = 'owner'
 }
+
+/**
+ * Type for roles compatible with IPermissionService interface
+ */
+export type PermissionRoleType = 'view' | 'edit' | 'admin';
 
 /**
  * Enumeration of permission operations for fine-grained access control
@@ -334,16 +336,20 @@ export class PermissionService implements IPermissionService, IDisposable {
    * 
    * @returns Promise resolving to the user's role
    */
-  async getUserRole(): Promise<PermissionRole> {
+  async getUserRole(): Promise<PermissionRoleType> {
     if (!this._currentUser) {
-      return PermissionRole.VIEW;
+      return 'view';
     }
 
     const userId = this._currentUser.identity?.username || '';
     const collaborator = this._collaborators.get(userId);
     
     if (collaborator) {
-      return collaborator.role;
+      // Convert OWNER to ADMIN for interface compatibility
+      if (collaborator.role === PermissionRole.OWNER) {
+        return 'admin';
+      }
+      return collaborator.role as PermissionRoleType;
     }
 
     // Check if user is document owner
@@ -351,11 +357,11 @@ export class PermissionService implements IPermissionService, IDisposable {
     const owner = permissions.get('owner') as string;
     
     if (owner === userId) {
-      return PermissionRole.OWNER;
+      return 'admin'; // Map owner to admin for interface compatibility
     }
 
     // Default to view permissions
-    return PermissionRole.VIEW;
+    return 'view';
   }
 
   /**
@@ -374,7 +380,8 @@ export class PermissionService implements IPermissionService, IDisposable {
     const userRole = await this.getUserRole();
     
     // Check if the role has the required permission
-    const rolePermissions = this._rolePermissions.get(userRole) || [];
+    const permissionRole = userRole as PermissionRole;
+    const rolePermissions = this._rolePermissions.get(permissionRole) || [];
     if (!rolePermissions.includes(permission)) {
       return false;
     }
@@ -397,26 +404,29 @@ export class PermissionService implements IPermissionService, IDisposable {
    * @param role - The new role to assign
    * @returns Promise resolving when permissions are updated
    */
-  async updatePermissions(userId: string, role: PermissionRole): Promise<void> {
+  async updatePermissions(userId: string, role: PermissionRoleType): Promise<void> {
     if (!await this.canAdmin()) {
       throw new Error('Insufficient permissions to update user roles');
     }
 
     const previousRole = await this._getUserRole(userId);
     
+    // Convert role type to PermissionRole enum
+    const permissionRole = role as PermissionRole;
+    
     // Update user role in Yjs document
     this._doc.transact(() => {
       const permissions = this._doc.getMap('permissions');
       const userRoles = permissions.get('user_roles') as Map<string, string> || new Map();
-      userRoles.set(userId, role);
+      userRoles.set(userId, permissionRole);
       permissions.set('user_roles', userRoles);
     });
 
     // Update local collaborator data
     const collaborator = this._collaborators.get(userId);
     if (collaborator) {
-      collaborator.role = role;
-      collaborator.permissions = this._rolePermissions.get(role) || [];
+      collaborator.role = permissionRole;
+      collaborator.permissions = this._rolePermissions.get(permissionRole) || [];
     }
 
     // Emit permission change event
@@ -424,9 +434,9 @@ export class PermissionService implements IPermissionService, IDisposable {
       type: 'role_assigned',
       userId: this._currentUser?.identity?.username || '',
       targetUserId: userId,
-      role,
+      role: permissionRole,
       previousRole,
-      permissions: this._rolePermissions.get(role) || [],
+      permissions: this._rolePermissions.get(permissionRole) || [],
       timestamp: new Date(),
       documentId: this._documentId
     });
@@ -437,13 +447,15 @@ export class PermissionService implements IPermissionService, IDisposable {
    * 
    * @returns Promise resolving to array of collaborators with their roles
    */
-  async getCollaborators(): Promise<Array<{userId: string; role: PermissionRole; name: string}>> {
-    const collaborators: Array<{userId: string; role: PermissionRole; name: string}> = [];
+  async getCollaborators(): Promise<Array<{userId: string; role: PermissionRoleType; name: string}>> {
+    const collaborators: Array<{userId: string; role: PermissionRoleType; name: string}> = [];
 
-    for (const [userId, collaborator] of this._collaborators) {
+    for (const [, collaborator] of this._collaborators) {
+      // Convert OWNER to ADMIN for interface compatibility
+      const role = collaborator.role === PermissionRole.OWNER ? 'admin' : collaborator.role as PermissionRoleType;
       collaborators.push({
         userId: collaborator.id,
-        role: collaborator.role,
+        role,
         name: collaborator.name
       });
     }
@@ -458,7 +470,7 @@ export class PermissionService implements IPermissionService, IDisposable {
    * @param role - The role to assign
    * @returns Promise resolving when role is set
    */
-  async setUserRole(userId: string, role: PermissionRole): Promise<void> {
+  async setUserRole(userId: string, role: PermissionRoleType): Promise<void> {
     return this.updatePermissions(userId, role);
   }
 
@@ -558,17 +570,18 @@ export class PermissionService implements IPermissionService, IDisposable {
     };
 
     permissions.observe(onPermissionUpdate);
-    this._disposables.add(new DisposableSet.DisposableDelegate(() => {
+    this._disposables.add(new DisposableDelegate(() => {
       permissions.unobserve(onPermissionUpdate);
     }));
 
     // Listen for awareness changes
-    this._disposables.add(
-      this._awarenessService.onUserJoin.connect(this._onUserJoin, this)
-    );
-    this._disposables.add(
-      this._awarenessService.onUserLeave.connect(this._onUserLeave, this)
-    );
+    this._awarenessService.onUserJoin.connect(this._onUserJoin, this);
+    this._awarenessService.onUserLeave.connect(this._onUserLeave, this);
+    
+    this._disposables.add(new DisposableDelegate(() => {
+      this._awarenessService.onUserJoin.disconnect(this._onUserJoin, this);
+      this._awarenessService.onUserLeave.disconnect(this._onUserLeave, this);
+    }));
   }
 
   /**
@@ -579,7 +592,8 @@ export class PermissionService implements IPermissionService, IDisposable {
       return;
     }
 
-    const userId = this._currentUser.identity?.username || '';
+    const userInfo = this._getJupyterHubUserInfo(this._currentUser);
+    const userId = userInfo.id;
     
     this._doc.transact(() => {
       const permissions = this._doc.getMap('permissions');
@@ -591,6 +605,17 @@ export class PermissionService implements IPermissionService, IDisposable {
       const userRoles = new Map<string, string>();
       userRoles.set(userId, PermissionRole.OWNER);
       permissions.set('user_roles', userRoles);
+      
+      // Store JupyterHub user metadata
+      const userMetadata = new Map<string, any>();
+      userMetadata.set(userId, {
+        name: userInfo.name,
+        displayName: userInfo.displayName,
+        email: userInfo.email,
+        avatar: userInfo.avatar,
+        joinedAt: new Date().toISOString()
+      });
+      permissions.set('user_metadata', userMetadata);
       
       // Mark as initialized
       permissions.set('initialized', true);
@@ -673,15 +698,20 @@ export class PermissionService implements IPermissionService, IDisposable {
    * @param args - Event arguments
    */
   private _onUserJoin(sender: AwarenessService, args: { userId: string; name: string; avatar?: string }): void {
+    // Try to get detailed user information from stored metadata
+    const permissions = this._doc.getMap('permissions');
+    const userMetadata = permissions.get('user_metadata') as Map<string, any> || new Map();
+    const storedUserInfo = userMetadata.get(args.userId);
+
     const collaborator: ICollaborator = {
       id: args.userId,
-      name: args.name,
-      displayName: args.name,
-      email: '',
-      avatar: args.avatar || '',
+      name: storedUserInfo?.name || args.name,
+      displayName: storedUserInfo?.displayName || args.name,
+      email: storedUserInfo?.email || '',
+      avatar: storedUserInfo?.avatar || args.avatar || '',
       role: PermissionRole.VIEW,
       permissions: this._rolePermissions.get(PermissionRole.VIEW) || [],
-      joinedAt: new Date(),
+      joinedAt: storedUserInfo?.joinedAt ? new Date(storedUserInfo.joinedAt) : new Date(),
       isActive: true,
       lastSeen: new Date()
     };
@@ -699,6 +729,29 @@ export class PermissionService implements IPermissionService, IDisposable {
   private _onUserLeave(sender: AwarenessService, args: { userId: string }): void {
     this._collaborators.delete(args.userId);
     this._collaboratorLeftSignal.emit({ userId: args.userId });
+  }
+
+  /**
+   * Get comprehensive user information from JupyterHub identity
+   * 
+   * @param user - JupyterLab user object
+   * @returns Comprehensive user information with JupyterHub integration
+   */
+  private _getJupyterHubUserInfo(user: User.IUser): {
+    id: string;
+    name: string;
+    displayName: string;
+    email: string;
+    avatar: string;
+  } {
+    const identity = user.identity;
+    return {
+      id: String(identity?.username || ''),
+      name: String(identity?.name || identity?.username || 'Anonymous'),
+      displayName: String(identity?.display_name || identity?.name || identity?.username || 'Anonymous User'),
+      email: String(identity?.email || ''),
+      avatar: String(identity?.avatar_url || '')
+    };
   }
 
   /**
