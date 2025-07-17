@@ -452,13 +452,13 @@
 
 /* Focus indicators for keyboard navigation */
 .jp-CommentThread:focus-within {
-  outline: 2px solid var(--jp-collab-focus-ring-color);
-  outline-offset: 2px;
+  outline: var(--jp-collab-focus-ring-width) solid var(--jp-collab-focus-ring-color);
+  outline-offset: var(--jp-collab-focus-ring-width);
 }
 
 .jp-CommentBadge:focus {
-  outline: 2px solid var(--jp-collab-focus-ring-color);
-  outline-offset: 2px;
+  outline: var(--jp-collab-focus-ring-width) solid var(--jp-collab-focus-ring-color);
+  outline-offset: var(--jp-collab-focus-ring-width);
 }
 
 /* Screen reader only text */
