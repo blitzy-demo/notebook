@@ -1,0 +1,718 @@
+/*-----------------------------------------------------------------------------
+| Copyright (c) Jupyter Development Team.
+| Distributed under the terms of the Modified BSD License.
+|----------------------------------------------------------------------------*/
+
+@import './variables.css';
+
+/**
+ * Consolidated base stylesheet for the collaborative notebook package.
+ * This file integrates styling from both notebook-extension and application
+ * packages with enhancements for collaborative features including user presence,
+ * cell locking, comments, and responsive design support.
+ */
+
+/* =========================================================================
+ * CORE APPLICATION LAYOUT
+ * ========================================================================= */
+
+/* Global theme container setup */
+body.jp-ThemedContainer {
+  margin: 0;
+  padding: 0;
+  background: var(--jp-layout-color2);
+}
+
+#main.jp-ThemedContainer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--jp-layout-color2);
+}
+
+/* Top panel wrapper for header elements */
+#top-panel-wrapper {
+  min-height: calc(1.5 * var(--jp-private-topbar-height));
+  border-bottom: var(--jp-border-width) solid var(--jp-border-color0);
+  background: var(--jp-layout-color1);
+}
+
+#top-panel {
+  display: flex;
+  min-height: calc(1.5 * var(--jp-private-topbar-height));
+  padding-left: 5px;
+  padding-right: 5px;
+  margin-left: auto;
+  margin-right: auto;
+  max-width: var(--jp-notebook-max-width);
+}
+
+/* Menu panel wrapper for navigation */
+#menu-panel-wrapper {
+  min-height: var(--jp-private-topbar-height);
+  background: var(--jp-layout-color1);
+  border-bottom: var(--jp-border-width) solid var(--jp-border-color0);
+  box-shadow: var(--jp-elevation-z1);
+}
+
+#menu-panel {
+  display: flex;
+  min-height: var(--jp-private-topbar-height);
+  background: var(--jp-layout-color1);
+  padding-left: 5px;
+  padding-right: 5px;
+  margin-left: auto;
+  margin-right: auto;
+  max-width: var(--jp-notebook-max-width);
+}
+
+/* Main content panel */
+#main-panel {
+  margin-left: auto;
+  margin-right: auto;
+  max-width: var(--jp-notebook-max-width);
+}
+
+/* Spacer widgets for layout */
+#spacer-widget-top {
+  min-height: 16px;
+}
+
+/* Only edit pages should have a bottom space */
+body[data-notebook='edit'] #spacer-widget-bottom {
+  min-height: 16px;
+}
+
+/* Special case notebooks as document oriented pages */
+[data-notebook]:not(body[data-notebook='notebooks']) #main-panel {
+  box-shadow: var(--jp-elevation-z4);
+}
+
+.jp-TreePanel > .lm-TabPanel-stackedPanel {
+  box-shadow: var(--jp-elevation-z4);
+}
+
+/* =========================================================================
+ * NOTEBOOK-SPECIFIC LAYOUT STYLES
+ * ========================================================================= */
+
+/* Document oriented look for the notebook */
+body[data-notebook='notebooks'] {
+  /* Notebook takes full width when jp-mod-fullwidth is set */
+}
+
+body[data-notebook='notebooks'] .jp-NotebookPanel.jp-mod-fullwidth .jp-WindowedPanel-outer {
+  padding-left: unset;
+  padding-right: unset !important;
+  width: unset;
+}
+
+/* Keep the notebook centered on the page */
+body[data-notebook='notebooks'] .jp-NotebookPanel-toolbar {
+  padding-left: calc(calc(100% - var(--jp-notebook-max-width)) * 0.5);
+  padding-right: calc(calc(100% - var(--jp-notebook-max-width)) * 0.5);
+}
+
+body[data-notebook='notebooks'] .jp-WindowedPanel-outer {
+  width: unset !important;
+  padding-top: unset;
+  padding-left: calc(calc(100% - var(--jp-notebook-max-width)) * 0.5);
+  padding-right: calc(
+    calc(
+        100% - var(--jp-notebook-max-width) - var(--jp-notebook-padding-offset)
+      ) * 0.5
+  ) !important;
+  background: var(--jp-layout-color2);
+}
+
+body[data-notebook='notebooks'] .jp-WindowedPanel-inner {
+  margin-top: var(--jp-notebook-toolbar-margin-bottom);
+  /* Adjustments for the extra top and bottom notebook padding */
+  margin-bottom: calc(4 * var(--jp-notebook-padding));
+}
+
+body[data-notebook='notebooks'] .jp-Notebook-cell {
+  background: var(--jp-layout-color0);
+  /* Enhanced positioning for collaborative features */
+  position: relative;
+}
+
+/* Empty space at the bottom of the notebook (similar to classic) */
+body[data-notebook='notebooks'] .jp-Notebook.jp-mod-scrollPastEnd .jp-WindowedPanel-outer::after {
+  min-height: 100px;
+}
+
+/* Fix background colors */
+body[data-notebook='notebooks'] .jp-WindowedPanel-outer > * {
+  background: var(--jp-layout-color0);
+}
+
+body[data-notebook='notebooks'] .jp-Notebook.jp-mod-commandMode .jp-Cell.jp-mod-active.jp-mod-selected:not(.jp-mod-multiSelected) {
+  background: var(--jp-layout-color0) !important;
+}
+
+body[data-notebook='notebooks'] .jp-Notebook .jp-Notebook-cell:not(:first-child)::before {
+  content: ' ';
+  height: 100%;
+  position: absolute;
+  top: 0;
+  width: 11px;
+}
+
+/* Cell toolbar adjustments */
+body[data-notebook='notebooks'] .jp-cell-toolbar {
+  background: unset;
+  box-shadow: unset;
+}
+
+/* First code cell on mobile (keep the selector above the media query) */
+body[data-notebook='notebooks'] .jp-CodeCell[data-windowed-list-index='0'] .jp-cell-toolbar {
+  top: unset;
+}
+
+/* Tweak the notebook footer (to add a new cell) */
+body[data-notebook='notebooks'] .jp-Notebook-footer {
+  background: unset;
+  width: 100%;
+  margin-left: unset;
+}
+
+/* Notebook viewport styling */
+body[data-notebook='notebooks'] .jp-WindowedPanel-viewport {
+  background: var(--jp-layout-color0);
+  box-shadow: var(--jp-elevation-z4);
+  
+  /* Extra padding at the top and bottom so the notebook looks nicer */
+  padding-top: calc(2 * var(--jp-notebook-padding));
+  padding-bottom: calc(2 * var(--jp-notebook-padding));
+}
+
+/* Notebook box shadow */
+body[data-notebook='notebooks'] .jp-Notebook > *:first-child:last-child::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  box-shadow: 0px 0px 12px 1px var(--jp-shadow-umbra-color);
+}
+
+/* Notebook-specific panel adjustments */
+body[data-notebook='notebooks'] #main-panel {
+  margin-left: unset;
+  margin-right: unset;
+  max-width: unset;
+}
+
+body[data-notebook='notebooks'] #spacer-widget-top {
+  min-height: unset;
+}
+
+#main-panel > .jp-TreePanel {
+  padding: 0px 5px;
+}
+
+/* =========================================================================
+ * NOTEBOOK COMPONENT STYLES
+ * ========================================================================= */
+
+/* Additional customizations of the components on the notebook page */
+.jp-NotebookKernelLogo {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  text-align: center;
+  margin-right: 8px;
+}
+
+.jp-NotebookKernelLogo img {
+  max-width: 28px;
+  max-height: 28px;
+  display: flex;
+}
+
+.jp-NotebookKernelStatus {
+  margin: 0;
+  font-weight: normal;
+  font-size: var(--jp-ui-font-size1);
+  color: var(--jp-ui-font-color0);
+  font-family: var(--jp-ui-font-family);
+  line-height: var(--jp-private-title-panel-height);
+  padding-left: var(--jp-kernel-status-padding);
+  padding-right: var(--jp-kernel-status-padding);
+}
+
+.jp-NotebookKernelStatus-error {
+  background-color: var(--jp-error-color0);
+}
+
+.jp-NotebookKernelStatus-warn {
+  background-color: var(--jp-warn-color0);
+}
+
+.jp-NotebookKernelStatus-info {
+  background-color: var(--jp-info-color0);
+}
+
+.jp-NotebookKernelStatus-fade {
+  animation: 0.5s fade-out forwards;
+}
+
+.jp-NotebookTrustedStatus {
+  background: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+  margin-top: 4px;
+  margin-bottom: 4px;
+  border: solid 1px var(--jp-border-color2);
+  cursor: help;
+}
+
+.jp-NotebookTrustedStatus-not-trusted {
+  cursor: pointer;
+}
+
+@keyframes fade-out {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+#jp-title h1 {
+  cursor: pointer;
+  font-size: 18px;
+  margin: 0;
+  font-weight: normal;
+  color: var(--jp-ui-font-color0);
+  font-family: var(--jp-ui-font-family);
+  line-height: calc(1.5 * var(--jp-private-title-panel-height));
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+#jp-title h1:hover {
+  background: var(--jp-layout-color2);
+}
+
+.jp-NotebookCheckpoint {
+  font-size: 14px;
+  margin-left: 5px;
+  margin-right: 5px;
+  font-weight: normal;
+  color: var(--jp-ui-font-color0);
+  font-family: var(--jp-ui-font-family);
+  line-height: calc(1.5 * var(--jp-private-title-panel-height));
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* =========================================================================
+ * COLLABORATIVE FEATURES STYLES
+ * ========================================================================= */
+
+/* User presence indicators */
+.jp-collab-presence-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--jp-collab-avatar-size);
+  height: var(--jp-collab-avatar-size);
+  border-radius: 50%;
+  background-color: var(--jp-collab-presence-indicator-color);
+  color: white;
+  font-size: 12px;
+  font-weight: bold;
+  position: relative;
+  margin-right: 4px;
+  border: var(--jp-collab-avatar-border-width) solid var(--jp-collab-avatar-border-color);
+  z-index: var(--jp-collab-presence-bar-z-index);
+  
+  /* Accessibility improvements */
+  cursor: pointer;
+  transition: all var(--jp-collab-transition-duration) ease;
+}
+
+.jp-collab-presence-indicator:hover {
+  transform: scale(1.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.jp-collab-presence-indicator:focus {
+  outline: var(--jp-collab-focus-ring-width) solid var(--jp-collab-focus-ring-color);
+  outline-offset: 2px;
+}
+
+/* Collaborative cursor colors for different users */
+.jp-collab-cursor-user-1 {
+  border-color: var(--jp-cursor-color-user-1);
+  background-color: var(--jp-cursor-color-user-1);
+}
+
+.jp-collab-cursor-user-2 {
+  border-color: var(--jp-cursor-color-user-2);
+  background-color: var(--jp-cursor-color-user-2);
+}
+
+.jp-collab-cursor-user-3 {
+  border-color: var(--jp-cursor-color-user-3);
+  background-color: var(--jp-cursor-color-user-3);
+}
+
+.jp-collab-cursor-user-4 {
+  border-color: var(--jp-cursor-color-user-4);
+  background-color: var(--jp-cursor-color-user-4);
+}
+
+/* Cell locking indicators */
+.jp-collab-locked-cell {
+  border-left: 3px solid var(--jp-locked-cell-border-color);
+  background-color: rgba(255, 69, 0, 0.05);
+  position: relative;
+  opacity: 0.8;
+}
+
+.jp-collab-locked-cell::before {
+  content: '🔒';
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 14px;
+  color: var(--jp-locked-cell-border-color);
+  z-index: var(--jp-collab-lock-indicator-z-index);
+  animation: pulse var(--jp-lock-indicator-pulse-duration) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.jp-collab-locked-cell:hover::before {
+  animation: none;
+  opacity: 1;
+}
+
+/* Comment badges and indicators */
+.jp-collab-comment-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: var(--jp-collab-comment-badge-size);
+  height: var(--jp-collab-comment-badge-size);
+  border-radius: 50%;
+  background-color: var(--jp-comment-badge-color);
+  color: white;
+  font-size: 10px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--jp-collab-comment-badge-z-index);
+  cursor: pointer;
+  transition: all var(--jp-collab-transition-duration) ease;
+}
+
+.jp-collab-comment-badge:hover {
+  transform: scale(1.2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.jp-collab-comment-badge.resolved {
+  background-color: var(--jp-resolved-comment-badge-color);
+}
+
+/* Collaboration bar styling */
+.jp-collab-bar {
+  display: flex;
+  align-items: center;
+  height: var(--jp-collab-bar-height);
+  padding: var(--jp-collab-bar-padding);
+  background: var(--jp-layout-color1);
+  border-bottom: var(--jp-collab-bar-border-bottom);
+  gap: var(--jp-collab-avatar-group-spacing);
+  overflow-x: auto;
+}
+
+.jp-collab-bar-users {
+  display: flex;
+  align-items: center;
+  gap: var(--jp-collab-avatar-group-spacing);
+  margin-right: auto;
+}
+
+.jp-collab-bar-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Avatar grouping with overlap effect */
+.jp-collab-avatar-group {
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.jp-collab-avatar-group .jp-collab-presence-indicator:not(:first-child) {
+  margin-left: calc(-1 * var(--jp-collab-avatar-overlap));
+}
+
+.jp-collab-avatar-group .jp-collab-presence-indicator:hover {
+  z-index: calc(var(--jp-collab-presence-bar-z-index) + 10);
+}
+
+/* =========================================================================
+ * ACCESSIBILITY FEATURES
+ * ========================================================================= */
+
+/* Screen reader announcements for collaborative changes */
+.jp-collab-screen-reader-announcement {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+.jp-collab-screen-reader-announcement.active {
+  position: static;
+  left: auto;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip: auto;
+  border: 1px solid var(--jp-border-color1);
+  background: var(--jp-layout-color1);
+  padding: 4px 8px;
+  margin: 4px 0;
+  font-size: var(--jp-ui-font-size1);
+  color: var(--jp-ui-font-color1);
+  border-radius: var(--jp-border-radius);
+}
+
+/* Skip link for accessibility */
+.jp-skiplink {
+  position: absolute;
+  top: -100em;
+}
+
+.jp-skiplink:focus-within {
+  position: absolute;
+  z-index: 10000;
+  top: 0;
+  left: 46%;
+  margin: 0 auto;
+  padding: 1em;
+  width: 15%;
+  box-shadow: var(--jp-elevation-z4);
+  border-radius: 4px;
+  background: var(--jp-layout-color0);
+  text-align: center;
+}
+
+.jp-skiplink:focus-within a {
+  text-decoration: underline;
+  color: var(--jp-content-link-color);
+}
+
+/* Enhanced focus indicators for collaborative elements */
+.jp-collab-presence-indicator:focus,
+.jp-collab-comment-badge:focus,
+.jp-collab-locked-cell:focus-within {
+  outline: var(--jp-collab-focus-ring-width) solid var(--jp-collab-focus-ring-color);
+  outline-offset: 2px;
+}
+
+/* =========================================================================
+ * RESPONSIVE DESIGN FOR COLLABORATIVE FEATURES
+ * ========================================================================= */
+
+/* Mobile responsiveness for collaborative features */
+.jp-collab-mobile-responsive {
+  display: block;
+}
+
+/* Mobile-specific adjustments */
+@media only screen and (max-width: 760px) {
+  /* First code cell on mobile */
+  body[data-notebook='notebooks'] .jp-CodeCell[data-windowed-list-index='0'] .jp-cell-toolbar {
+    top: var(--jp-notebook-padding);
+  }
+
+  body[data-notebook='notebooks'] .jp-MarkdownCell .jp-cell-toolbar,
+  body[data-notebook='notebooks'] .jp-RawCell .jp-cell-toolbar {
+    top: calc(0.5 * var(--jp-notebook-padding));
+  }
+
+  #main-panel > .jp-TreePanel {
+    margin: 0px -5px;
+  }
+  
+  /* Hide mobile incompatible elements */
+  body[data-format='mobile'] .jp-NotebookCheckpoint {
+    display: none;
+  }
+
+  body[data-format='mobile'] .jp-WindowedPanel-outer > *:first-child {
+    margin-top: 0;
+  }
+
+  body[data-format='mobile'] .jp-ToolbarButton .jp-DebuggerBugButton {
+    display: none;
+  }
+  
+  /* Collaborative features mobile adjustments */
+  .jp-collab-bar {
+    height: var(--jp-collab-presence-bar-height-mobile);
+    padding: var(--jp-collab-bar-padding);
+  }
+  
+  .jp-collab-presence-indicator {
+    width: var(--jp-collab-avatar-size-mobile);
+    height: var(--jp-collab-avatar-size-mobile);
+    font-size: 10px;
+  }
+  
+  .jp-collab-comment-badge {
+    width: var(--jp-collab-comment-badge-size-mobile);
+    height: var(--jp-collab-comment-badge-size-mobile);
+    font-size: 8px;
+  }
+  
+  .jp-collab-mobile-responsive {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  
+  .jp-collab-avatar-group .jp-collab-presence-indicator:not(:first-child) {
+    margin-left: calc(-1 * var(--jp-collab-avatar-overlap) * 1.5);
+  }
+}
+
+/* Tablet-specific adjustments */
+@media only screen and (min-width: 761px) and (max-width: 1024px) {
+  .jp-collab-bar {
+    height: var(--jp-collab-presence-bar-height);
+    padding: var(--jp-collab-bar-padding);
+  }
+  
+  .jp-collab-presence-indicator {
+    width: 22px;
+    height: 22px;
+    font-size: 11px;
+  }
+  
+  .jp-collab-comment-badge {
+    width: 15px;
+    height: 15px;
+    font-size: 9px;
+  }
+}
+
+/* High contrast mode adjustments */
+@media (prefers-contrast: high) {
+  .jp-collab-presence-indicator,
+  .jp-collab-comment-badge,
+  .jp-collab-locked-cell {
+    border: var(--jp-collab-high-contrast-border);
+  }
+  
+  .jp-collab-locked-cell::before {
+    text-shadow: 0 0 2px var(--jp-layout-color0);
+  }
+}
+
+/* Reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  .jp-collab-presence-indicator,
+  .jp-collab-comment-badge,
+  .jp-collab-locked-cell::before {
+    animation: none;
+    transition: none;
+  }
+  
+  .jp-collab-presence-indicator:hover,
+  .jp-collab-comment-badge:hover {
+    transform: none;
+  }
+}
+
+/* Print media adjustments */
+@media print {
+  .jp-collab-presence-indicator,
+  .jp-collab-comment-badge,
+  .jp-collab-bar,
+  .jp-collab-locked-cell::before {
+    display: none;
+  }
+  
+  .jp-collab-locked-cell {
+    border-left: 1px solid var(--md-grey-800);
+    background-color: transparent;
+  }
+  
+  .jp-collab-screen-reader-announcement {
+    display: none;
+  }
+}
+
+/* =========================================================================
+ * DARK MODE COLLABORATIVE OVERRIDES
+ * ========================================================================= */
+
+@media (prefers-color-scheme: dark) {
+  .jp-collab-presence-indicator {
+    background-color: var(--jp-collab-dark-presence-indicator);
+  }
+  
+  .jp-collab-comment-badge {
+    background-color: var(--jp-collab-dark-comment-badge);
+  }
+  
+  .jp-collab-comment-badge.resolved {
+    background-color: var(--jp-collab-dark-resolved-comment);
+  }
+  
+  .jp-collab-locked-cell {
+    border-left-color: var(--jp-collab-dark-locked-cell-border);
+    background-color: rgba(255, 99, 71, 0.1);
+  }
+  
+  .jp-collab-locked-cell::before {
+    color: var(--jp-collab-dark-locked-cell-border);
+  }
+  
+  .jp-collab-cursor-user-1 {
+    background-color: var(--jp-collab-dark-cursor-user-1);
+    border-color: var(--jp-collab-dark-cursor-user-1);
+  }
+  
+  .jp-collab-cursor-user-2 {
+    background-color: var(--jp-collab-dark-cursor-user-2);
+    border-color: var(--jp-collab-dark-cursor-user-2);
+  }
+  
+  .jp-collab-cursor-user-3 {
+    background-color: var(--jp-collab-dark-cursor-user-3);
+    border-color: var(--jp-collab-dark-cursor-user-3);
+  }
+  
+  .jp-collab-cursor-user-4 {
+    background-color: var(--jp-collab-dark-cursor-user-4);
+    border-color: var(--jp-collab-dark-cursor-user-4);
+  }
+}
