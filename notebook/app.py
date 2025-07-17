@@ -356,7 +356,54 @@ class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[
         self.handlers.append(("/consoles/(.*)", ConsoleHandler))
         self.handlers.append(("/terminals/(.*)", TerminalHandler))
         self.handlers.append(("/custom/custom.css", CustomCssHandler))
+        
+        # Register collaboration handlers for real-time collaborative editing
+        self._register_collaboration_handlers()
+        
         super().initialize_handlers()
+
+    def _register_collaboration_handlers(self) -> None:
+        """Register collaboration handlers for real-time collaborative editing."""
+        # Check if jupyter_collaboration extension is available
+        if not self.server_extension_is_enabled("jupyter_collaboration"):
+            return
+            
+        try:
+            # Import collaboration handlers - these will be provided by jupyter_collaboration extension
+            from jupyter_collaboration.handlers import (
+                YjsWebSocketHandler,
+                CollaborationSessionHandler,
+                CollaborationPermissionsHandler,
+                CollaborationCommentsHandler,
+                CollaborationHistoryHandler,
+                CollaborationAwarenessHandler,
+            )
+            
+            # WebSocket handler for real-time Yjs document synchronization
+            self.handlers.append((r"/api/collaboration/rooms/(.*)", YjsWebSocketHandler))
+            
+            # REST API handlers for collaboration management
+            self.handlers.append((r"/api/collaboration/sessions", CollaborationSessionHandler))
+            self.handlers.append((r"/api/collaboration/sessions/(.*)", CollaborationSessionHandler))
+            self.handlers.append((r"/api/collaboration/permissions/(.*)", CollaborationPermissionsHandler))
+            self.handlers.append((r"/api/collaboration/comments/(.*)", CollaborationCommentsHandler))
+            self.handlers.append((r"/api/collaboration/history/(.*)", CollaborationHistoryHandler))
+            self.handlers.append((r"/api/collaboration/awareness/(.*)", CollaborationAwarenessHandler))
+            
+            # Enable collaboration features in page config
+            page_config = self.serverapp.web_app.settings.setdefault("page_config_data", {})
+            page_config["collaborationEnabled"] = True
+            page_config["collaborationEndpoint"] = "/api/collaboration"
+            
+            self.log.info("Collaboration handlers registered successfully")
+            
+        except ImportError:
+            self.log.debug("jupyter_collaboration extension not available, skipping collaboration handlers")
+        except Exception as e:
+            self.log.warning(f"Failed to register collaboration handlers: {e}")
+            # Set collaboration as disabled if handler registration fails
+            page_config = self.serverapp.web_app.settings.setdefault("page_config_data", {})
+            page_config["collaborationEnabled"] = False
 
     def initialize(self, argv: list[str] | None = None) -> None:  # noqa: ARG002
         """Subclass because the ExtensionApp.initialize() method does not take arguments"""
@@ -364,6 +411,18 @@ class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[
 
 
 main = launch_new_instance = JupyterNotebookApp.launch_instance
+
+# Export classes for collaboration handler registration and inheritance
+__all__ = [
+    "JupyterNotebookApp",
+    "NotebookBaseHandler",
+    "TreeHandler",
+    "NotebookHandler",
+    "FileHandler",
+    "ConsoleHandler",
+    "TerminalHandler",
+    "CustomCssHandler",
+]
 
 if __name__ == "__main__":
     main()
