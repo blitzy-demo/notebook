@@ -32,6 +32,37 @@
   /* Material Design color overrides */
   --md-grey-800: #323232;
   
+  /* Standard JupyterLab layout colors */
+  --jp-layout-color0: #ffffff;
+  --jp-layout-color1: #f5f5f5;
+  --jp-layout-color2: #e6e6e6;
+  --jp-layout-color3: #d9d9d9;
+  --jp-layout-color4: #cccccc;
+  --jp-inverse-layout-color0: #000000;
+  --jp-inverse-layout-color1: #ffffff;
+  --jp-inverse-layout-color2: #f2f2f2;
+  --jp-inverse-layout-color3: #e6e6e6;
+  --jp-inverse-layout-color4: #cccccc;
+  
+  /* Standard JupyterLab UI font colors */
+  --jp-ui-font-color0: #000000;
+  --jp-ui-font-color1: #3f3f3f;
+  --jp-ui-font-color2: #5a5a5a;
+  --jp-ui-font-color3: #737373;
+  --jp-ui-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+  --jp-ui-font-size0: 11px;
+  --jp-ui-font-size1: 13px;
+  --jp-ui-font-size2: 14px;
+  --jp-ui-font-size3: 16px;
+  
+  /* Standard JupyterLab border colors */
+  --jp-border-color0: #e0e0e0;
+  --jp-border-color1: #d0d0d0;
+  --jp-border-color2: #b0b0b0;
+  --jp-border-color3: #a0a0a0;
+  --jp-border-width: 1px;
+  --jp-border-radius: 2px;
+  
   /* =========================================================================
    * COLLABORATIVE THEMING VARIABLES
    * ========================================================================= */
@@ -159,6 +190,30 @@
   --jp-collab-dark-cursor-user-2: #ffc266;
   --jp-collab-dark-cursor-user-3: #5ce670;
   --jp-collab-dark-cursor-user-4: #ff5252;
+  
+  /* Dark mode layout colors */
+  --jp-dark-layout-color0: #111111;
+  --jp-dark-layout-color1: #1e1e1e;
+  --jp-dark-layout-color2: #2d2d2d;
+  --jp-dark-layout-color3: #3f3f3f;
+  --jp-dark-layout-color4: #5a5a5a;
+  --jp-dark-inverse-layout-color0: #ffffff;
+  --jp-dark-inverse-layout-color1: #f2f2f2;
+  --jp-dark-inverse-layout-color2: #e6e6e6;
+  --jp-dark-inverse-layout-color3: #d9d9d9;
+  --jp-dark-inverse-layout-color4: #cccccc;
+  
+  /* Dark mode UI font colors */
+  --jp-dark-ui-font-color0: #ffffff;
+  --jp-dark-ui-font-color1: #f2f2f2;
+  --jp-dark-ui-font-color2: #e6e6e6;
+  --jp-dark-ui-font-color3: #d9d9d9;
+  
+  /* Dark mode border colors */
+  --jp-dark-border-color0: #3f3f3f;
+  --jp-dark-border-color1: #5a5a5a;
+  --jp-dark-border-color2: #737373;
+  --jp-dark-border-color3: #8c8c8c;
 }
 
 /* =========================================================================
@@ -207,6 +262,45 @@
     --jp-collab-avatar-border-width: 1px;
     --jp-collab-focus-ring-width: 1px;
     --jp-collab-high-contrast-border: 1px solid;
+  }
+}
+
+/* Dark mode adaptations */
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Override layout colors for dark mode */
+    --jp-layout-color0: var(--jp-dark-layout-color0);
+    --jp-layout-color1: var(--jp-dark-layout-color1);
+    --jp-layout-color2: var(--jp-dark-layout-color2);
+    --jp-layout-color3: var(--jp-dark-layout-color3);
+    --jp-layout-color4: var(--jp-dark-layout-color4);
+    --jp-inverse-layout-color0: var(--jp-dark-inverse-layout-color0);
+    --jp-inverse-layout-color1: var(--jp-dark-inverse-layout-color1);
+    --jp-inverse-layout-color2: var(--jp-dark-inverse-layout-color2);
+    --jp-inverse-layout-color3: var(--jp-dark-inverse-layout-color3);
+    --jp-inverse-layout-color4: var(--jp-dark-inverse-layout-color4);
+    
+    /* Override UI font colors for dark mode */
+    --jp-ui-font-color0: var(--jp-dark-ui-font-color0);
+    --jp-ui-font-color1: var(--jp-dark-ui-font-color1);
+    --jp-ui-font-color2: var(--jp-dark-ui-font-color2);
+    --jp-ui-font-color3: var(--jp-dark-ui-font-color3);
+    
+    /* Override border colors for dark mode */
+    --jp-border-color0: var(--jp-dark-border-color0);
+    --jp-border-color1: var(--jp-dark-border-color1);
+    --jp-border-color2: var(--jp-dark-border-color2);
+    --jp-border-color3: var(--jp-dark-border-color3);
+    
+    /* Override collaborative colors for dark mode */
+    --jp-collab-presence-indicator-color: var(--jp-collab-dark-presence-indicator);
+    --jp-comment-badge-color: var(--jp-collab-dark-comment-badge);
+    --jp-resolved-comment-badge-color: var(--jp-collab-dark-resolved-comment);
+    --jp-locked-cell-border-color: var(--jp-collab-dark-locked-cell-border);
+    --jp-cursor-color-user-1: var(--jp-collab-dark-cursor-user-1);
+    --jp-cursor-color-user-2: var(--jp-collab-dark-cursor-user-2);
+    --jp-cursor-color-user-3: var(--jp-collab-dark-cursor-user-3);
+    --jp-cursor-color-user-4: var(--jp-collab-dark-cursor-user-4);
   }
 }
 
