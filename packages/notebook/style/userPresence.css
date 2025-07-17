@@ -1,0 +1,560 @@
+/*-----------------------------------------------------------------------------
+| Copyright (c) Jupyter Development Team.
+| Distributed under the terms of the Modified BSD License.
+|----------------------------------------------------------------------------*/
+
+/**
+ * User presence and awareness styling for collaborative editing.
+ * This file provides comprehensive styling for multi-user sessions including
+ * avatar display, status indicators, cursor highlighting, and accessibility
+ * support for collaborative features.
+ */
+
+/* =========================================================================
+ * PRESENCE LIST CONTAINER
+ * ========================================================================= */
+
+.jp-PresenceList {
+  display: flex;
+  align-items: center;
+  gap: var(--jp-collab-avatar-group-spacing);
+  padding: var(--jp-collab-bar-padding);
+  min-height: var(--jp-collab-presence-bar-height);
+  background: var(--jp-layout-color1);
+  border-bottom: var(--jp-collab-bar-border-bottom);
+  z-index: var(--jp-collab-presence-bar-z-index);
+  overflow: hidden;
+  position: relative;
+}
+
+.jp-PresenceList:empty {
+  display: none;
+}
+
+/* Responsive behavior for mobile devices */
+@media only screen and (max-width: 760px) {
+  .jp-PresenceList {
+    gap: var(--jp-collab-avatar-group-spacing);
+    padding: var(--jp-collab-bar-padding);
+    min-height: var(--jp-collab-presence-bar-height-mobile);
+  }
+}
+
+/* =========================================================================
+ * PRESENCE ITEM STYLING
+ * ========================================================================= */
+
+.jp-PresenceItem {
+  display: flex;
+  align-items: center;
+  position: relative;
+  margin-right: calc(-1 * var(--jp-collab-avatar-overlap));
+  transition: transform var(--jp-collab-transition-duration) ease,
+              z-index var(--jp-collab-transition-duration) ease;
+  cursor: pointer;
+}
+
+.jp-PresenceItem:hover {
+  transform: translateY(-2px);
+  z-index: calc(var(--jp-collab-presence-bar-z-index) + 1);
+}
+
+.jp-PresenceItem:focus {
+  outline: var(--jp-collab-focus-ring-width) solid var(--jp-collab-focus-ring-color);
+  outline-offset: 2px;
+  border-radius: 50%;
+}
+
+.jp-PresenceItem:last-child {
+  margin-right: 0;
+}
+
+/* Animation for presence item appearance */
+.jp-PresenceItem {
+  animation: presenceEnter var(--jp-presence-enter-duration) ease-out;
+}
+
+@keyframes presenceEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* =========================================================================
+ * USER AVATAR STYLING
+ * ========================================================================= */
+
+.jp-UserAvatar {
+  width: var(--jp-collab-avatar-size);
+  height: var(--jp-collab-avatar-size);
+  border-radius: 50%;
+  border: var(--jp-collab-avatar-border-width) solid var(--jp-collab-avatar-border-color);
+  background: var(--jp-collab-presence-indicator-color);
+  color: var(--jp-inverse-layout-color1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(var(--jp-collab-avatar-size) * 0.4);
+  font-weight: 600;
+  line-height: 1;
+  position: relative;
+  overflow: hidden;
+  transition: border-color var(--jp-collab-transition-duration) ease,
+              box-shadow var(--jp-collab-transition-duration) ease;
+}
+
+.jp-UserAvatar:hover {
+  border-color: var(--jp-collab-focus-ring-color);
+  box-shadow: 0 0 0 2px var(--jp-collab-focus-ring-color);
+}
+
+.jp-UserAvatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+/* User-specific avatar colors for fallback initials */
+.jp-UserAvatar[data-user-id="1"] {
+  background: var(--jp-cursor-color-user-1);
+}
+
+.jp-UserAvatar[data-user-id="2"] {
+  background: var(--jp-cursor-color-user-2);
+}
+
+.jp-UserAvatar[data-user-id="3"] {
+  background: var(--jp-cursor-color-user-3);
+}
+
+.jp-UserAvatar[data-user-id="4"] {
+  background: var(--jp-cursor-color-user-4);
+}
+
+/* =========================================================================
+ * USER STATUS INDICATORS
+ * ========================================================================= */
+
+.jp-UserStatus {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid var(--jp-layout-color1);
+  transition: background-color var(--jp-collab-transition-duration) ease;
+  z-index: 1;
+}
+
+.jp-UserStatus-online {
+  background-color: var(--jp-collab-success-color);
+  animation: pulseOnline var(--jp-presence-pulse-duration) ease-in-out infinite;
+}
+
+.jp-UserStatus-idle {
+  background-color: var(--jp-collab-warning-color);
+}
+
+.jp-UserStatus-away {
+  background-color: var(--jp-collab-error-color);
+}
+
+/* Pulse animation for online status */
+@keyframes pulseOnline {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* =========================================================================
+ * USER CURSOR STYLING
+ * ========================================================================= */
+
+.jp-UserCursor {
+  position: absolute;
+  width: 2px;
+  height: 18px;
+  z-index: var(--jp-collab-cursor-z-index);
+  pointer-events: none;
+  animation: cursorBlink var(--jp-collab-pulse-duration) ease-in-out infinite;
+}
+
+.jp-UserCursor::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.jp-UserCursor::after {
+  content: attr(data-user-name);
+  position: absolute;
+  top: -24px;
+  left: 4px;
+  background: currentColor;
+  color: var(--jp-inverse-layout-color1);
+  padding: 2px 4px;
+  border-radius: 2px;
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity var(--jp-collab-fade-duration) ease,
+              transform var(--jp-collab-fade-duration) ease;
+  z-index: calc(var(--jp-collab-cursor-z-index) + 1);
+}
+
+.jp-UserCursor:hover::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Per-user cursor colors */
+.jp-UserCursor[data-user-id="1"] {
+  color: var(--jp-cursor-color-user-1);
+}
+
+.jp-UserCursor[data-user-id="2"] {
+  color: var(--jp-cursor-color-user-2);
+}
+
+.jp-UserCursor[data-user-id="3"] {
+  color: var(--jp-cursor-color-user-3);
+}
+
+.jp-UserCursor[data-user-id="4"] {
+  color: var(--jp-cursor-color-user-4);
+}
+
+/* Dark mode cursor colors */
+@media (prefers-color-scheme: dark) {
+  .jp-UserCursor[data-user-id="1"] {
+    color: var(--jp-collab-dark-cursor-user-1);
+  }
+  
+  .jp-UserCursor[data-user-id="2"] {
+    color: var(--jp-collab-dark-cursor-user-2);
+  }
+  
+  .jp-UserCursor[data-user-id="3"] {
+    color: var(--jp-collab-dark-cursor-user-3);
+  }
+  
+  .jp-UserCursor[data-user-id="4"] {
+    color: var(--jp-collab-dark-cursor-user-4);
+  }
+}
+
+@keyframes cursorBlink {
+  0%, 50% {
+    opacity: 1;
+  }
+  51%, 100% {
+    opacity: 0.3;
+  }
+}
+
+/* =========================================================================
+ * USER SELECTION HIGHLIGHTING
+ * ========================================================================= */
+
+.jp-UserSelection {
+  position: absolute;
+  z-index: var(--jp-collab-selection-z-index);
+  pointer-events: none;
+  opacity: 0.2;
+  transition: opacity var(--jp-collab-fade-duration) ease;
+}
+
+.jp-UserSelection:hover {
+  opacity: 0.3;
+}
+
+/* Per-user selection colors */
+.jp-UserSelection[data-user-id="1"] {
+  background-color: var(--jp-cursor-color-user-1);
+}
+
+.jp-UserSelection[data-user-id="2"] {
+  background-color: var(--jp-cursor-color-user-2);
+}
+
+.jp-UserSelection[data-user-id="3"] {
+  background-color: var(--jp-cursor-color-user-3);
+}
+
+.jp-UserSelection[data-user-id="4"] {
+  background-color: var(--jp-cursor-color-user-4);
+}
+
+/* Alternative styling for high contrast mode */
+@media (prefers-contrast: high) {
+  .jp-UserSelection {
+    opacity: 0.4;
+    border: var(--jp-collab-high-contrast-border);
+  }
+  
+  .jp-UserSelection[data-user-id="1"] {
+    border-color: var(--jp-cursor-color-user-1);
+  }
+  
+  .jp-UserSelection[data-user-id="2"] {
+    border-color: var(--jp-cursor-color-user-2);
+  }
+  
+  .jp-UserSelection[data-user-id="3"] {
+    border-color: var(--jp-cursor-color-user-3);
+  }
+  
+  .jp-UserSelection[data-user-id="4"] {
+    border-color: var(--jp-cursor-color-user-4);
+  }
+}
+
+/* =========================================================================
+ * PRESENCE TOOLTIP STYLING
+ * ========================================================================= */
+
+.jp-PresenceTooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--jp-collab-fade-duration) ease,
+              visibility var(--jp-collab-fade-duration) ease,
+              transform var(--jp-collab-fade-duration) ease;
+  z-index: calc(var(--jp-collab-presence-bar-z-index) + 10);
+  border: 1px solid var(--jp-border-color1);
+}
+
+.jp-PresenceTooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 6px solid var(--jp-layout-color2);
+}
+
+.jp-PresenceItem:hover .jp-PresenceTooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(-4px);
+}
+
+/* Enhanced tooltip content */
+.jp-PresenceTooltip .jp-tooltip-user-name {
+  font-weight: 600;
+  color: var(--jp-ui-font-color0);
+}
+
+.jp-PresenceTooltip .jp-tooltip-user-status {
+  margin-top: 4px;
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.jp-PresenceTooltip .jp-tooltip-last-active {
+  margin-top: 2px;
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+/* =========================================================================
+ * PRESENCE OVERFLOW HANDLING
+ * ========================================================================= */
+
+.jp-PresenceOverflow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--jp-collab-avatar-size);
+  height: var(--jp-collab-avatar-size);
+  border-radius: 50%;
+  background: var(--jp-layout-color2);
+  border: var(--jp-collab-avatar-border-width) solid var(--jp-border-color1);
+  color: var(--jp-ui-font-color1);
+  font-size: calc(var(--jp-collab-avatar-size) * 0.35);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--jp-collab-transition-duration) ease,
+              border-color var(--jp-collab-transition-duration) ease,
+              transform var(--jp-collab-transition-duration) ease;
+}
+
+.jp-PresenceOverflow:hover {
+  background: var(--jp-layout-color3);
+  border-color: var(--jp-collab-focus-ring-color);
+  transform: scale(1.05);
+}
+
+.jp-PresenceOverflow:focus {
+  outline: var(--jp-collab-focus-ring-width) solid var(--jp-collab-focus-ring-color);
+  outline-offset: 2px;
+}
+
+/* =========================================================================
+ * PRESENCE COUNT DISPLAY
+ * ========================================================================= */
+
+.jp-PresenceCount {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--jp-ui-font-color2);
+  font-weight: 500;
+}
+
+.jp-PresenceCount::before {
+  content: '';
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--jp-collab-presence-indicator-color);
+  animation: pulseIndicator var(--jp-presence-pulse-duration) ease-in-out infinite;
+}
+
+@keyframes pulseIndicator {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.2);
+  }
+}
+
+.jp-PresenceCount[data-count="0"] {
+  display: none;
+}
+
+/* =========================================================================
+ * ACCESSIBILITY ENHANCEMENTS
+ * ========================================================================= */
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .jp-UserAvatar {
+    border-width: 3px;
+  }
+  
+  .jp-UserStatus {
+    border-width: 3px;
+  }
+  
+  .jp-PresenceTooltip {
+    border-width: 2px;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .jp-PresenceItem,
+  .jp-UserAvatar,
+  .jp-UserCursor,
+  .jp-UserSelection,
+  .jp-PresenceTooltip,
+  .jp-PresenceOverflow {
+    animation: none;
+    transition: none;
+  }
+  
+  .jp-UserStatus-online {
+    animation: none;
+  }
+  
+  .jp-UserCursor {
+    animation: none;
+  }
+  
+  .jp-PresenceCount::before {
+    animation: none;
+  }
+}
+
+/* Screen reader support */
+.jp-PresenceItem[aria-label] {
+  position: relative;
+}
+
+.jp-PresenceItem[aria-label]:focus::after {
+  content: attr(aria-label);
+  position: absolute;
+  top: 100%;
+  left: 0;
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  padding: 4px 8px;
+  border-radius: 2px;
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: calc(var(--jp-collab-presence-bar-z-index) + 10);
+}
+
+/* Visual focus indicators for keyboard navigation */
+.jp-PresenceList:focus-within .jp-PresenceItem:focus {
+  box-shadow: 0 0 0 var(--jp-collab-focus-ring-width) var(--jp-collab-focus-ring-color);
+}
+
+/* Announcement styles for screen readers */
+.jp-presence-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* =========================================================================
+ * PRINT MEDIA HIDING
+ * ========================================================================= */
+
+@media print {
+  .jp-PresenceList,
+  .jp-PresenceItem,
+  .jp-UserAvatar,
+  .jp-UserStatus,
+  .jp-UserCursor,
+  .jp-UserSelection,
+  .jp-PresenceTooltip,
+  .jp-PresenceOverflow,
+  .jp-PresenceCount {
+    display: none !important;
+  }
+}
