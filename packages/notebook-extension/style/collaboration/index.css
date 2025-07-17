@@ -1,0 +1,469 @@
+/*
+ * Copyright (c) Jupyter Development Team.
+ * Distributed under the terms of the Modified BSD License.
+ */
+
+/*
+ * Central stylesheet for collaboration features in the notebook extension.
+ * This file imports and organizes all collaboration-specific CSS modules
+ * according to the hierarchical styling system requirements.
+ */
+
+/* Import base variables for collaboration theming */
+@import '../variables.css';
+
+/* ============================================================================
+ * COMMENT THREAD STYLES
+ * ============================================================================ */
+
+.jp-CommentThread {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--jp-layout-color1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: var(--jp-border-radius);
+  padding: var(--jp-cell-padding);
+  margin: var(--jp-cell-margin);
+  box-shadow: var(--jp-elevation-z1);
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  line-height: var(--jp-content-line-height);
+}
+
+.jp-CommentThread:hover {
+  border-color: var(--jp-comment-badge-color);
+}
+
+.jp-CommentThread .jp-CommentItem {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: var(--jp-cell-margin);
+  padding-bottom: var(--jp-cell-padding);
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.jp-CommentThread .jp-CommentItem:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.jp-CommentThread .jp-CommentHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--jp-cell-margin);
+  font-weight: var(--jp-content-font-weight2);
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-CommentThread .jp-CommentBody {
+  color: var(--jp-ui-font-color1);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  line-height: var(--jp-content-line-height);
+}
+
+.jp-CommentThread .jp-CommentReplyArea {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--jp-cell-margin);
+  padding-top: var(--jp-cell-padding);
+  border-top: 1px solid var(--jp-border-color2);
+}
+
+.jp-CommentThread .jp-CommentReplyArea textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: var(--jp-cell-padding);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: var(--jp-border-radius);
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+  resize: vertical;
+}
+
+.jp-CommentThread .jp-CommentReplyArea textarea:focus {
+  outline: none;
+  border-color: var(--jp-comment-badge-color);
+  box-shadow: inset 0 0 0 1px var(--jp-comment-badge-color);
+}
+
+/* ============================================================================
+ * CELL LOCK STYLES
+ * ============================================================================ */
+
+.jp-CellLock {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  background: var(--jp-locked-cell-border-color);
+  border: 1px solid var(--jp-locked-cell-border-color);
+  border-radius: var(--jp-border-radius);
+  color: var(--jp-ui-font-color0);
+  font-size: var(--jp-ui-font-size0);
+  font-weight: var(--jp-content-font-weight2);
+  cursor: default;
+  transition: all 0.2s ease;
+}
+
+.jp-CellLock:hover {
+  background: rgba(255, 69, 0, 0.7);
+  border-color: rgba(255, 69, 0, 0.7);
+}
+
+.jp-CellLock .jp-LockIcon {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M12 17c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm6-9h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM8.9 6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1v2H8.9V6z"/></svg>');
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.jp-CellLock .jp-LockStatus {
+  font-size: var(--jp-ui-font-size0);
+  font-weight: var(--jp-content-font-weight1);
+}
+
+.jp-CellLock .jp-LockOwnerTooltip {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: var(--jp-layout-color3);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: var(--jp-border-radius);
+  color: var(--jp-ui-font-color1);
+  font-size: var(--jp-ui-font-size0);
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+  z-index: 1000;
+}
+
+.jp-CellLock:hover .jp-LockOwnerTooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+.jp-CellLock .jp-LockOwnerTooltip::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-bottom-color: var(--jp-border-color1);
+}
+
+/* ============================================================================
+ * COLLABORATOR AVATAR STYLES
+ * ============================================================================ */
+
+.jp-CollaboratorAvatar {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--jp-collab-avatar-size);
+  height: var(--jp-collab-avatar-size);
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--jp-collab-presence-indicator-color);
+  border: 2px solid var(--jp-layout-color0);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.jp-CollaboratorAvatar:hover {
+  transform: scale(1.1);
+  box-shadow: var(--jp-elevation-z2);
+}
+
+.jp-CollaboratorAvatar .jp-AvatarImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+.jp-CollaboratorAvatar .jp-AvatarImage:not([src]) {
+  display: none;
+}
+
+.jp-CollaboratorAvatar .jp-AvatarImage:not([src]) + .jp-UserStatus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--jp-ui-font-color0);
+  font-size: var(--jp-ui-font-size0);
+  font-weight: var(--jp-content-font-weight2);
+  text-transform: uppercase;
+}
+
+.jp-CollaboratorAvatar .jp-PresenceIndicator {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--jp-collab-presence-indicator-color);
+  border: 2px solid var(--jp-layout-color0);
+  z-index: 1;
+}
+
+.jp-CollaboratorAvatar .jp-PresenceIndicator.jp-inactive {
+  background: var(--jp-layout-color2);
+}
+
+.jp-CollaboratorAvatar .jp-UserCursor {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 16px;
+  background: var(--jp-cursor-color-user-1);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.jp-CollaboratorAvatar .jp-UserCursor.jp-user-1 {
+  background: var(--jp-cursor-color-user-1);
+}
+
+.jp-CollaboratorAvatar .jp-UserCursor.jp-user-2 {
+  background: var(--jp-cursor-color-user-2);
+}
+
+.jp-CollaboratorAvatar .jp-UserCursor.jp-user-3 {
+  background: var(--jp-cursor-color-user-3);
+}
+
+.jp-CollaboratorAvatar .jp-UserCursor.jp-user-4 {
+  background: var(--jp-cursor-color-user-4);
+}
+
+.jp-CollaboratorAvatar:hover .jp-UserCursor {
+  opacity: 1;
+}
+
+.jp-CollaboratorAvatar .jp-UserStatus {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 4px;
+  padding: 2px 6px;
+  background: var(--jp-layout-color3);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: var(--jp-border-radius);
+  color: var(--jp-ui-font-color1);
+  font-size: var(--jp-ui-font-size0);
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+  z-index: 1000;
+}
+
+.jp-CollaboratorAvatar:hover .jp-UserStatus {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* ============================================================================
+ * COLLABORATION BAR STYLES
+ * ============================================================================ */
+
+.jp-CollaborationBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--jp-collab-bar-height);
+  padding: 0 var(--jp-collab-bar-spacing);
+  background: var(--jp-layout-color0);
+  border-bottom: 1px solid var(--jp-border-color2);
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-CollaborationBar .jp-CollabUserList {
+  display: flex;
+  align-items: center;
+  gap: var(--jp-collab-bar-spacing);
+}
+
+.jp-CollaborationBar .jp-CollabUserList .jp-CollaboratorAvatar {
+  margin-right: 4px;
+}
+
+.jp-CollaborationBar .jp-CollabActivity {
+  display: flex;
+  align-items: center;
+  gap: var(--jp-collab-bar-spacing);
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-CollaborationBar .jp-CollabActivity::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--jp-collab-presence-indicator-color);
+  margin-right: 4px;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.jp-CollaborationBar .jp-ShareButton {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--jp-brand-color1);
+  border: 1px solid var(--jp-brand-color1);
+  border-radius: var(--jp-border-radius);
+  color: var(--jp-ui-font-color0);
+  font-size: var(--jp-ui-font-size0);
+  font-weight: var(--jp-content-font-weight2);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.jp-CollaborationBar .jp-ShareButton:hover {
+  background: var(--jp-brand-color2);
+  border-color: var(--jp-brand-color2);
+}
+
+.jp-CollaborationBar .jp-ShareButton:active {
+  transform: translateY(1px);
+}
+
+.jp-CollaborationBar .jp-CollabStatus {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-CollaborationBar .jp-CollabStatus.jp-connected {
+  color: var(--jp-collab-presence-indicator-color);
+}
+
+.jp-CollaborationBar .jp-CollabStatus.jp-disconnected {
+  color: var(--jp-error-color1);
+}
+
+/* ============================================================================
+ * RESPONSIVE DESIGN
+ * ============================================================================ */
+
+@media (max-width: 768px) {
+  .jp-CollaborationBar {
+    flex-direction: column;
+    height: auto;
+    padding: var(--jp-collab-bar-spacing);
+    gap: var(--jp-collab-bar-spacing);
+  }
+
+  .jp-CollaborationBar .jp-CollabUserList {
+    order: 1;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .jp-CollaborationBar .jp-CollabActivity {
+    order: 2;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .jp-CollaborationBar .jp-ShareButton,
+  .jp-CollaborationBar .jp-CollabStatus {
+    order: 3;
+  }
+
+  .jp-CommentThread {
+    margin: var(--jp-cell-margin) calc(var(--jp-cell-margin) / 2);
+  }
+
+  .jp-CollaboratorAvatar {
+    width: calc(var(--jp-collab-avatar-size) * 0.8);
+    height: calc(var(--jp-collab-avatar-size) * 0.8);
+  }
+}
+
+/* ============================================================================
+ * ACCESSIBILITY IMPROVEMENTS
+ * ============================================================================ */
+
+.jp-CollaboratorAvatar:focus,
+.jp-ShareButton:focus,
+.jp-CellLock:focus {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 2px;
+}
+
+.jp-CommentThread .jp-CommentReplyArea textarea:focus {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 2px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .jp-CollaboratorAvatar {
+    border-width: 3px;
+  }
+
+  .jp-CellLock {
+    border-width: 2px;
+    font-weight: var(--jp-content-font-weight2);
+  }
+
+  .jp-CommentThread {
+    border-width: 2px;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .jp-CollaboratorAvatar,
+  .jp-CollaboratorAvatar .jp-UserCursor,
+  .jp-CollaboratorAvatar .jp-UserStatus,
+  .jp-CellLock,
+  .jp-CellLock .jp-LockOwnerTooltip,
+  .jp-ShareButton {
+    transition: none;
+  }
+
+  .jp-CollaborationBar .jp-CollabActivity::before {
+    animation: none;
+  }
+}
