@@ -21,19 +21,16 @@
 
 import { StackedPanel } from '@lumino/widgets';
 import { ISignal, Signal } from '@lumino/signaling';
-import { IMessageHandler } from '@lumino/messaging';
-import { find } from '@lumino/algorithm';
 import { IDisposable, DisposableSet } from '@lumino/disposable';
 import { closeIcon } from '@jupyterlab/ui-components';
 import { ICommandPalette } from '@jupyterlab/apputils';
 
 // Import internal dependencies
-import { NotebookPanel } from './widget';
 import { NotebookApp } from './app';
 import { AwarenessService } from './collab/awareness';
-import { IAwarenessService } from './tokens';
 import { LockService } from './collab/locks';
 import { PermissionService } from './collab/permissions';
+import { ILockService } from './tokens';
 
 /**
  * Interface for collaborative panel session information
@@ -176,15 +173,15 @@ export namespace CollaborativePanel {
  * awareness, and permission-based access control.
  */
 export class CollaborativePanelHandler implements IDisposable {
-  private _panel: StackedPanel;
-  private _notebookApp: NotebookApp;
-  private _awarenessService: AwarenessService;
-  private _lockService: LockService;
-  private _permissionService: PermissionService;
-  private _disposables: DisposableSet = new DisposableSet();
-  private _collaborativeState: CollaborativePanel.CollaborativeState;
-  private _session: ICollaborativePanelSession | null = null;
-  private _isDisposed: boolean = false;
+  protected _panel: StackedPanel;
+  protected _notebookApp: NotebookApp;
+  protected _awarenessService: AwarenessService;
+  protected _lockService: LockService;
+  protected _permissionService: PermissionService;
+  protected _disposables: DisposableSet = new DisposableSet();
+  protected _collaborativeState: CollaborativePanel.CollaborativeState;
+  protected _session: ICollaborativePanelSession | null = null;
+  protected _isDisposed: boolean = false;
   
   // Signals for collaborative events
   private _collaboratorsChangedSignal = new Signal<CollaborativePanelHandler, Array<{
@@ -243,6 +240,13 @@ export class CollaborativePanelHandler implements IDisposable {
    */
   get panel(): StackedPanel {
     return this._panel;
+  }
+
+  /**
+   * Test whether the handler is disposed
+   */
+  get isDisposed(): boolean {
+    return this._isDisposed;
   }
   
   /**
@@ -407,24 +411,22 @@ export class CollaborativePanelHandler implements IDisposable {
     
     try {
       // Use lock service to release panel lock
-      const unlockSuccessful = await this._lockService.unlockCell(
+      await this._lockService.unlockCell(
         `panel-${this._panel.id}`
       );
       
-      if (unlockSuccessful) {
-        this._panel.removeClass('jp-CollaborativePanel-locked');
-        
-        // Broadcast unlock state change
-        await this._broadcastPanelChange({
-          type: 'panel-unlocked' as any,
-          metadata: {
-            unlockedBy: this._awarenessService.getCurrentUser().userId,
-            unlockedAt: new Date().toISOString()
-          }
-        });
-      }
+      this._panel.removeClass('jp-CollaborativePanel-locked');
       
-      return unlockSuccessful;
+      // Broadcast unlock state change
+      await this._broadcastPanelChange({
+        type: 'panel-unlocked' as any,
+        metadata: {
+          unlockedBy: this._awarenessService.getCurrentUser().userId,
+          unlockedAt: new Date().toISOString()
+        }
+      });
+      
+      return true;
     } catch (error) {
       console.error('Error unlocking panel:', error);
       return false;
@@ -506,23 +508,14 @@ export class CollaborativePanelHandler implements IDisposable {
    */
   private _setupEventHandlers(): void {
     // Awareness service events
-    this._disposables.add(
-      this._awarenessService.onUserJoin.connect(this._onUserJoined, this)
-    );
-    
-    this._disposables.add(
-      this._awarenessService.onUserLeave.connect(this._onUserLeft, this)
-    );
+    this._awarenessService.onUserJoin.connect(this._onUserJoined, this);
+    this._awarenessService.onUserLeave.connect(this._onUserLeft, this);
     
     // Permission service events
-    this._disposables.add(
-      this._permissionService.onPermissionChanged.connect(this._onPermissionsChanged, this)
-    );
+    this._permissionService.onPermissionChanged.connect(this._onPermissionsChanged, this);
     
     // Lock service events
-    this._disposables.add(
-      this._lockService.onLockChange.connect(this._onLockChanged, this)
-    );
+    this._lockService.onLockChange.connect(this._onLockChanged, this);
   }
   
   /**
@@ -604,7 +597,7 @@ export class CollaborativePanelHandler implements IDisposable {
   /**
    * Update user activity for collaborative tracking
    */
-  private _updateUserActivity(widgetId: string): void {
+  protected _updateUserActivity(widgetId: string): void {
     if (!this._collaborativeState.isCollaborative) {
       return;
     }
@@ -626,7 +619,7 @@ export class CollaborativePanelHandler implements IDisposable {
   /**
    * Broadcast panel change to collaborators
    */
-  private async _broadcastPanelChange(change: {
+  protected async _broadcastPanelChange(change: {
     type: string;
     widgetId?: string;
     metadata?: Record<string, any>;
@@ -697,8 +690,8 @@ export class CollaborativePanelHandler implements IDisposable {
    * Handle lock changed event
    */
   private _onLockChanged(
-    sender: LockService,
-    args: any
+    sender: ILockService,
+    args: { cellId: string; isLocked: boolean; owner?: { userId: string; name: string; } | undefined; }
   ): void {
     // Update lock state in UI
     if (args.cellId === `panel-${this._panel.id}`) {
@@ -713,7 +706,7 @@ export class CollaborativePanelHandler implements IDisposable {
   /**
    * Update permissions based on current user and session
    */
-  private async _updatePermissions(): Promise<void> {
+  protected async _updatePermissions(): Promise<void> {
     try {
       const canView = await this._permissionService.canView();
       const canEdit = await this._permissionService.canEdit();
@@ -1146,6 +1139,13 @@ export class CollaborativeSidePanelPalette implements IDisposable {
   }> = new Map();
   private _disposables: DisposableSet = new DisposableSet();
   private _isDisposed: boolean = false;
+
+  /**
+   * Test whether the palette is disposed
+   */
+  get isDisposed(): boolean {
+    return this._isDisposed;
+  }
   
   /**
    * Create a new collaborative side panel palette
@@ -1162,9 +1162,7 @@ export class CollaborativeSidePanelPalette implements IDisposable {
     this._permissionService = options.permissionService;
     
     // Set up permission change handler
-    this._disposables.add(
-      this._permissionService.onPermissionChanged.connect(this._onPermissionsChanged, this)
-    );
+    this._permissionService.onPermissionChanged.connect(this._onPermissionsChanged, this);
   }
   
   /**
@@ -1273,9 +1271,7 @@ export class CollaborativeSidePanelPalette implements IDisposable {
         side: area,
         title: `Show ${widget.title.caption}`,
         id: widget.id,
-        collaborative: true,
-        permissions: options?.permissions,
-        rank: options?.rank
+        collaborative: true
       }
     });
     
@@ -1309,7 +1305,7 @@ export class CollaborativeSidePanelPalette implements IDisposable {
     }
     
     // Update all items with new permissions
-    for (const [key, item] of this._items) {
+    for (const [, item] of this._items) {
       item.permissions = permissions;
     }
     
@@ -1331,7 +1327,7 @@ export class CollaborativeSidePanelPalette implements IDisposable {
       const canAdmin = await this._permissionService.canAdmin();
       
       // Filter items based on permissions
-      for (const [key, item] of this._items) {
+      for (const [, item] of this._items) {
         const hasPermission = 
           (item.permissions.permissions.canView && canView) ||
           (item.permissions.permissions.canEdit && canEdit) ||
@@ -1358,7 +1354,7 @@ export class CollaborativeSidePanelPalette implements IDisposable {
     this._isDisposed = true;
     
     // Dispose all items
-    for (const [key, item] of this._items) {
+    for (const [, item] of this._items) {
       item.disposable.dispose();
     }
     
