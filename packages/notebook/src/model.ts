@@ -21,7 +21,7 @@
  * @version 1.0.0
  */
 
-import { Doc, Array as YArray, Map as YMap } from 'yjs';
+import { Doc } from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import { Awareness } from 'y-protocols/awareness';
@@ -30,15 +30,13 @@ import { ICellModel } from '@jupyterlab/cells';
 import { ISignal, Signal } from '@lumino/signaling';
 import { DisposableSet } from '@lumino/disposable';
 import { UUID } from '@lumino/coreutils';
-import { PageConfig } from '@jupyterlab/coreutils';
-import { ServiceManager } from '@jupyterlab/services';
 
 import { AwarenessService } from './collab/awareness';
 import { LockService } from './collab/locks';
 import { HistoryService } from './collab/history';
 import { CommentService } from './collab/comments';
 import { PermissionService } from './collab/permissions';
-import { ICommentService } from './tokens';
+import { IYjsNotebookProvider } from './tokens';
 
 /**
  * Enumeration of document change types for collaborative editing
@@ -166,7 +164,7 @@ export interface YjsNotebookProviderOptions {
  * a Yjs document with the notebook model, enabling real-time synchronization,
  * conflict resolution, and collaborative features.
  */
-export class YjsNotebookProvider {
+export class YjsNotebookProvider implements IYjsNotebookProvider {
   private _doc: Doc;
   private _awareness: Awareness;
   private _websocketProvider: WebsocketProvider | null = null;
@@ -187,8 +185,12 @@ export class YjsNotebookProvider {
   private _permissionService: PermissionService | null = null;
   
   // Signals for events
-  private _documentChangeSignal = new Signal<YjsNotebookProvider, CollaborativeDocumentChange>(this);
-  private _awarenessChangeSignal = new Signal<YjsNotebookProvider, {
+  private _documentChangeSignal = new Signal<IYjsNotebookProvider, {
+    type: string;
+    cellId?: string;
+    changes: any;
+  }>(this);
+  private _awarenessChangeSignal = new Signal<IYjsNotebookProvider, {
     users: Array<{userId: string; name: string; cursor?: any}>;
   }>(this);
   private _connectionChangeSignal = new Signal<YjsNotebookProvider, boolean>(this);
@@ -261,18 +263,29 @@ export class YjsNotebookProvider {
   get isConnected(): boolean {
     return this._isConnected;
   }
+
+  /**
+   * The last synchronization timestamp
+   */
+  get lastSync(): Date {
+    return this._lastSync;
+  }
   
   /**
    * Signal emitted when the document changes
    */
-  get onDocumentChange(): ISignal<YjsNotebookProvider, CollaborativeDocumentChange> {
+  get onDocumentChange(): ISignal<IYjsNotebookProvider, {
+    type: string;
+    cellId?: string;
+    changes: any;
+  }> {
     return this._documentChangeSignal;
   }
   
   /**
    * Signal emitted when awareness information changes
    */
-  get onAwarenessChange(): ISignal<YjsNotebookProvider, {
+  get onAwarenessChange(): ISignal<IYjsNotebookProvider, {
     users: Array<{userId: string; name: string; cursor?: any}>;
   }> {
     return this._awarenessChangeSignal;
@@ -433,16 +446,11 @@ export class YjsNotebookProvider {
     // Emit document change event
     this._documentChangeSignal.emit({
       type: DocumentChangeType.COLLABORATIVE_SYNC,
-      change: {
+      cellId: undefined,
+      changes: {
         cellCount: this._notebookModel!.cells.length,
-        metadata: this._notebookModel!.metadata
-      },
-      user: this._getCurrentUser(),
-      timestamp: new Date(),
-      version: this._documentVersion,
-      metadata: {
-        operation: 'full_sync',
-        cellCount: this._notebookModel!.cells.length
+        metadata: this._notebookModel!.metadata,
+        operation: 'full_sync'
       }
     });
   }
@@ -560,7 +568,7 @@ export class YjsNotebookProvider {
     
     // Initialize permission service
     this._permissionService = options.permissionService || 
-      new PermissionService(this._doc, this._sessionId);
+      new PermissionService(this._doc, this._sessionId, this._awarenessService!);
     
     // Initialize lock service
     if (options.enableLocking !== false && this._awarenessService && this._permissionService) {
@@ -626,16 +634,11 @@ export class YjsNotebookProvider {
       // Emit document change event
       this._documentChangeSignal.emit({
         type: DocumentChangeType.COLLABORATIVE_SYNC,
-        change: {
+        cellId: undefined,
+        changes: {
           update: update,
-          origin: origin
-        },
-        user: this._getCurrentUser(),
-        timestamp: new Date(),
-        version: this._documentVersion,
-        metadata: {
-          updateSize: update.length,
-          origin: origin
+          origin: origin,
+          updateSize: update.length
         }
       });
     });
@@ -668,7 +671,9 @@ export class YjsNotebookProvider {
     this._notebookModel.cells.changed.connect(this._onCellsChanged, this);
     
     // Listen for metadata changes
-    this._notebookModel.metadata.changed.connect(this._onMetadataChanged, this);
+    if (this._notebookModel.metadata && (this._notebookModel.metadata as any).changed) {
+      (this._notebookModel.metadata as any).changed.connect(this._onMetadataChanged, this);
+    }
     
     // Listen for content changes
     this._notebookModel.contentChanged.connect(this._onContentChanged, this);
@@ -683,7 +688,9 @@ export class YjsNotebookProvider {
     }
     
     this._notebookModel.cells.changed.disconnect(this._onCellsChanged, this);
-    this._notebookModel.metadata.changed.disconnect(this._onMetadataChanged, this);
+    if (this._notebookModel.metadata && (this._notebookModel.metadata as any).changed) {
+      (this._notebookModel.metadata as any).changed.disconnect(this._onMetadataChanged, this);
+    }
     this._notebookModel.contentChanged.disconnect(this._onContentChanged, this);
   }
   
@@ -759,7 +766,7 @@ export class YjsNotebookProvider {
     return {
       id: cell.id,
       type: cell.type,
-      source: cell.source,
+      source: (cell as any).source || '',
       metadata: cell.metadata,
       trusted: cell.trusted,
       // Add execution count for code cells
@@ -768,20 +775,7 @@ export class YjsNotebookProvider {
       outputs: (cell as any).outputs ? (cell as any).outputs.toJSON() : null
     };
   }
-  
-  /**
-   * Get current user information
-   */
-  private _getCurrentUser(): { id: string; name: string; avatar?: string } {
-    if (this._awarenessService) {
-      return this._awarenessService.getCurrentUser();
-    }
-    
-    return {
-      id: 'anonymous',
-      name: 'Anonymous User'
-    };
-  }
+
 }
 
 /**
@@ -1058,7 +1052,7 @@ export class CollaborativeNotebookModel {
   /**
    * Handle awareness changes
    */
-  private _onAwarenessChange(sender: YjsNotebookProvider, args: {
+  private _onAwarenessChange(sender: IYjsNotebookProvider, args: {
     users: Array<{userId: string; name: string; cursor?: any}>;
   }): void {
     // Track collaborator join/leave events
