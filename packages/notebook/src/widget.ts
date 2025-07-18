@@ -1154,3 +1154,9 @@ export class CollaborativeWidgetManager implements IDisposable {
     this._widgets.clear();
   }
 }
+
+/**
+ * Enhanced NotebookPanel with collaborative features
+ * Export as NotebookPanel for compatibility
+ */
+export { CollaborativeNotebookPanel as NotebookPanel };
