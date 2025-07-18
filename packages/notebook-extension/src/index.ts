@@ -50,42 +50,59 @@ import { LockService } from '../../notebook/src/collab/locks';
 import { UserPresenceWidget } from './components/userPresence';
 
 import { Token } from '@lumino/coreutils';
-import { Doc } from 'yjs';
-
 /**
  * Token for the comment system service
  */
-export const ICommentSystemService = new Token<CommentService>(
+export const ICommentSystemService = new Token<any>(
   '@jupyter-notebook/notebook-extension:comment-system'
 );
 
 /**
  * Token for the awareness service
  */
-export const IAwarenessService = new Token<AwarenessService>(
+export const IAwarenessService = new Token<any>(
   '@jupyter-notebook/notebook-extension:awareness'
 );
 
 /**
  * Token for the permission service
  */
-export const IPermissionService = new Token<PermissionService>(
+export const IPermissionService = new Token<any>(
   '@jupyter-notebook/notebook-extension:permissions'
 );
 
 /**
  * Token for the history service
  */
-export const IHistoryService = new Token<HistoryService>(
+export const IHistoryService = new Token<any>(
   '@jupyter-notebook/notebook-extension:history'
 );
 
 /**
  * Token for the lock service
  */
-export const ILockService = new Token<LockService>(
+export const ILockService = new Token<any>(
   '@jupyter-notebook/notebook-extension:locks'
 );
+
+/**
+ * Token for the comment system widget
+ */
+export const ICommentSystemWidget = new Token<any>(
+  '@jupyter-notebook/notebook-extension:comment-system-widget'
+);
+
+import { Doc } from 'yjs';
+
+
+
+
+
+
+
+
+
+
 
 /**
  * Token for the comment system widget
@@ -161,16 +178,14 @@ const commentSystem: JupyterFrontEndPlugin<CommentService> = {
     // In a real implementation, this would be provided by the collaboration backend
     const doc = new Doc();
     
-    // Initialize collaborative services using factory pattern
-    const awarenessService = AwarenessService.create ? AwarenessService.create() : new AwarenessService();
-    const permissionService = PermissionService.create ? PermissionService.create() : new PermissionService();
-    const historyService = HistoryService.create ? HistoryService.create() : new HistoryService();
-    const lockService = LockService.create ? LockService.create() : new LockService();
+    // Initialize collaborative services
+    const awarenessService = new AwarenessService(doc, null);
+    const permissionService = new PermissionService(doc, awarenessService, null);
+    const historyService = new HistoryService(doc, awarenessService, permissionService);
+    const lockService = new LockService(doc, awarenessService, permissionService);
     
     // Create comment service
-    const commentService = CommentService.create ? 
-      CommentService.create(doc, awarenessService, permissionService) :
-      new CommentService(doc, awarenessService, permissionService);
+    const commentService = new CommentService(doc, awarenessService, permissionService);
     
     // Initialize services
     const initializeServices = async () => {
@@ -214,7 +229,7 @@ const commentSystem: JupyterFrontEndPlugin<CommentService> = {
           
           // Get the active cell or first cell for comment system
           const activeCell = notebook.content.activeCell?.model || 
-                            (notebook.content.model?.cells.length > 0 ? 
+                            (notebook.content.model?.cells?.length > 0 ? 
                              notebook.content.model.cells.get(0) : null);
           
           // Only create comment widget if we have a valid cell
@@ -898,21 +913,16 @@ const plugins: JupyterFrontEndPlugin<any>[] = [
 
 export default plugins;
 
-// Export tokens and interfaces for extension integration
+
+
+
+
+// Export tokens for extension integration
 export {
   ICommentSystemService,
   IAwarenessService,
   IPermissionService,
   IHistoryService,
   ILockService,
-  ICommentSystemWidget,
-  CommentService,
-  AwarenessService,
-  PermissionService,
-  HistoryService,
-  LockService,
-  CommentSystemWidget,
-  HistoryViewerWidget,
-  CellLockIndicatorWidget,
-  UserPresenceWidget
+  ICommentSystemWidget
 };
