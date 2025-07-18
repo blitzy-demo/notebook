@@ -27,10 +27,10 @@ import { Time } from '@jupyterlab/coreutils';
 import { ISignal } from '@lumino/signaling';
 
 // Import collaborative services
-import { AwarenessService } from '../../../notebook/src/collab/awareness';
-import { PermissionService } from '../../../notebook/src/collab/permissions';
-import { HistoryService } from '../../../notebook/src/collab/history';
-import { CommentService } from '../../../notebook/src/collab/comments';
+import { AwarenessService } from '@jupyter-notebook/notebook/lib/collab/awareness';
+import { PermissionService } from '@jupyter-notebook/notebook/lib/collab/permissions';
+import { HistoryService } from '@jupyter-notebook/notebook/lib/collab/history';
+import { CommentService } from '@jupyter-notebook/notebook/lib/collab/comments';
 
 // Import UI components
 import { PermissionsDialog } from './permissionsDialog';
