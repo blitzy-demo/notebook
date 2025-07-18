@@ -27,7 +27,7 @@ import { IDisposable } from '@lumino/disposable';
 import { CellOperations } from './celloperations';
 import { LockService } from './collab/locks';
 import { AwarenessService } from './collab/awareness';
-import { CommentService } from './collab/comments';
+import { CommentService, CommentType } from './collab/comments';
 import { YjsNotebookProvider } from './model';
 
 /**
@@ -469,7 +469,9 @@ export class CellPresenceIndicator extends Widget {
         userElement.textContent = user.name.charAt(0).toUpperCase();
       }
       
-      this._presenceContainer.appendChild(userElement);
+      if (this._presenceContainer) {
+        this._presenceContainer.appendChild(userElement);
+      }
     });
   }
 
@@ -493,7 +495,9 @@ export class CellPresenceIndicator extends Widget {
         cursorElement.style.top = `${position.line * 20}px`;
         cursorElement.style.left = `${position.column * 8}px`;
         cursorElement.title = `${user.name}'s cursor`;
-        this._cursorOverlay.appendChild(cursorElement);
+        if (this._cursorOverlay) {
+          this._cursorOverlay.appendChild(cursorElement);
+        }
       }
     });
   }
@@ -571,9 +575,9 @@ export class CellCommentWidget extends Widget {
    * @param content - The comment content
    * @param parentId - Optional parent comment ID for replies
    */
-  async addComment(content: string, parentId?: string): Promise<void> {
+  async addComment(content: string, type?: CommentType): Promise<void> {
     try {
-      await this._commentService.addComment(this._cellId, content, parentId);
+      await this._commentService.addComment(this._cellId, content, type);
       this._refreshComments();
     } catch (error) {
       console.error('Error adding comment:', error);
@@ -588,7 +592,7 @@ export class CellCommentWidget extends Widget {
    */
   async replyToComment(commentId: string, content: string): Promise<void> {
     try {
-      await this._commentService.addComment(this._cellId, content, commentId);
+      await this._commentService.replyToComment(commentId, content);
       this._refreshComments();
     } catch (error) {
       console.error('Error replying to comment:', error);
@@ -786,11 +790,15 @@ export class CellCommentWidget extends Widget {
       timestampElement.className = 'jp-CellCommentTimestamp';
       timestampElement.textContent = comment.timestamp.toLocaleString();
       
-      commentElement.appendChild(authorElement);
-      commentElement.appendChild(contentElement);
-      commentElement.appendChild(timestampElement);
+      if (commentElement && authorElement && contentElement && timestampElement) {
+        commentElement.appendChild(authorElement);
+        commentElement.appendChild(contentElement);
+        commentElement.appendChild(timestampElement);
+      }
       
-      this._commentContainer.appendChild(commentElement);
+      if (this._commentContainer && commentElement) {
+        this._commentContainer.appendChild(commentElement);
+      }
     });
   }
 }
