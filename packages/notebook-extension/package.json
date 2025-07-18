@@ -1,7 +1,7 @@
 {
   "name": "@jupyter-notebook/notebook-extension",
   "version": "7.5.0-alpha.0",
-  "description": "Jupyter Notebook - Notebook Extension",
+  "description": "Jupyter Notebook - Notebook Extension with real-time collaborative editing capabilities",
   "homepage": "https://github.com/jupyter/notebook",
   "bugs": {
     "url": "https://github.com/jupyter/notebook/issues"
@@ -14,7 +14,8 @@
   "author": "Project Jupyter",
   "sideEffects": [
     "style/**/*.css",
-    "style/index.js"
+    "style/index.js",
+    "style/collaboration/**/*.css"
   ],
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -49,7 +50,11 @@
     "@lumino/polling": "^2.1.4",
     "@lumino/widgets": "^2.7.1",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "y-indexeddb": "^9.0.9",
+    "y-protocols": "^1.0.5",
+    "y-websocket": "^1.5.0",
+    "yjs": "^13.5.40"
   },
   "devDependencies": {
     "rimraf": "^3.0.2",

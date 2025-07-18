@@ -1,0 +1,130 @@
+/*-----------------------------------------------------------------------------
+| Copyright (c) Jupyter Development Team.
+| Distributed under the terms of the Modified BSD License.
+|----------------------------------------------------------------------------*/
+
+/**
+ * Main stylesheet entry point for the collaborative notebook package.
+ * 
+ * This file serves as the primary stylesheet entry point that imports all
+ * necessary CSS modules for collaborative notebook features while maintaining
+ * proper CSS cascade order for optimal styling inheritance and specificity.
+ * 
+ * The import order is optimized to ensure:
+ * 1. External JupyterLab dependencies are loaded first for base styling
+ * 2. CSS custom properties (variables) are available to all components
+ * 3. Core layout and base styles establish the foundation
+ * 4. Collaborative feature styles build upon the base styles
+ * 5. Specific component styles override general styles appropriately
+ */
+
+/* =========================================================================
+ * EXTERNAL JUPYTERLAB DEPENDENCIES
+ * ========================================================================= */
+
+/* Core JupyterLab application styling - provides base layout, theming, and 
+ * UI component foundations required for notebook shell integration */
+@import url('~@jupyterlab/application/style/index.css');
+
+/* JupyterLab main menu styling - provides consistent menu bar appearance 
+ * and behavior for notebook application menu integration */
+@import url('~@jupyterlab/mainmenu/style/index.css');
+
+/* JupyterLab UI components styling - provides consistent styling for buttons,
+ * dialogs, widgets, and other interactive elements used in collaborative 
+ * notebook interface */
+@import url('~@jupyterlab/ui-components/style/index.css');
+
+/* =========================================================================
+ * CORE COLLABORATIVE THEMING AND VARIABLES
+ * ========================================================================= */
+
+/* CSS custom properties for collaborative theming - must be imported first
+ * to ensure variables are available to all subsequent stylesheets */
+@import url('./variables.css');
+
+/* =========================================================================
+ * FOUNDATIONAL LAYOUT AND BASE STYLES
+ * ========================================================================= */
+
+/* Consolidated base stylesheet providing core layout, responsive design,
+ * and theming foundation for collaborative notebook features */
+@import url('./base.css');
+
+/* Side panel styling for collaborative notebook features including history 
+ * viewer, permissions dialog, and other collaborative components integrated 
+ * into the application shell side panels */
+@import url('./sidepanel.css');
+
+/* =========================================================================
+ * COLLABORATIVE FEATURE COMPONENTS
+ * ========================================================================= */
+
+/* Core collaborative UI component styling including collaboration bar,
+ * user presence indicators, cell lock indicators, and responsive design
+ * support for multi-user editing features */
+@import url('./collaboration.css');
+
+/* User presence and awareness styling for collaborative editing including
+ * avatar display, status indicators, cursor highlighting, and accessibility
+ * support for multi-user sessions */
+@import url('./userPresence.css');
+
+/* Comment system styling for collaborative notebooks including comment
+ * threads, badges, reply areas, and visual threading with responsive
+ * design support */
+@import url('./comments.css');
+
+/* =========================================================================
+ * COLLABORATIVE STYLING ENHANCEMENTS
+ * ========================================================================= */
+
+/**
+ * Global enhancements for collaborative features that override or extend
+ * base styles for optimal collaborative editing experience.
+ */
+
+/* Ensure collaborative elements maintain proper visibility and accessibility */
+.jp-Notebook.jp-collaborative {
+  /* Enhanced focus management for collaborative editing */
+  --jp-content-font-size1: var(--jp-ui-font-size1);
+  --jp-content-line-height: 1.5;
+  
+  /* Improved contrast for multi-user scenarios */
+  --jp-editor-selected-background: rgba(56, 128, 255, 0.1);
+  --jp-editor-selected-focused-background: rgba(56, 128, 255, 0.2);
+}
+
+/* High contrast mode support for collaborative elements */
+@media (prefers-contrast: high) {
+  .jp-Notebook.jp-collaborative {
+    --jp-collab-presence-indicator-color: var(--jp-collab-focus-ring-color);
+    --jp-comment-badge-color: var(--jp-collab-focus-ring-color);
+    --jp-locked-cell-border-color: var(--jp-collab-focus-ring-color);
+  }
+}
+
+/* Reduced motion support for collaborative animations */
+@media (prefers-reduced-motion: reduce) {
+  .jp-Notebook.jp-collaborative {
+    --jp-collab-transition-duration: 0s;
+    --jp-collab-pulse-duration: 0s;
+    --jp-collab-fade-duration: 0s;
+    --jp-lock-indicator-pulse-duration: 0s;
+    --jp-presence-enter-duration: 0s;
+    --jp-presence-exit-duration: 0s;
+    --jp-presence-pulse-duration: 0s;
+  }
+}
+
+/* Print mode optimization - hide collaborative elements when printing */
+@media print {
+  .jp-CollaborationBar,
+  .jp-PresenceList,
+  .jp-CommentBadge,
+  .jp-LockIndicator,
+  .jp-UserCursor,
+  .jp-UserSelection {
+    display: none !important;
+  }
+}

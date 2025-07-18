@@ -3,4 +3,23 @@
   --jp-notebook-padding-offset: 20px;
 
   --jp-kernel-status-padding: 5px;
+
+  /* Collaboration Features */
+  --jp-collab-avatar-size: 24px;
+  --jp-collab-presence-indicator-color: #3880ff;
+  --jp-collab-bar-height: 40px;
+  --jp-collab-bar-spacing: 8px;
+
+  /* Per-user cursor colors */
+  --jp-cursor-color-user-1: #3880ff;
+  --jp-cursor-color-user-2: #10dc60;
+  --jp-cursor-color-user-3: #ffce00;
+  --jp-cursor-color-user-4: #f04141;
+
+  /* Cell locking */
+  --jp-locked-cell-border-color: rgba(255, 69, 0, 0.5);
+
+  /* Comment system */
+  --jp-comment-badge-color: #3880ff;
+  --jp-resolved-comment-badge-color: #10dc60;
 }

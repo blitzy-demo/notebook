@@ -1,0 +1,319 @@
+/*-----------------------------------------------------------------------------
+| Copyright (c) Jupyter Development Team.
+| Distributed under the terms of the Modified BSD License.
+|----------------------------------------------------------------------------*/
+
+/*
+ * This file contains CSS custom properties (variables) for collaborative
+ * Jupyter Notebook theming. It consolidates variables from both the
+ * notebook-extension and application packages while adding new variables
+ * for collaborative features.
+ */
+
+:root {
+  /* =========================================================================
+   * CORE LAYOUT VARIABLES
+   * ========================================================================= */
+  
+  /* Notebook layout dimensions */
+  --jp-notebook-max-width: 1000px;
+  --jp-notebook-padding: 10px;
+  --jp-notebook-toolbar-margin-bottom: 20px;
+  --jp-notebook-padding-offset: 20px;
+  
+  /* Kernel status and execution indicators */
+  --jp-kernel-status-padding: 5px;
+  
+  /* Application shell layout */
+  --jp-private-topbar-height: 28px;
+  --jp-private-sidebar-tab-width: 240px;
+  --jp-sidebar-min-width: 240px;
+  
+  /* Material Design color overrides */
+  --md-grey-800: #323232;
+  
+  /* Standard JupyterLab layout colors */
+  --jp-layout-color0: #ffffff;
+  --jp-layout-color1: #f5f5f5;
+  --jp-layout-color2: #e6e6e6;
+  --jp-layout-color3: #d9d9d9;
+  --jp-layout-color4: #cccccc;
+  --jp-inverse-layout-color0: #000000;
+  --jp-inverse-layout-color1: #ffffff;
+  --jp-inverse-layout-color2: #f2f2f2;
+  --jp-inverse-layout-color3: #e6e6e6;
+  --jp-inverse-layout-color4: #cccccc;
+  
+  /* Standard JupyterLab UI font colors */
+  --jp-ui-font-color0: #000000;
+  --jp-ui-font-color1: #3f3f3f;
+  --jp-ui-font-color2: #5a5a5a;
+  --jp-ui-font-color3: #737373;
+  --jp-ui-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+  --jp-ui-font-size0: 11px;
+  --jp-ui-font-size1: 13px;
+  --jp-ui-font-size2: 14px;
+  --jp-ui-font-size3: 16px;
+  
+  /* Standard JupyterLab border colors */
+  --jp-border-color0: #e0e0e0;
+  --jp-border-color1: #d0d0d0;
+  --jp-border-color2: #b0b0b0;
+  --jp-border-color3: #a0a0a0;
+  --jp-border-width: 1px;
+  --jp-border-radius: 2px;
+  
+  /* =========================================================================
+   * COLLABORATIVE THEMING VARIABLES
+   * ========================================================================= */
+  
+  /* User presence and awareness */
+  --jp-collab-avatar-size: 24px;
+  --jp-collab-presence-indicator-color: #3880ff;
+  
+  /* Multi-user cursor colors for collaborative editing */
+  --jp-cursor-color-user-1: #3880ff;
+  --jp-cursor-color-user-2: #ffb347;
+  --jp-cursor-color-user-3: #4cd964;
+  --jp-cursor-color-user-4: #ff3b30;
+  
+  /* Cell locking and editing indicators */
+  --jp-locked-cell-border-color: rgba(255, 69, 0, 0.5);
+  
+  /* Comment and review system */
+  --jp-comment-badge-color: #3880ff;
+  --jp-resolved-comment-badge-color: #34c759;
+  --jp-collab-comment-badge-size: 16px;
+  
+  /* =========================================================================
+   * RESPONSIVE DESIGN VARIABLES
+   * ========================================================================= */
+  
+  /* Mobile and tablet breakpoints for collaborative features */
+  --jp-collab-mobile-breakpoint: 760px;
+  --jp-collab-tablet-breakpoint: 1024px;
+  
+  /* Responsive sizing for collaborative elements */
+  --jp-collab-avatar-size-mobile: 20px;
+  --jp-collab-comment-badge-size-mobile: 14px;
+  --jp-collab-presence-bar-height: 40px;
+  --jp-collab-presence-bar-height-mobile: 32px;
+  
+  /* =========================================================================
+   * ANIMATION AND TRANSITION VARIABLES
+   * ========================================================================= */
+  
+  /* Collaborative UI animations */
+  --jp-collab-transition-duration: 0.2s;
+  --jp-collab-pulse-duration: 1.5s;
+  --jp-collab-fade-duration: 0.3s;
+  
+  /* Lock indicator animation timing */
+  --jp-lock-indicator-pulse-duration: 0.8s;
+  --jp-lock-indicator-fade-duration: 0.25s;
+  
+  /* User presence animation timing */
+  --jp-presence-enter-duration: 0.3s;
+  --jp-presence-exit-duration: 0.2s;
+  --jp-presence-pulse-duration: 2s;
+  
+  /* =========================================================================
+   * ACCESSIBILITY AND CONTRAST VARIABLES
+   * ========================================================================= */
+  
+  /* High contrast mode overrides for collaborative elements */
+  --jp-collab-high-contrast-border: 2px solid;
+  --jp-collab-focus-ring-color: #005fcc;
+  --jp-collab-focus-ring-width: 2px;
+  
+  /* Alternative indicators for color-blind users */
+  --jp-collab-pattern-opacity: 0.2;
+  --jp-collab-texture-scale: 1.0;
+  
+  /* =========================================================================
+   * Z-INDEX LAYERING FOR COLLABORATIVE ELEMENTS
+   * ========================================================================= */
+  
+  /* Collaborative UI element stacking order */
+  --jp-collab-presence-bar-z-index: 100;
+  --jp-collab-comment-badge-z-index: 50;
+  --jp-collab-lock-indicator-z-index: 25;
+  --jp-collab-cursor-z-index: 75;
+  --jp-collab-selection-z-index: 10;
+  
+  /* =========================================================================
+   * NOTIFICATION AND FEEDBACK VARIABLES
+   * ========================================================================= */
+  
+  /* Collaborative notification styling */
+  --jp-collab-notification-bg: rgba(56, 128, 255, 0.1);
+  --jp-collab-notification-border: 1px solid rgba(56, 128, 255, 0.3);
+  --jp-collab-notification-text-color: #3880ff;
+  
+  /* Error and warning colors for collaborative conflicts */
+  --jp-collab-error-color: #ff3b30;
+  --jp-collab-warning-color: #ffb347;
+  --jp-collab-success-color: #4cd964;
+  
+  /* =========================================================================
+   * COLLABORATIVE TOOLBAR AND MENU VARIABLES
+   * ========================================================================= */
+  
+  /* Collaboration bar dimensions and spacing */
+  --jp-collab-bar-height: 48px;
+  --jp-collab-bar-padding: 8px 16px;
+  --jp-collab-bar-border-bottom: 1px solid var(--jp-border-color1);
+  
+  /* Collaboration menu and dropdown styling */
+  --jp-collab-menu-item-height: 32px;
+  --jp-collab-menu-item-padding: 4px 12px;
+  --jp-collab-menu-border-radius: 4px;
+  
+  /* User avatar grouping and overflow handling */
+  --jp-collab-avatar-group-spacing: 4px;
+  --jp-collab-avatar-overlap: 8px;
+  --jp-collab-avatar-border-width: 2px;
+  --jp-collab-avatar-border-color: var(--jp-layout-color1);
+  
+  /* =========================================================================
+   * DARK MODE COLLABORATIVE OVERRIDES
+   * ========================================================================= */
+  
+  /* Dark theme adjustments for collaborative elements */
+  --jp-collab-dark-presence-indicator: #4da6ff;
+  --jp-collab-dark-comment-badge: #4da6ff;
+  --jp-collab-dark-resolved-comment: #40d968;
+  --jp-collab-dark-locked-cell-border: rgba(255, 99, 71, 0.6);
+  
+  /* Dark mode cursor colors with better contrast */
+  --jp-collab-dark-cursor-user-1: #4da6ff;
+  --jp-collab-dark-cursor-user-2: #ffc266;
+  --jp-collab-dark-cursor-user-3: #5ce670;
+  --jp-collab-dark-cursor-user-4: #ff5252;
+  
+  /* Dark mode layout colors */
+  --jp-dark-layout-color0: #111111;
+  --jp-dark-layout-color1: #1e1e1e;
+  --jp-dark-layout-color2: #2d2d2d;
+  --jp-dark-layout-color3: #3f3f3f;
+  --jp-dark-layout-color4: #5a5a5a;
+  --jp-dark-inverse-layout-color0: #ffffff;
+  --jp-dark-inverse-layout-color1: #f2f2f2;
+  --jp-dark-inverse-layout-color2: #e6e6e6;
+  --jp-dark-inverse-layout-color3: #d9d9d9;
+  --jp-dark-inverse-layout-color4: #cccccc;
+  
+  /* Dark mode UI font colors */
+  --jp-dark-ui-font-color0: #ffffff;
+  --jp-dark-ui-font-color1: #f2f2f2;
+  --jp-dark-ui-font-color2: #e6e6e6;
+  --jp-dark-ui-font-color3: #d9d9d9;
+  
+  /* Dark mode border colors */
+  --jp-dark-border-color0: #3f3f3f;
+  --jp-dark-border-color1: #5a5a5a;
+  --jp-dark-border-color2: #737373;
+  --jp-dark-border-color3: #8c8c8c;
+}
+
+/* =========================================================================
+ * MEDIA QUERIES FOR RESPONSIVE COLLABORATIVE FEATURES
+ * ========================================================================= */
+
+/* Mobile device adaptations */
+@media only screen and (max-width: 760px) {
+  :root {
+    /* Reduce collaborative element sizes for mobile */
+    --jp-collab-avatar-size: var(--jp-collab-avatar-size-mobile);
+    --jp-collab-comment-badge-size: var(--jp-collab-comment-badge-size-mobile);
+    --jp-collab-presence-bar-height: var(--jp-collab-presence-bar-height-mobile);
+    
+    /* Adjust spacing for touch targets */
+    --jp-collab-bar-padding: 6px 12px;
+    --jp-collab-menu-item-height: 36px;
+    --jp-collab-menu-item-padding: 6px 12px;
+    
+    /* Optimize avatar grouping for smaller screens */
+    --jp-collab-avatar-group-spacing: 2px;
+    --jp-collab-avatar-overlap: 12px;
+  }
+}
+
+/* Tablet device adaptations */
+@media only screen and (min-width: 761px) and (max-width: 1024px) {
+  :root {
+    /* Intermediate sizing for tablet displays */
+    --jp-collab-avatar-size: 22px;
+    --jp-collab-comment-badge-size: 15px;
+    --jp-collab-presence-bar-height: 36px;
+    
+    /* Adjust collaborative bar for tablet layout */
+    --jp-collab-bar-padding: 7px 14px;
+    --jp-collab-avatar-group-spacing: 3px;
+    --jp-collab-avatar-overlap: 10px;
+  }
+}
+
+/* High DPI display adaptations */
+@media only screen and (-webkit-min-device-pixel-ratio: 2),
+       only screen and (min-resolution: 192dpi) {
+  :root {
+    /* Enhance visual elements for high DPI displays */
+    --jp-collab-avatar-border-width: 1px;
+    --jp-collab-focus-ring-width: 1px;
+    --jp-collab-high-contrast-border: 1px solid;
+  }
+}
+
+/* Dark mode adaptations */
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Override layout colors for dark mode */
+    --jp-layout-color0: var(--jp-dark-layout-color0);
+    --jp-layout-color1: var(--jp-dark-layout-color1);
+    --jp-layout-color2: var(--jp-dark-layout-color2);
+    --jp-layout-color3: var(--jp-dark-layout-color3);
+    --jp-layout-color4: var(--jp-dark-layout-color4);
+    --jp-inverse-layout-color0: var(--jp-dark-inverse-layout-color0);
+    --jp-inverse-layout-color1: var(--jp-dark-inverse-layout-color1);
+    --jp-inverse-layout-color2: var(--jp-dark-inverse-layout-color2);
+    --jp-inverse-layout-color3: var(--jp-dark-inverse-layout-color3);
+    --jp-inverse-layout-color4: var(--jp-dark-inverse-layout-color4);
+    
+    /* Override UI font colors for dark mode */
+    --jp-ui-font-color0: var(--jp-dark-ui-font-color0);
+    --jp-ui-font-color1: var(--jp-dark-ui-font-color1);
+    --jp-ui-font-color2: var(--jp-dark-ui-font-color2);
+    --jp-ui-font-color3: var(--jp-dark-ui-font-color3);
+    
+    /* Override border colors for dark mode */
+    --jp-border-color0: var(--jp-dark-border-color0);
+    --jp-border-color1: var(--jp-dark-border-color1);
+    --jp-border-color2: var(--jp-dark-border-color2);
+    --jp-border-color3: var(--jp-dark-border-color3);
+    
+    /* Override collaborative colors for dark mode */
+    --jp-collab-presence-indicator-color: var(--jp-collab-dark-presence-indicator);
+    --jp-comment-badge-color: var(--jp-collab-dark-comment-badge);
+    --jp-resolved-comment-badge-color: var(--jp-collab-dark-resolved-comment);
+    --jp-locked-cell-border-color: var(--jp-collab-dark-locked-cell-border);
+    --jp-cursor-color-user-1: var(--jp-collab-dark-cursor-user-1);
+    --jp-cursor-color-user-2: var(--jp-collab-dark-cursor-user-2);
+    --jp-cursor-color-user-3: var(--jp-collab-dark-cursor-user-3);
+    --jp-cursor-color-user-4: var(--jp-collab-dark-cursor-user-4);
+  }
+}
+
+/* =========================================================================
+ * PRINT MEDIA OVERRIDES
+ * ========================================================================= */
+
+/* Hide collaborative elements in print mode */
+@media print {
+  :root {
+    --jp-collab-presence-bar-height: 0;
+    --jp-collab-bar-height: 0;
+    --jp-collab-avatar-size: 0;
+    --jp-collab-comment-badge-size: 0;
+  }
+}
