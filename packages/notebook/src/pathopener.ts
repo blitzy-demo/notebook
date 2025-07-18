@@ -28,7 +28,7 @@ import { ISignal, Signal } from '@lumino/signaling';
 
 // Internal imports
 import { IPermissionService, ICollaborativeNotebookPathOpener } from './tokens';
-import { PermissionService } from './collab/permissions';
+// import { PermissionService } from './collab/permissions'; // Unused import
 import { NotebookApp } from './app';
 import { AwarenessService } from './collab/awareness';
 
@@ -127,8 +127,8 @@ export class CollaborativeNotebookPathOpener implements ICollaborativeNotebookPa
   // Configuration and state
   private _collaborativeMode: boolean = true;
   private _defaultPermissions: 'view' | 'edit' | 'admin' = 'edit';
-  private _maxRetries: number = 3;
-  private _retryDelay: number = 1000;
+  // private _maxRetries: number = 3; // Reserved for future use
+  // private _retryDelay: number = 1000; // Reserved for future use
   
   /**
    * Create a new collaborative notebook path opener
@@ -154,7 +154,7 @@ export class CollaborativeNotebookPathOpener implements ICollaborativeNotebookPa
     
     // Add services to disposables
     this._disposables.add(this._permissionService);
-    this._disposables.add(this._notebookApp);
+    // Note: NotebookApp may not implement IDisposable, so we don't add it to disposables
     this._disposables.add(this._awarenessService);
     
     // Initialize event handlers
@@ -205,13 +205,13 @@ export class CollaborativeNotebookPathOpener implements ICollaborativeNotebookPa
     const {
       prefix,
       path,
-      searchParams,
+      // searchParams, // Reserved for future use
       target,
       features,
       collaborative = this._collaborativeMode,
       sessionId,
       permissions,
-      userContext
+      // userContext // Reserved for future use
     } = options;
     
     try {
@@ -284,7 +284,7 @@ export class CollaborativeNotebookPathOpener implements ICollaborativeNotebookPa
       const collaborativeSession = await this._getOrCreateCollaborativeSession(path, sessionId, permissions);
       
       // Update user status
-      const currentUser = this._awarenessService.getCurrentUser();
+      // const currentUser = this._awarenessService.getCurrentUser(); // Reserved for future use
       this._awarenessService.updateUserStatus('active' as any); // Cast to match the enum
       
       // Construct collaborative URL
@@ -359,7 +359,7 @@ export class CollaborativeNotebookPathOpener implements ICollaborativeNotebookPa
       }
       
       // Determine user's role
-      const userRole = await this._permissionService.getUserRole();
+      // const userRole = await this._permissionService.getUserRole(); // Reserved for future use
       
       // Check if user can edit
       const canEdit = await this._permissionService.canEdit();
@@ -431,7 +431,10 @@ export class CollaborativeNotebookPathOpener implements ICollaborativeNotebookPa
    */
   private _setupEventHandlers(): void {
     // Listen for permission changes
-    this._permissionService.onPermissionChanged?.connect(this._onPermissionChanged, this);
+    // Note: onPermissionChanged may not be available on all permission service implementations
+    if ('onPermissionChanged' in this._permissionService && this._permissionService.onPermissionChanged) {
+      this._permissionService.onPermissionChanged.connect(this._onPermissionChanged, this);
+    }
     
     // Listen for user presence changes
     this._awarenessService.onUserJoin.connect(this._onUserJoin, this);
@@ -479,7 +482,7 @@ export class CollaborativeNotebookPathOpener implements ICollaborativeNotebookPa
           sessionId: sessionInfo.sessionId,
           documentPath: sessionInfo.notebookPath,
           participants: sessionInfo.participants,
-          createdAt: sessionInfo.joinedAt,
+          createdAt: (sessionInfo as any).joinedAt || new Date(), // Handle potential missing property
           isActive: true
         };
       } catch (error) {
@@ -551,7 +554,7 @@ export class CollaborativeNotebookPathOpener implements ICollaborativeNotebookPa
         sessionId: session.sessionId,
         documentPath: session.documentPath,
         userId: currentUser.userId,
-        openedAt: new Date(),
+        openedAt: new Date().toISOString(),
         isActive: true
       });
       
@@ -574,9 +577,9 @@ export class CollaborativeNotebookPathOpener implements ICollaborativeNotebookPa
         sessionId: session.sessionId,
         documentPath: session.documentPath,
         participants: session.participants,
-        createdAt: session.createdAt,
+        createdAt: session.createdAt.toISOString(),
         isActive: session.isActive,
-        lastAccessed: new Date()
+        lastAccessed: new Date().toISOString()
       });
     } catch (error) {
       console.error('Error saving session state:', error);
