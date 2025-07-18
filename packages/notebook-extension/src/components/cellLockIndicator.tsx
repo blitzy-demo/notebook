@@ -22,8 +22,7 @@ import { ReactWidget } from '@jupyterlab/apputils';
 import { ICellModel } from '@jupyterlab/cells';
 import { ITranslator } from '@jupyterlab/translation';
 import { Time } from '@jupyterlab/coreutils';
-import { unlockIcon } from '@jupyterlab/ui-components';
-import { ISignal } from '@lumino/signaling';
+import { lockIcon } from '@jupyterlab/ui-components';
 
 import { LockService } from '../../../notebook/src/collab/locks';
 import { AwarenessService } from '../../../notebook/src/collab/awareness';
@@ -114,7 +113,6 @@ export function CellLockIndicator(props: ICellLockIndicatorProps): JSX.Element {
   const [lockState, setLockState] = useState<CellLockState>(CellLockState.UNLOCKED);
   const [isProcessing, setIsProcessing] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<number>(0);
-  const [currentUser, setCurrentUser] = useState<{ userId: string; name: string } | null>(null);
 
   /**
    * Update lock status based on current cell state
@@ -128,7 +126,6 @@ export function CellLockIndicator(props: ICellLockIndicatorProps): JSX.Element {
       const cellId = cellModel.id;
       const isLocked = await lockService.isLocked(cellId);
       const lockOwner = await lockService.getLockOwner(cellId);
-      const canLock = await lockService.canLock();
       const currentUserInfo = awarenessService.getCurrentUser();
 
       const newStatus: ICellLockStatus = {
@@ -160,9 +157,6 @@ export function CellLockIndicator(props: ICellLockIndicatorProps): JSX.Element {
       } else {
         setTimeRemaining(0);
       }
-
-      // Update current user info
-      setCurrentUser(currentUserInfo);
 
       // Notify parent of lock state change
       if (onLockChange) {
@@ -313,10 +307,10 @@ export function CellLockIndicator(props: ICellLockIndicatorProps): JSX.Element {
   /**
    * Get the lock indicator icon
    */
-  const getLockIcon = (): JSX.Element => {
+  const getLockIcon = (): React.ReactNode => {
     switch (lockState) {
       case CellLockState.UNLOCKED:
-        return unlockIcon.react({ className: 'jp-cell-lock-icon' });
+        return lockIcon.react({ className: 'jp-cell-lock-icon jp-cell-lock-icon-unlock' });
       case CellLockState.LOCKED_BY_SELF:
         return <span className="jp-cell-lock-icon jp-cell-lock-icon-self">🔒</span>;
       case CellLockState.LOCKED_BY_OTHER:
@@ -328,7 +322,7 @@ export function CellLockIndicator(props: ICellLockIndicatorProps): JSX.Element {
       case CellLockState.CONFLICT:
         return <span className="jp-cell-lock-icon jp-cell-lock-icon-conflict">⚠️</span>;
       default:
-        return unlockIcon.react({ className: 'jp-cell-lock-icon' });
+        return lockIcon.react({ className: 'jp-cell-lock-icon' });
     }
   };
 
@@ -344,7 +338,7 @@ export function CellLockIndicator(props: ICellLockIndicatorProps): JSX.Element {
       case CellLockState.LOCKED_BY_OTHER:
         const ownerName = lockStatus.ownerName || trans.__('Unknown user');
         const timeLeft = timeRemaining > 0 ? 
-          ` (${Time.formatHuman(timeRemaining)} remaining)` : '';
+          ` (${Time.formatHuman(new Date(timeRemaining))} remaining)` : '';
         return trans.__('Cell is locked by %1%2', ownerName, timeLeft);
       case CellLockState.ACQUIRING_LOCK:
         return trans.__('Acquiring lock...');
@@ -513,37 +507,7 @@ export class CellLockIndicatorWidget extends ReactWidget {
     this.addClass('jp-cell-lock-indicator-widget');
   }
 
-  /**
-   * Create a new cell lock indicator widget
-   * 
-   * @param cellModel - The cell model to display lock indicator for
-   * @param lockService - Service for managing cell locks
-   * @param awarenessService - Service for user awareness and presence
-   * @param permissionService - Service for managing permissions
-   * @param translator - Translation service for internationalization
-   * @param options - Optional configuration options
-   * @returns A new cell lock indicator widget instance
-   */
-  static create(
-    cellModel: ICellModel,
-    lockService: LockService,
-    awarenessService: AwarenessService,
-    permissionService: PermissionService,
-    translator: ITranslator,
-    options?: {
-      onLockChange?: (cellId: string, isLocked: boolean) => void;
-      onConflictDetected?: (cellId: string, conflictInfo: any) => void;
-    }
-  ): CellLockIndicatorWidget {
-    return new CellLockIndicatorWidget(
-      cellModel,
-      lockService,
-      awarenessService,
-      permissionService,
-      translator,
-      options
-    );
-  }
+
 
   /**
    * Update the widget with new cell model or services
@@ -578,7 +542,7 @@ export class CellLockIndicatorWidget extends ReactWidget {
   /**
    * Render the React component
    */
-  render(): JSX.Element {
+  render(): React.ReactNode {
     return React.createElement(CellLockIndicator, {
       cellModel: this._cellModel,
       lockService: this._lockService,
