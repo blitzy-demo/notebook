@@ -114,7 +114,6 @@ export class CollaborativeNotebookPathOpener implements ICollaborativeNotebookPa
   private _permissionService: IPermissionService;
   private _notebookApp: NotebookApp;
   private _awarenessService: AwarenessService;
-  private _serviceManager: ServiceManager;
   private _stateDB: IStateDB;
   private _disposed: boolean = false;
   private _disposables: DisposableSet = new DisposableSet();
@@ -147,7 +146,6 @@ export class CollaborativeNotebookPathOpener implements ICollaborativeNotebookPa
     this._permissionService = options.permissionService;
     this._notebookApp = options.notebookApp;
     this._awarenessService = options.awarenessService;
-    this._serviceManager = options.serviceManager;
     this._stateDB = options.stateDB;
     this._collaborativeMode = options.collaborativeMode ?? true;
     this._defaultPermissions = options.defaultPermissions ?? 'edit';
@@ -431,9 +429,12 @@ export class CollaborativeNotebookPathOpener implements ICollaborativeNotebookPa
    */
   private _setupEventHandlers(): void {
     // Listen for permission changes
-    // Note: onPermissionChanged may not be available on all permission service implementations
-    if ('onPermissionChanged' in this._permissionService && this._permissionService.onPermissionChanged && typeof this._permissionService.onPermissionChanged.connect === 'function') {
-      this._permissionService.onPermissionChanged.connect(this._onPermissionChanged, this);
+    // Note: onPermissionChanged is available on PermissionService implementation
+    if (this._permissionService && 'onPermissionChanged' in this._permissionService) {
+      const service = this._permissionService as any;
+      if (service.onPermissionChanged && service.onPermissionChanged.connect) {
+        service.onPermissionChanged.connect(this._onPermissionChanged, this);
+      }
     }
     
     // Listen for user presence changes
