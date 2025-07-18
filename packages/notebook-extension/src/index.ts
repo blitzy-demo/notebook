@@ -39,6 +39,61 @@ import { Widget } from '@lumino/widgets';
 
 import { TrustedComponent } from './trusted';
 
+import { CommentSystemWidget } from './components/commentSystem';
+import { CommentService } from '../../notebook/src/collab/comments';
+import { AwarenessService } from '../../notebook/src/collab/awareness';
+import { PermissionService } from '../../notebook/src/collab/permissions';
+import { HistoryViewerWidget } from './components/historyViewer';
+import { HistoryService } from '../../notebook/src/collab/history';
+import { CellLockIndicatorWidget } from './components/cellLockIndicator';
+import { LockService } from '../../notebook/src/collab/locks';
+import { UserPresenceWidget } from './components/userPresence';
+
+import { Token } from '@lumino/coreutils';
+import { Doc } from 'yjs';
+
+/**
+ * Token for the comment system service
+ */
+export const ICommentSystemService = new Token<CommentService>(
+  '@jupyter-notebook/notebook-extension:comment-system'
+);
+
+/**
+ * Token for the awareness service
+ */
+export const IAwarenessService = new Token<AwarenessService>(
+  '@jupyter-notebook/notebook-extension:awareness'
+);
+
+/**
+ * Token for the permission service
+ */
+export const IPermissionService = new Token<PermissionService>(
+  '@jupyter-notebook/notebook-extension:permissions'
+);
+
+/**
+ * Token for the history service
+ */
+export const IHistoryService = new Token<HistoryService>(
+  '@jupyter-notebook/notebook-extension:history'
+);
+
+/**
+ * Token for the lock service
+ */
+export const ILockService = new Token<LockService>(
+  '@jupyter-notebook/notebook-extension:locks'
+);
+
+/**
+ * Token for the comment system widget
+ */
+export const ICommentSystemWidget = new Token<CommentSystemWidget>(
+  '@jupyter-notebook/notebook-extension:comment-system-widget'
+);
+
 /**
  * The class for kernel status errors.
  */
@@ -83,6 +138,152 @@ namespace CommandIDs {
    */
   export const toggleFullWidth = 'notebook:toggle-full-width';
 }
+
+/**
+ * A plugin for the collaborative comment system
+ */
+const commentSystem: JupyterFrontEndPlugin<CommentService> = {
+  id: '@jupyter-notebook/notebook-extension:comment-system',
+  description: 'A plugin for the collaborative comment system.',
+  autoStart: true,
+  requires: [INotebookTracker, ITranslator],
+  optional: [INotebookShell],
+  provides: ICommentSystemService,
+  activate: (
+    app: JupyterFrontEnd,
+    tracker: INotebookTracker,
+    translator: ITranslator,
+    notebookShell: INotebookShell | null
+  ): CommentService => {
+    console.log('Activating comment system plugin');
+    
+    // Create Yjs document for collaboration
+    // In a real implementation, this would be provided by the collaboration backend
+    const doc = new Doc();
+    
+    // Initialize collaborative services using factory pattern
+    const awarenessService = AwarenessService.create ? AwarenessService.create() : new AwarenessService();
+    const permissionService = PermissionService.create ? PermissionService.create() : new PermissionService();
+    const historyService = HistoryService.create ? HistoryService.create() : new HistoryService();
+    const lockService = LockService.create ? LockService.create() : new LockService();
+    
+    // Create comment service
+    const commentService = CommentService.create ? 
+      CommentService.create(doc, awarenessService, permissionService) :
+      new CommentService(doc, awarenessService, permissionService);
+    
+    // Initialize services
+    const initializeServices = async () => {
+      try {
+        // Initialize services that have initialize methods
+        const initPromises = [];
+        
+        if (awarenessService && typeof awarenessService.initialize === 'function') {
+          initPromises.push(awarenessService.initialize());
+        }
+        if (permissionService && typeof permissionService.initialize === 'function') {
+          initPromises.push(permissionService.initialize());
+        }
+        if (historyService && typeof historyService.initialize === 'function') {
+          initPromises.push(historyService.initialize());
+        }
+        if (lockService && typeof lockService.initialize === 'function') {
+          initPromises.push(lockService.initialize());
+        }
+        if (commentService && typeof commentService.initialize === 'function') {
+          initPromises.push(commentService.initialize());
+        }
+        
+        await Promise.all(initPromises);
+        console.log('Comment system services initialized successfully');
+      } catch (error) {
+        console.error('Failed to initialize comment system services:', error);
+      }
+    };
+    
+    // Initialize services when application is ready
+    app.restored.then(initializeServices);
+    
+    // Set up comment system for each notebook
+    tracker.widgetAdded.connect((sender, notebook) => {
+      if (!notebook.content) return;
+      
+      const setupCommentSystem = async () => {
+        try {
+          await notebook.context.ready;
+          
+          // Get the active cell or first cell for comment system
+          const activeCell = notebook.content.activeCell?.model || 
+                            (notebook.content.model?.cells.length > 0 ? 
+                             notebook.content.model.cells.get(0) : null);
+          
+          // Only create comment widget if we have a valid cell
+          if (activeCell) {
+            const commentWidget = CommentSystemWidget.create({
+              cellModel: activeCell,
+              commentService,
+              awarenessService,
+              permissionService,
+              translator,
+              onCommentAdded: (comment: any) => {
+                console.log('Comment added:', comment);
+              },
+              onCommentResolved: (commentId: string) => {
+                console.log('Comment resolved:', commentId);
+              }
+            });
+            
+            // Update the widget when cells change
+            notebook.content.activeCellChanged.connect((sender, cell) => {
+              if (cell?.model) {
+                commentWidget.update();
+              }
+            });
+            
+            // Add comment system to notebook if shell is available
+            if (notebookShell) {
+              notebookShell.add(commentWidget, 'right', { 
+                type: 'Comments',
+                rank: 1000 
+              });
+            }
+          }
+        } catch (error) {
+          console.error('Failed to setup comment system for notebook:', error);
+        }
+      };
+      
+      setupCommentSystem();
+    });
+    
+    // Setup disposal
+    app.commands.addCommand('comment-system:dispose', {
+      execute: () => {
+        try {
+          if (commentService && typeof commentService.dispose === 'function') {
+            commentService.dispose();
+          }
+          if (awarenessService && typeof awarenessService.dispose === 'function') {
+            awarenessService.dispose();
+          }
+          if (permissionService && typeof permissionService.dispose === 'function') {
+            permissionService.dispose();
+          }
+          if (historyService && typeof historyService.dispose === 'function') {
+            historyService.dispose();
+          }
+          if (lockService && typeof lockService.dispose === 'function') {
+            lockService.dispose();
+          }
+        } catch (error) {
+          console.error('Error disposing comment system services:', error);
+        }
+      }
+    });
+    
+    return commentService;
+  }
+};
 
 /**
  * A plugin for the checkpoint indicator
@@ -681,6 +882,7 @@ const editNotebookMetadata: JupyterFrontEndPlugin<void> = {
  * Export the plugins as default.
  */
 const plugins: JupyterFrontEndPlugin<any>[] = [
+  commentSystem,
   checkpoints,
   closeTab,
   openTreeTab,
@@ -695,3 +897,22 @@ const plugins: JupyterFrontEndPlugin<any>[] = [
 ];
 
 export default plugins;
+
+// Export tokens and interfaces for extension integration
+export {
+  ICommentSystemService,
+  IAwarenessService,
+  IPermissionService,
+  IHistoryService,
+  ILockService,
+  ICommentSystemWidget,
+  CommentService,
+  AwarenessService,
+  PermissionService,
+  HistoryService,
+  LockService,
+  CommentSystemWidget,
+  HistoryViewerWidget,
+  CellLockIndicatorWidget,
+  UserPresenceWidget
+};
