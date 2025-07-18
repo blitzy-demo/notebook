@@ -25,7 +25,6 @@ import { Doc } from 'yjs';
 import { Signal, ISignal } from '@lumino/signaling';
 import { DisposableSet, IDisposable, DisposableDelegate } from '@lumino/disposable';
 import { UUID } from '@lumino/coreutils';
-import { ICellModel } from '@jupyterlab/cells';
 
 import { AwarenessService } from './awareness';
 import { PermissionService } from './permissions';
@@ -116,10 +115,10 @@ export class LockService implements ILockService, IDisposable {
   private _permissionService: PermissionService;
   private _disposed: boolean = false;
   private _disposables: DisposableSet = new DisposableSet();
-  private _lockTimers: Map<string, NodeJS.Timeout> = new Map();
+  private _lockTimers: Map<string, number> = new Map();
   private _lockStates: Map<string, ILockState> = new Map();
   private _defaultTimeout: number = 300000; // 5 minutes in milliseconds
-  private _lockCleanupInterval: NodeJS.Timeout | null = null;
+  private _lockCleanupInterval: number | null = null;
   
   // Signals for lock events
   private _lockChangeSignal = new Signal<ILockService, {
@@ -791,7 +790,6 @@ export class LockService implements ILockService, IDisposable {
    */
   private async _syncLocksFromYjs(): Promise<void> {
     const locks = this._doc.getMap('locks');
-    const currentUser = this._awarenessService.getCurrentUser();
     
     for (const [cellId, lockData] of locks.entries()) {
       if (lockData && typeof lockData === 'object') {
