@@ -21,9 +21,8 @@
 
 import { Doc } from 'yjs';
 import { ISignal, Signal } from '@lumino/signaling';
-import { DisposableSet } from '@lumino/disposable';
+import { DisposableSet, DisposableDelegate } from '@lumino/disposable';
 import { UUID } from '@lumino/coreutils';
-import { ICellModel } from '@jupyterlab/cells';
 import { INotebookModel } from '@jupyterlab/notebook';
 
 import { AwarenessService } from './awareness';
@@ -158,6 +157,7 @@ export class CommentService {
   private _comments: Map<string, IComment> = new Map();
   private _threads: Map<string, ICommentThread> = new Map();
   private _notifications: Map<string, ICommentNotification> = new Map();
+  // Store notebook model for future integration with cell operations
   private _notebookModel: INotebookModel | null = null;
 
   // Signals for comment events
@@ -623,6 +623,13 @@ export class CommentService {
   }
 
   /**
+   * Get the current notebook model
+   */
+  get notebookModel(): INotebookModel | null {
+    return this._notebookModel;
+  }
+
+  /**
    * Dispose of the comment service and cleanup resources
    */
   dispose(): void {
@@ -669,7 +676,7 @@ export class CommentService {
     };
 
     comments.observe(onCommentUpdate);
-    this._disposables.add({ dispose: () => comments.unobserve(onCommentUpdate) });
+    this._disposables.add(new DisposableDelegate(() => comments.unobserve(onCommentUpdate)));
 
     // Listen for thread changes
     const threads = this._doc.getMap('threads');
@@ -678,7 +685,7 @@ export class CommentService {
     };
 
     threads.observe(onThreadUpdate);
-    this._disposables.add({ dispose: () => threads.unobserve(onThreadUpdate) });
+    this._disposables.add(new DisposableDelegate(() => threads.unobserve(onThreadUpdate)));
 
     // Listen for notification changes
     const notifications = this._doc.getMap('notifications');
@@ -687,7 +694,7 @@ export class CommentService {
     };
 
     notifications.observe(onNotificationUpdate);
-    this._disposables.add({ dispose: () => notifications.unobserve(onNotificationUpdate) });
+    this._disposables.add(new DisposableDelegate(() => notifications.unobserve(onNotificationUpdate)));
   }
 
   /**
