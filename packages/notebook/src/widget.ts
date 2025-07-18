@@ -33,9 +33,6 @@ import { PermissionService } from './collab/permissions';
 import { CommentService, IComment } from './collab/comments';
 import { HistoryService, IChangeEvent } from './collab/history';
 
-// Import UI components - using Widget base class and interfaces
-import { Widget } from '@lumino/widgets';
-
 // Define UI component interfaces
 interface ICollaborationBarWidget extends Widget {
   create(options: any): ICollaborationBarWidget;
@@ -245,12 +242,12 @@ export class CollaborativeNotebookPanel extends NotebookPanel {
   private _historyService: HistoryService;
   
   // UI components
-  private _collaborationBar: ICollaborationBarWidget;
-  private _userPresence: IUserPresenceWidget;
-  private _lockIndicator: ICellLockIndicatorWidget;
-  private _historyViewer: IHistoryViewerWidget;
-  private _permissionsDialog: IPermissionsDialogWidget;
-  private _commentSystem: ICommentSystemWidget;
+  private _collaborationBar: ICollaborationBarWidget | null = null;
+  private _userPresence: IUserPresenceWidget | null = null;
+  private _lockIndicator: ICellLockIndicatorWidget | null = null;
+  private _historyViewer: IHistoryViewerWidget | null = null;
+  private _permissionsDialog: IPermissionsDialogWidget | null = null;
+  private _commentSystem: ICommentSystemWidget | null = null;
   
   // State management
   private _collaborativeState: ICollaborativeState;
@@ -379,42 +376,42 @@ export class CollaborativeNotebookPanel extends NotebookPanel {
   /**
    * Get the collaboration bar widget
    */
-  get collaborationBar(): ICollaborationBarWidget {
+  get collaborationBar(): ICollaborationBarWidget | null {
     return this._collaborationBar;
   }
   
   /**
    * Get the user presence widget
    */
-  get userPresence(): IUserPresenceWidget {
+  get userPresence(): IUserPresenceWidget | null {
     return this._userPresence;
   }
   
   /**
    * Get the lock indicator widget
    */
-  get lockIndicator(): ICellLockIndicatorWidget {
+  get lockIndicator(): ICellLockIndicatorWidget | null {
     return this._lockIndicator;
   }
   
   /**
    * Get the history viewer widget
    */
-  get historyViewer(): IHistoryViewerWidget {
+  get historyViewer(): IHistoryViewerWidget | null {
     return this._historyViewer;
   }
   
   /**
    * Get the permissions dialog widget
    */
-  get permissionsDialog(): IPermissionsDialogWidget {
+  get permissionsDialog(): IPermissionsDialogWidget | null {
     return this._permissionsDialog;
   }
   
   /**
    * Get the comment system widget
    */
-  get commentSystem(): ICommentSystemWidget {
+  get commentSystem(): ICommentSystemWidget | null {
     return this._commentSystem;
   }
   
@@ -472,14 +469,18 @@ export class CollaborativeNotebookPanel extends NotebookPanel {
    * Show the permissions dialog
    */
   showPermissionsDialog(): void {
-    this._permissionsDialog.show();
+    if (this._permissionsDialog) {
+      this._permissionsDialog.show();
+    }
   }
   
   /**
    * Show the history viewer
    */
   showHistoryViewer(): void {
-    this._historyViewer.show();
+    if (this._historyViewer) {
+      this._historyViewer.show();
+    }
   }
   
   /**
@@ -831,7 +832,7 @@ export class CollaborativeNotebookPanel extends NotebookPanel {
       cellId: args.cellId,
       commentId: args.id,
       content: args.content,
-      author: { userId: args.author.userId || args.author.id || 'unknown', name: args.author.name }
+      author: { userId: args.author.id || 'unknown', name: args.author.name }
     });
     this._updateCommentCounts(args.cellId);
   }
@@ -922,16 +923,9 @@ export class CollaborativeNotebookPanel extends NotebookPanel {
   private _updateCommentCounts(cellId: string): void {
     try {
       const comments = this._commentService.getCommentsByCell(cellId);
-      // Handle both sync and async responses
-      if (comments && typeof comments.then === 'function') {
-        comments.then((commentList: any[]) => {
-          this._collaborativeState.commentCounts[cellId] = commentList.length;
-          this._updateUIComponents();
-        }).catch(console.error);
-      } else {
-        this._collaborativeState.commentCounts[cellId] = (comments as any[]).length;
-        this._updateUIComponents();
-      }
+      // Comments is a synchronous array, not a Promise
+      this._collaborativeState.commentCounts[cellId] = comments ? comments.length : 0;
+      this._updateUIComponents();
     } catch (error) {
       console.error('Error updating comment counts:', error);
     }
@@ -1115,7 +1109,10 @@ export class CollaborativeWidgetManager implements IDisposable {
    * @returns Disposable subscription
    */
   subscribeToEvents(callback: (sender: any, state: ICollaborativeState) => void): IDisposable {
-    return this._stateChangedSignal.connect(callback) as IDisposable;
+    const disconnect = this._stateChangedSignal.connect(callback);
+    return {
+      dispose: () => this._stateChangedSignal.disconnect(callback)
+    };
   }
   
   /**
