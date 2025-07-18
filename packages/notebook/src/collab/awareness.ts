@@ -19,12 +19,10 @@
 import { Doc } from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 import { ISignal, Signal } from '@lumino/signaling';
-import { IDisposable, DisposableDelegate } from '@lumino/disposable';
+import { IDisposable } from '@lumino/disposable';
 import { UUID } from '@lumino/coreutils';
 import { User } from '@jupyterlab/services';
-import { ICellModel } from '@jupyterlab/cells';
-import { IEditor } from '@jupyterlab/codeeditor';
-import { Time } from '@jupyterlab/coreutils';
+import { CodeEditor } from '@jupyterlab/codeeditor';
 import { IAwarenessService } from '../tokens';
 
 /**
@@ -173,7 +171,6 @@ export interface IAwarenessEvent {
  * It maintains a synchronized view of all active users and their current states.
  */
 export class AwarenessService implements IAwarenessService, IDisposable {
-  private _doc: Doc;
   private _awareness: Awareness;
   private _currentUser: IUser | null = null;
   private _users: Map<string, IUser> = new Map();
@@ -185,7 +182,7 @@ export class AwarenessService implements IAwarenessService, IDisposable {
   ];
   private _colorIndex: number = 0;
   private _activityTimeout: number = 30000; // 30 seconds
-  private _activityTimer: NodeJS.Timeout | null = null;
+  private _activityTimer: any | null = null;
 
   // Signals for awareness events
   private _userJoinedSignal = new Signal<AwarenessService, { userId: string; name: string; avatar?: string }>(this);
@@ -199,7 +196,6 @@ export class AwarenessService implements IAwarenessService, IDisposable {
    * @param user - The current user information
    */
   constructor(doc: Doc, user: User.IUser) {
-    this._doc = doc;
     this._awareness = new Awareness(doc);
     this._initializeCurrentUser(user);
     this._setupAwarenessListeners();
@@ -370,7 +366,7 @@ export class AwarenessService implements IAwarenessService, IDisposable {
    * @param cellId - ID of the cell containing the cursor
    * @param editor - The editor instance to get cursor position from
    */
-  trackCursorPosition(cellId: string, editor: IEditor): void {
+  trackCursorPosition(cellId: string, editor: CodeEditor.IEditor): void {
     if (!this._currentUser) {
       return;
     }
@@ -411,7 +407,7 @@ export class AwarenessService implements IAwarenessService, IDisposable {
    * @param cellId - ID of the cell containing the selection
    * @param editor - The editor instance to get selection from
    */
-  trackSelection(cellId: string, editor: IEditor): void {
+  trackSelection(cellId: string, editor: CodeEditor.IEditor): void {
     if (!this._currentUser) {
       return;
     }
@@ -520,11 +516,11 @@ export class AwarenessService implements IAwarenessService, IDisposable {
    * @param user - The JupyterLab user object
    */
   private _initializeCurrentUser(user: User.IUser): void {
-    const userId = user.identity?.username || UUID.uuid4();
-    const userName = user.identity?.name || user.identity?.username || 'Anonymous';
-    const displayName = user.identity?.display_name || userName;
-    const email = user.identity?.email || '';
-    const avatar = user.identity?.avatar_url || '';
+    const userId = String(user.identity?.username || UUID.uuid4());
+    const userName = String(user.identity?.name || user.identity?.username || 'Anonymous');
+    const displayName = String(user.identity?.display_name || userName);
+    const email = String(user.identity?.email || '');
+    const avatar = String(user.identity?.avatar_url || '');
     const color = this._getNextUserColor();
 
     this._currentUser = {
@@ -542,18 +538,20 @@ export class AwarenessService implements IAwarenessService, IDisposable {
       status: UserStatus.ACTIVE
     };
 
-    this._users.set(userId, this._currentUser);
-    this._userPresenceMap.set(userId, {
-      userId: userId,
-      user: this._currentUser,
-      timestamp: new Date(),
-      cursor: null,
-      selection: null,
-      currentCell: null,
-      status: UserStatus.ACTIVE,
-      isActive: true,
-      lastActivity: new Date()
-    });
+    if (this._currentUser) {
+      this._users.set(userId, this._currentUser);
+      this._userPresenceMap.set(userId, {
+        userId: userId,
+        user: this._currentUser,
+        timestamp: new Date(),
+        cursor: null,
+        selection: null,
+        currentCell: null,
+        status: UserStatus.ACTIVE,
+        isActive: true,
+        lastActivity: new Date()
+      });
+    }
 
     this._updateLocalAwareness();
   }
@@ -615,7 +613,7 @@ export class AwarenessService implements IAwarenessService, IDisposable {
   private _processAwarenessChanges(): void {
     const states = this._awareness.getStates();
     
-    for (const [clientId, state] of states) {
+    for (const [, state] of states) {
       if (state && state.user && state.user.id !== this._currentUser?.id) {
         this._updateUserFromAwareness(state.user);
       }
