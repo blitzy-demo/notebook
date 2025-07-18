@@ -20,17 +20,12 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { ReactWidget } from '@jupyterlab/apputils';
-import { NotebookActions } from '@jupyterlab/notebook';
+import { NotebookActions, NotebookPanel } from '@jupyterlab/notebook';
 import { ITranslator } from '@jupyterlab/translation';
-import { ServiceManager } from '@jupyterlab/services';
-import { Widget } from '@lumino/widgets';
-import { Signal } from '@lumino/signaling';
 
 // Import collaborative services
-import { PermissionService } from './collab/permissions';
-import { NotebookPanel } from './widget';
-import { IPermissionService } from './tokens';
-import { AwarenessService } from './collab/awareness';
+import { PermissionService, PermissionOperation } from './collab/permissions';
+import { AwarenessService, UserStatus } from './collab/awareness';
 
 /**
  * Interface for collaborative trust state information
@@ -94,11 +89,11 @@ export const isTrusted = (notebook: NotebookPanel): boolean => {
   let trusted = 0;
 
   for (const currentCell of cells) {
-    if (currentCell.type !== 'code') {
+    if ((currentCell as any).type !== 'code') {
       continue;
     }
     total++;
-    if (currentCell.trusted) {
+    if ((currentCell as any).trusted) {
       trusted++;
     }
   }
@@ -202,7 +197,7 @@ export const TrustedButton = ({
 
     try {
       // Check if user has permission to execute trusted code
-      const hasPermission = await permissionService.checkPermission('execute');
+      const hasPermission = await permissionService.checkPermission(PermissionOperation.EXECUTE);
       return hasPermission && trusted;
     } catch (error) {
       console.error(`Error verifying trust for user ${userId}:`, error);
@@ -269,7 +264,7 @@ export const TrustedButton = ({
         const currentUser = awarenessService.getCurrentUser();
         if (currentUser) {
           // Update user status to indicate trust verification
-          awarenessService.updateUserStatus(currentUser.id, 'editing');
+          awarenessService.updateUserStatus(UserStatus.EDITING);
         }
       }
     } catch (error) {
@@ -443,20 +438,15 @@ export class CollaborativeTrustVerifier {
   private _notebook: NotebookPanel;
   private _permissionService: PermissionService;
   private _awarenessService: AwarenessService;
-  private _serviceManager: ServiceManager;
-  private _trustStateSignal: Signal<CollaborativeTrustVerifier, ICollaborativeTrustState>;
 
   constructor(
     notebook: NotebookPanel,
     permissionService: PermissionService,
-    awarenessService: AwarenessService,
-    serviceManager: ServiceManager
+    awarenessService: AwarenessService
   ) {
     this._notebook = notebook;
     this._permissionService = permissionService;
     this._awarenessService = awarenessService;
-    this._serviceManager = serviceManager;
-    this._trustStateSignal = new Signal<CollaborativeTrustVerifier, ICollaborativeTrustState>(this);
   }
 
   /**
@@ -643,7 +633,7 @@ export class CollaborativeTrustVerifier {
   private async _verifyUserTrust(userId: string): Promise<boolean> {
     try {
       // Check if user has permission to execute trusted code
-      const hasPermission = await this._permissionService.checkPermission('execute');
+      const hasPermission = await this._permissionService.checkPermission(PermissionOperation.EXECUTE);
       
       // Check if notebook is trusted
       const notebookTrusted = isTrusted(this._notebook);
@@ -666,7 +656,7 @@ export class CollaborativeTrustVerifier {
         // Notify collaborators about trust change
         const currentUser = this._awarenessService.getCurrentUser();
         if (currentUser) {
-          this._awarenessService.updateUserStatus(currentUser.id, 'editing');
+          this._awarenessService.updateUserStatus(UserStatus.EDITING);
         }
       }
     } catch (error) {
