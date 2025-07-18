@@ -18,7 +18,7 @@
  * @version 1.0.0
  */
 
-import { TabPanel } from '@lumino/widgets';
+import { Widget, Panel } from '@lumino/widgets';
 import { ISignal, Signal } from '@lumino/signaling';
 import { PromiseDelegate } from '@lumino/coreutils';
 import { JupyterFrontEnd } from '@jupyterlab/application';
@@ -183,7 +183,10 @@ export const INotebookShellToken = new Token<INotebookShell>(
  * and session management. It integrates seamlessly with the Yjs CRDT framework and
  * provides a comprehensive collaborative editing experience.
  */
-export class NotebookShell extends TabPanel implements Partial<INotebookShell> {
+export class NotebookShell extends Widget implements Partial<INotebookShell> {
+  // Main panel for widget management
+  private _main: Panel;
+  
   // Collaborative services
   private _notebookApp: NotebookApp;
   private _awarenessService: AwarenessService;
@@ -205,6 +208,7 @@ export class NotebookShell extends TabPanel implements Partial<INotebookShell> {
   private _lockChangeSignal = new Signal<any, ILockChangeEvent>(this);
   private _collaboratorJoinSignal = new Signal<any, ICollaboratorEvent>(this);
   private _collaboratorLeaveSignal = new Signal<any, ICollaboratorEvent>(this);
+  private _currentChangedSignal = new Signal<any, any>(this);
   
   // Disposables
   private _disposables = new DisposableSet();
@@ -222,13 +226,16 @@ export class NotebookShell extends TabPanel implements Partial<INotebookShell> {
     sessionManager: ICollaborativeSessionManager;
     collaborative?: boolean;
   }) {
-    super({
-      tabsMovable: true,
-      addButtonEnabled: false
-    });
+    super();
     
     this.id = 'notebook-shell';
     this.addClass('jp-NotebookShell');
+    
+    // Initialize main panel
+    this._main = new Panel();
+    this._main.id = 'main-panel';
+    this._main.node.setAttribute('role', 'main');
+    Widget.attach(this._main, this.node);
     
     // Initialize services
     this._notebookApp = options.notebookApp;
@@ -250,8 +257,6 @@ export class NotebookShell extends TabPanel implements Partial<INotebookShell> {
     
     // Initialize UI components
     this._initializeUIComponents();
-    
-
   }
   
   /**
@@ -286,14 +291,14 @@ export class NotebookShell extends TabPanel implements Partial<INotebookShell> {
    * Get the current widget in the shell's main area
    */
   get currentWidget(): any {
-    return super.widgets.length > 0 ? super.widgets[0] : null;
+    return this._main.widgets.length > 0 ? this._main.widgets[0] : null;
   }
   
   /**
    * Get the signal for current widget changes
    */
   get currentChanged(): ISignal<any, any> {
-    return super.currentChanged;
+    return this._currentChangedSignal;
   }
   
   /**
@@ -402,12 +407,13 @@ export class NotebookShell extends TabPanel implements Partial<INotebookShell> {
     // Handle different areas
     if (area === 'main' || !area) {
       // Clear existing widgets in main area (single-document interface)
-      while (super.widgets.length > 0) {
-        super.widgets[0].dispose();
+      while (this._main.widgets.length > 0) {
+        this._main.widgets[0].dispose();
       }
       
       // Add the new widget
-      super.addWidget(widget);
+      this._main.addWidget(widget);
+      this._currentChangedSignal.emit(widget);
       this._mainWidgetLoaded.resolve();
       
       // Set up collaborative features for notebook widgets
@@ -432,7 +438,7 @@ export class NotebookShell extends TabPanel implements Partial<INotebookShell> {
    * Activate a widget by ID
    */
   activateById(id: string): void {
-    const widget = find(super.widgets, w => w.id === id);
+    const widget = find(this._main.widgets, w => w.id === id);
     if (widget) {
       widget.activate();
     }
@@ -441,9 +447,9 @@ export class NotebookShell extends TabPanel implements Partial<INotebookShell> {
   /**
    * Get widgets in a specific area
    */
-  *getWidgets(area?: string): IterableIterator<any> {
+  *widgets(area?: string): IterableIterator<any> {
     if (!area || area === 'main') {
-      yield* super.widgets;
+      yield* this._main.widgets;
     }
     // Other areas would be handled by panel handler
   }
@@ -476,11 +482,11 @@ export class NotebookShell extends TabPanel implements Partial<INotebookShell> {
 
   closeAll(): void {
     // Close all widgets
-    super.widgets.forEach(widget => widget.dispose());
+    this._main.widgets.forEach(widget => widget.dispose());
   }
 
   isEmpty(area?: string): boolean {
-    return super.widgets.length === 0;
+    return this._main.widgets.length === 0;
   }
 
 
