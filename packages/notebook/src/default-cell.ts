@@ -20,23 +20,15 @@
  * @version 1.0.0
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Cell } from '@jupyterlab/notebook';
 import { Widget } from '@lumino/widgets';
-import { Signal } from '@lumino/signaling';
-import { Doc } from 'yjs';
-import { Awareness } from 'y-protocols/awareness';
-import { reactIcon } from '@jupyterlab/ui-components';
 import { ICellModel } from '@jupyterlab/cells';
 import { IDisposable } from '@lumino/disposable';
-import { IEditor } from '@jupyterlab/codeeditor';
 
 import { CellOperations } from './celloperations';
 import { LockService } from './collab/locks';
 import { AwarenessService } from './collab/awareness';
 import { CommentService } from './collab/comments';
 import { YjsNotebookProvider } from './model';
-import { IAwarenessService } from './tokens';
 
 /**
  * Interface for collaborative cell options and configuration
@@ -87,9 +79,10 @@ export interface IPresenceState {
     userId: string;
     name: string;
     avatar?: string;
-    cursor?: { line: number; column: number };
-    selection?: { start: number; end: number };
+    cursor?: { cellId: string; position: number } | { line: number; column: number };
+    selection?: { cellId: string; start: number; end: number } | { start: number; end: number };
     isActive: boolean;
+    lastActivity?: Date;
   }>;
   /** Cursor positions for all users */
   cursorPositions: Map<string, { line: number; column: number }>;
@@ -126,7 +119,6 @@ export class CellLockIndicator extends Widget {
   private _cellId: string;
   private _lockIcon: HTMLElement | null = null;
   private _lockTooltip: HTMLElement | null = null;
-  private _disposed: boolean = false;
 
   /**
    * Creates a new cell lock indicator
@@ -194,10 +186,9 @@ export class CellLockIndicator extends Widget {
    * Dispose of the lock indicator
    */
   dispose(): void {
-    if (this._disposed) {
+    if (this.isDisposed) {
       return;
     }
-    this._disposed = true;
     super.dispose();
   }
 
@@ -282,7 +273,6 @@ export class CellPresenceIndicator extends Widget {
   private _cellId: string;
   private _presenceContainer: HTMLElement | null = null;
   private _cursorOverlay: HTMLElement | null = null;
-  private _disposed: boolean = false;
 
   /**
    * Creates a new cell presence indicator
@@ -311,7 +301,19 @@ export class CellPresenceIndicator extends Widget {
     selection?: { start: number; end: number };
     isActive: boolean;
   }> {
-    return this._presenceState.activeUsers;
+    // Transform the internal format to the expected format
+    return this._presenceState.activeUsers.map(user => ({
+      userId: user.userId,
+      name: user.name,
+      avatar: user.avatar,
+      cursor: user.cursor && typeof user.cursor === 'object' && 'line' in user.cursor 
+        ? user.cursor
+        : undefined,
+      selection: user.selection && typeof user.selection === 'object' && 'start' in user.selection && 'end' in user.selection
+        ? { start: user.selection.start, end: user.selection.end }
+        : undefined,
+      isActive: user.isActive
+    }));
   }
 
   /**
@@ -374,10 +376,9 @@ export class CellPresenceIndicator extends Widget {
    * Dispose of the presence indicator
    */
   dispose(): void {
-    if (this._disposed) {
+    if (this.isDisposed) {
       return;
     }
-    this._disposed = true;
     super.dispose();
   }
 
@@ -520,7 +521,6 @@ export class CellCommentWidget extends Widget {
   private _cellId: string;
   private _commentContainer: HTMLElement | null = null;
   private _commentButton: HTMLElement | null = null;
-  private _disposed: boolean = false;
 
   /**
    * Creates a new cell comment widget
@@ -641,10 +641,9 @@ export class CellCommentWidget extends Widget {
    * Dispose of the comment widget
    */
   dispose(): void {
-    if (this._disposed) {
+    if (this.isDisposed) {
       return;
     }
-    this._disposed = true;
     super.dispose();
   }
 
@@ -797,14 +796,30 @@ export class CellCommentWidget extends Widget {
 }
 
 /**
+ * Base cell interface for collaborative features
+ */
+interface IBaseCell {
+  model: ICellModel;
+  inputArea: { node: HTMLElement };
+  outputArea?: { node: HTMLElement };
+  editor?: any;
+  readOnly?: boolean;
+  dispose(): void;
+}
+
+/**
  * Enhanced collaborative code cell with collaborative features
  */
-export class CollaborativeCodeCell extends Cell {
+export class CollaborativeCodeCell extends Widget implements IBaseCell {
   private _collaborativeOptions: ICollaborativeCellOptions;
   private _lockIndicator: CellLockIndicator;
   private _presenceIndicator: CellPresenceIndicator;
   private _commentWidget: CellCommentWidget;
-  private _disposed: boolean = false;
+  public model: ICellModel;
+  public inputArea: { node: HTMLElement };
+  public outputArea?: { node: HTMLElement };
+  public editor?: any;
+  public readOnly?: boolean;
 
   /**
    * Creates a new collaborative code cell
@@ -812,8 +827,14 @@ export class CollaborativeCodeCell extends Cell {
    * @param options - The collaborative cell options
    */
   constructor(options: ICollaborativeCellOptions) {
-    super(options);
+    super();
     this._collaborativeOptions = options;
+    this.model = options.model;
+    
+    // Initialize basic cell structure
+    this.inputArea = { node: document.createElement('div') };
+    this.inputArea.node.className = 'jp-Cell-inputArea';
+    this.node.appendChild(this.inputArea.node);
     
     // Initialize collaborative components
     this._lockIndicator = new CellLockIndicator(
@@ -896,10 +917,9 @@ export class CollaborativeCodeCell extends Cell {
    * Dispose of the collaborative code cell
    */
   dispose(): void {
-    if (this._disposed) {
+    if (this.isDisposed) {
       return;
     }
-    this._disposed = true;
     
     this._lockIndicator.dispose();
     this._presenceIndicator.dispose();
@@ -956,12 +976,16 @@ export class CollaborativeCodeCell extends Cell {
 /**
  * Enhanced collaborative markdown cell with collaborative features
  */
-export class CollaborativeMarkdownCell extends Cell {
+export class CollaborativeMarkdownCell extends Widget implements IBaseCell {
   private _collaborativeOptions: ICollaborativeCellOptions;
   private _lockIndicator: CellLockIndicator;
   private _presenceIndicator: CellPresenceIndicator;
   private _commentWidget: CellCommentWidget;
-  private _disposed: boolean = false;
+  public model: ICellModel;
+  public inputArea: { node: HTMLElement };
+  public outputArea?: { node: HTMLElement };
+  public editor?: any;
+  public readOnly?: boolean;
 
   /**
    * Creates a new collaborative markdown cell
@@ -969,8 +993,14 @@ export class CollaborativeMarkdownCell extends Cell {
    * @param options - The collaborative cell options
    */
   constructor(options: ICollaborativeCellOptions) {
-    super(options);
+    super();
     this._collaborativeOptions = options;
+    this.model = options.model;
+    
+    // Initialize basic cell structure
+    this.inputArea = { node: document.createElement('div') };
+    this.inputArea.node.className = 'jp-Cell-inputArea';
+    this.node.appendChild(this.inputArea.node);
     
     // Initialize collaborative components
     this._lockIndicator = new CellLockIndicator(
@@ -1053,10 +1083,9 @@ export class CollaborativeMarkdownCell extends Cell {
    * Dispose of the collaborative markdown cell
    */
   dispose(): void {
-    if (this._disposed) {
+    if (this.isDisposed) {
       return;
     }
-    this._disposed = true;
     
     this._lockIndicator.dispose();
     this._presenceIndicator.dispose();
@@ -1090,32 +1119,36 @@ export class CollaborativeMarkdownCell extends Cell {
     }
 
     // Track cursor position changes
-    editor.onCursorPositionChanged.connect(() => {
-      this._collaborativeOptions.awarenessService.trackCursorPosition(
-        this.model.id,
-        editor
-      );
-    });
+    if (editor.onCursorPositionChanged) {
+      editor.onCursorPositionChanged.connect(() => {
+        this._collaborativeOptions.awarenessService.trackCursorPosition(
+          this.model.id,
+          editor
+        );
+      });
+    }
 
     // Track selection changes
-    editor.onSelectionChanged.connect(() => {
-      const selection = editor.getSelection();
-      if (selection) {
-        this._presenceIndicator.highlightSelection(
-          this._collaborativeOptions.awarenessService.getCurrentUser().userId,
-          { start: selection.start.column, end: selection.end.column }
-        );
-      }
-    });
+    if (editor.onSelectionChanged) {
+      editor.onSelectionChanged.connect(() => {
+        const selection = editor.getSelection();
+        if (selection) {
+          this._presenceIndicator.highlightSelection(
+            this._collaborativeOptions.awarenessService.getCurrentUser().userId,
+            { start: selection.start?.column || 0, end: selection.end?.column || 0 }
+          );
+        }
+      });
+    }
   }
 }
 
 /**
  * Factory for creating collaborative cell instances
  */
-export class CollaborativeCellFactory {
+export class CollaborativeCellFactory implements IDisposable {
   private _collaborativeOptions: ICollaborativeCellOptions;
-  private _disposed: boolean = false;
+  private _isDisposed: boolean = false;
 
   /**
    * Creates a new collaborative cell factory
@@ -1124,6 +1157,13 @@ export class CollaborativeCellFactory {
    */
   constructor(options: ICollaborativeCellOptions) {
     this._collaborativeOptions = options;
+  }
+
+  /**
+   * Test whether the factory is disposed.
+   */
+  get isDisposed(): boolean {
+    return this._isDisposed;
   }
 
   /**
@@ -1199,17 +1239,17 @@ export class CollaborativeCellFactory {
    * Dispose of the factory
    */
   dispose(): void {
-    if (this._disposed) {
+    if (this._isDisposed) {
       return;
     }
-    this._disposed = true;
+    this._isDisposed = true;
   }
 }
 
 /**
  * Enhanced collaborative default cell that serves as the base for all collaborative cells
  */
-export class CollaborativeDefaultCell extends Cell {
+export class CollaborativeDefaultCell extends Widget implements IBaseCell {
   private _collaborativeOptions: ICollaborativeCellOptions;
   private _lockIndicator: CellLockIndicator;
   private _presenceIndicator: CellPresenceIndicator;
@@ -1219,7 +1259,11 @@ export class CollaborativeDefaultCell extends Cell {
     presenceEnabled: boolean;
     commentsEnabled: boolean;
   };
-  private _disposed: boolean = false;
+  public model: ICellModel;
+  public inputArea: { node: HTMLElement };
+  public outputArea?: { node: HTMLElement };
+  public editor?: any;
+  public readOnly?: boolean;
 
   /**
    * Creates a new collaborative default cell
@@ -1227,8 +1271,14 @@ export class CollaborativeDefaultCell extends Cell {
    * @param options - The collaborative cell options
    */
   constructor(options: ICollaborativeCellOptions) {
-    super(options);
+    super();
     this._collaborativeOptions = options;
+    this.model = options.model;
+    
+    // Initialize basic cell structure
+    this.inputArea = { node: document.createElement('div') };
+    this.inputArea.node.className = 'jp-Cell-inputArea';
+    this.node.appendChild(this.inputArea.node);
     
     // Initialize collaborative features configuration
     this._collaborativeFeatures = {
@@ -1352,10 +1402,9 @@ export class CollaborativeDefaultCell extends Cell {
    * Dispose of the collaborative default cell
    */
   dispose(): void {
-    if (this._disposed) {
+    if (this.isDisposed) {
       return;
     }
-    this._disposed = true;
     
     this._lockIndicator.dispose();
     this._presenceIndicator.dispose();
