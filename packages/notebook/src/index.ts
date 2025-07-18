@@ -308,10 +308,10 @@ export class NotebookShell {
    * @param cellId The cell identifier
    * @param userId The user requesting the lock
    */
-  async lockCell(cellId: string, userId: string): Promise<boolean> {
+  async lockCell(cellId: string, timeout?: number): Promise<boolean> {
     if (this._lockService) {
       try {
-        return await this._lockService.lockCell(cellId, userId);
+        return await this._lockService.lockCell(cellId, timeout);
       } catch (error) {
         console.error('Error locking cell:', error);
         return false;
@@ -325,10 +325,11 @@ export class NotebookShell {
    * @param cellId The cell identifier
    * @param userId The user releasing the lock
    */
-  async unlockCell(cellId: string, userId: string): Promise<boolean> {
+  async unlockCell(cellId: string): Promise<boolean> {
     if (this._lockService) {
       try {
-        return await this._lockService.unlockCell(cellId, userId);
+        await this._lockService.unlockCell(cellId);
+        return true;
       } catch (error) {
         console.error('Error unlocking cell:', error);
         return false;
@@ -625,8 +626,8 @@ export const TrustedComponent = {
    * @param options Component options
    * @returns Created component instance
    */
-  create(options: any): any {
-    return new CollaborativeTrustVerifier(options);
+  create(options: { notebook: NotebookPanel; permissionService: PermissionService; awarenessService: AwarenessService }): any {
+    return new CollaborativeTrustVerifier(options.notebook, options.permissionService, options.awarenessService);
   }
 };
 
@@ -687,7 +688,7 @@ const collaborativeAwareness: JupyterFrontEndPlugin<void> = {
     console.log('Collaborative awareness system activated');
     
     // Initialize awareness service
-    const awarenessService = new AwarenessService({} as any);
+    const awarenessService = new AwarenessService({} as any, {} as any);
     
     // Register awareness-related commands
     app.commands.addCommand('notebook:show-collaborators', {
@@ -772,8 +773,7 @@ const collaborativeServices: JupyterFrontEndPlugin<void> = {
       label: 'Unlock Cell',
       execute: (args: any) => {
         const cellId = args.cellId;
-        const userId = args.userId;
-        return lockService.unlockCell(cellId, userId);
+        return lockService.unlockCell(cellId);
       }
     });
     
