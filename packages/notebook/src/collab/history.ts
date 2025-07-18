@@ -26,9 +26,6 @@ import { ISignal, Signal } from '@lumino/signaling';
 import { IDisposable, DisposableSet, DisposableDelegate } from '@lumino/disposable';
 import { UUID } from '@lumino/coreutils';
 import { Time } from '@jupyterlab/coreutils';
-import { ICellModel } from '@jupyterlab/cells';
-import { INotebookModel } from '@jupyterlab/notebook';
-import { Awareness } from 'y-protocols/awareness';
 
 import { AwarenessService } from './awareness';
 import { PermissionService } from './permissions';
@@ -246,7 +243,6 @@ export class HistoryService implements IDisposable {
   
   // Change tracking
   private _pendingChanges: Map<string, any> = new Map();
-  private _lastProcessedTransaction: Date = new Date();
   
   // Event signals
   private _documentChangedSignal = new Signal<HistoryService, IChangeEvent>(this);
@@ -360,15 +356,22 @@ export class HistoryService implements IDisposable {
 
     const timeline = Array.from(grouped.entries()).map(([timeKey, entries]) => ({
       timestamp: new Date(parseInt(timeKey) * 1000),
-      changes: entries.flatMap(entry => 
-        entry.changes.map(change => ({
+      changes: entries.reduce((allChanges: Array<{
+        type: string;
+        cellId: string;
+        userId: string;
+        userName: string;
+        description: string;
+      }>, entry) => {
+        const entryChanges = entry.changes.map(change => ({
           type: change.type,
           cellId: change.cellId || entry.cellId || '',
           userId: entry.author.userId,
           userName: entry.author.name,
           description: entry.description
-        }))
-      )
+        }));
+        return allChanges.concat(entryChanges);
+      }, [])
     }));
 
     return timeline;
@@ -415,9 +418,12 @@ export class HistoryService implements IDisposable {
    * @returns Disposable subscription
    */
   subscribeToChanges(callback: (change: IChangeEvent) => void): IDisposable {
-    const connection = this._documentChangedSignal.connect(callback);
+    const slot = (sender: HistoryService, change: IChangeEvent) => {
+      callback(change);
+    };
+    this._documentChangedSignal.connect(slot);
     return new DisposableDelegate(() => {
-      connection.disconnect();
+      this._documentChangedSignal.disconnect(slot);
     });
   }
 
@@ -560,7 +566,7 @@ export class HistoryService implements IDisposable {
     const currentUser = this._awarenessService.getCurrentUser();
     
     // Process changed types in the transaction
-    for (const [yType, changeSet] of transaction.changed) {
+    for (const [, changeSet] of transaction.changed) {
       for (const change of changeSet) {
         const changeEvent: IChangeEvent = {
           type: this._determineChangeType(change),
