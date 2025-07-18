@@ -432,7 +432,7 @@ export class CollaborativeNotebookPathOpener implements ICollaborativeNotebookPa
   private _setupEventHandlers(): void {
     // Listen for permission changes
     // Note: onPermissionChanged may not be available on all permission service implementations
-    if ('onPermissionChanged' in this._permissionService && this._permissionService.onPermissionChanged) {
+    if ('onPermissionChanged' in this._permissionService && this._permissionService.onPermissionChanged && typeof this._permissionService.onPermissionChanged.connect === 'function') {
       this._permissionService.onPermissionChanged.connect(this._onPermissionChanged, this);
     }
     
