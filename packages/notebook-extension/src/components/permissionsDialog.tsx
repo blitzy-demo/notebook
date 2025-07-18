@@ -18,17 +18,26 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+// @ts-ignore - react-dom/client types may not be fully available
 import { createRoot } from 'react-dom/client';
-import { Dialog, IResult, IButton } from '@jupyterlab/apputils';
+import { Dialog } from '@jupyterlab/apputils';
 import { ITranslator } from '@jupyterlab/translation';
-import { ISignal } from '@lumino/signaling';
 import { closeIcon } from '@jupyterlab/ui-components';
-import { NotebookPanel } from '@jupyterlab/notebook';
-import { URLExt } from '@jupyterlab/coreutils';
-import { IDocumentManager } from '@jupyterlab/docmanager';
 import { Widget } from '@lumino/widgets';
-import { PermissionService } from '../../../notebook/src/collab/permissions';
-import { AwarenessService } from '../../../notebook/src/collab/awareness';
+
+// Import types for permissions and awareness services
+// These will be injected as props rather than imported directly
+export interface IPermissionService {
+  getCollaborators(): Promise<any[]>;
+  setUserRole(userId: string, role: string): Promise<void>;
+  onPermissionChanged: { connect(callback: () => void): void; disconnect(callback: () => void): void };
+  onCollaboratorJoined: { connect(callback: () => void): void; disconnect(callback: () => void): void };
+  onCollaboratorLeft: { connect(callback: () => void): void; disconnect(callback: () => void): void };
+}
+
+export interface IAwarenessService {
+  getUsers(): any[];
+}
 
 /**
  * Permission role enumeration for the dialog interface
@@ -83,11 +92,11 @@ export interface IPermissionLevel {
  */
 export interface IPermissionsDialogProps {
   /** The notebook model being managed */
-  notebookModel: NotebookPanel.IModel;
+  notebookModel: any; // Will be injected from NotebookPanel context
   /** Permission service instance for access control */
-  permissionService: PermissionService;
+  permissionService: IPermissionService;
   /** Awareness service for user presence tracking */
-  awarenessService: AwarenessService;
+  awarenessService: IAwarenessService;
   /** Translator for internationalization */
   translator: ITranslator;
   /** Callback fired when permissions are changed */
@@ -332,6 +341,10 @@ export const PermissionsDialog: React.FC<IPermissionsDialogProps> = ({
   const getRoleInfo = useCallback((role: PermissionRole): IPermissionLevel => {
     return PERMISSION_LEVELS.find(level => level.level === role) || PERMISSION_LEVELS[1];
   }, []);
+  
+  // Prevent unused variable warning by explicitly using the function
+  // This can be used for future role-based UI enhancements
+  void getRoleInfo;
 
   /**
    * Handle document visibility change
@@ -489,7 +502,6 @@ export const PermissionsDialog: React.FC<IPermissionsDialogProps> = ({
         ) : (
           <div className="jp-PermissionsDialog-collaborators">
             {collaborators.map(collaborator => {
-              const roleInfo = getRoleInfo(collaborator.role);
               return (
                 <div key={collaborator.id} className="jp-PermissionsDialog-collaborator">
                   <div className="jp-PermissionsDialog-collaboratorInfo">
@@ -583,14 +595,14 @@ export const PermissionsDialog: React.FC<IPermissionsDialogProps> = ({
  * Widget wrapper for the permissions dialog
  */
 export class PermissionsDialogWidget extends Widget {
-  private _dialog: Dialog<IResult<void>>;
+  private _dialog: Dialog<void>;
 
   constructor(props: IPermissionsDialogProps) {
     super();
     this.addClass('jp-PermissionsDialogWidget');
 
     // Create dialog buttons
-    const buttons: IButton[] = [
+    const buttons: Dialog.IButton[] = [
       Dialog.cancelButton({ label: props.translator.load('notebook-extension').__('Cancel') }),
       Dialog.okButton({ label: props.translator.load('notebook-extension').__('Done') })
     ];
@@ -615,7 +627,7 @@ export class PermissionsDialogWidget extends Widget {
   /**
    * Show the dialog
    */
-  async show(): Promise<IResult<void>> {
+  async show(): Promise<Dialog.IResult<void>> {
     return this._dialog.launch();
   }
 
@@ -661,7 +673,7 @@ class PermissionsDialogBodyWidget extends Widget {
 /**
  * Utility function to show the permissions dialog
  */
-export async function showPermissionsDialog(props: IPermissionsDialogProps): Promise<IResult<void>> {
+export async function showPermissionsDialog(props: IPermissionsDialogProps): Promise<Dialog.IResult<void>> {
   const widget = PermissionsDialogWidget.create(props);
   return widget.show();
 }
