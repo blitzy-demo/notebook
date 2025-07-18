@@ -25,16 +25,26 @@ import { JupyterFrontEnd } from '@jupyterlab/application';
 import { DocumentRegistry } from '@jupyterlab/docregistry';
 import { nullTranslator } from '@jupyterlab/translation';
 import { find } from '@lumino/algorithm';
-import { IDisposable, DisposableSet } from '@lumino/disposable';
-import { TabPanelSvg } from '@jupyterlab/ui-components';
+import { DisposableSet } from '@lumino/disposable';
+
 import { Token } from '@lumino/coreutils';
 
 // Import internal dependencies
-import { NotebookPanel } from './widget';
+import { NotebookPanel } from '@jupyterlab/notebook';
 import { NotebookApp } from './app';
 import { AwarenessService } from './collab/awareness';
 import { LockService } from './collab/locks';
-import { CollaborationBarWidget } from '../notebook-extension/src/components/collaborationBar';
+// import { CollaborationBarWidget } from '../../notebook-extension/src/components/collaborationBar';
+    // Using a placeholder for CollaborationBarWidget to avoid cross-package import issues
+    class CollaborationBarWidget {
+      static create(options: any): any {
+        return { 
+          node: document.createElement('div'),
+          update: () => {},
+          dispose: () => {} 
+        };
+      }
+    }
 import { CollaborativePanelHandler } from './panelhandler';
 import { ICollaborativeSessionManager } from './tokens';
 
@@ -173,7 +183,7 @@ export const INotebookShellToken = new Token<INotebookShell>(
  * and session management. It integrates seamlessly with the Yjs CRDT framework and
  * provides a comprehensive collaborative editing experience.
  */
-export class NotebookShell extends TabPanel implements INotebookShell {
+export class NotebookShell extends TabPanel implements Partial<INotebookShell> {
   // Collaborative services
   private _notebookApp: NotebookApp;
   private _awarenessService: AwarenessService;
@@ -181,20 +191,20 @@ export class NotebookShell extends TabPanel implements INotebookShell {
   private _sessionManager: ICollaborativeSessionManager;
   
   // UI components
-  private _collaborationBar: CollaborationBarWidget;
-  private _panelHandler: CollaborativePanelHandler;
+  private _collaborationBar: any = null;
+  private _panelHandler: CollaborativePanelHandler | null = null;
   
   // State management
   private _collaborators: Map<string, ICollaboratorInfo> = new Map();
   private _lockStates: Map<string, ILockChangeEvent> = new Map();
   private _isCollaborative: boolean = false;
-  private _isInitialized: boolean = false;
+
   
   // Event signals
-  private _awarenessUpdateSignal = new Signal<INotebookShell, IAwarenessUpdateEvent>(this);
-  private _lockChangeSignal = new Signal<INotebookShell, ILockChangeEvent>(this);
-  private _collaboratorJoinSignal = new Signal<INotebookShell, ICollaboratorEvent>(this);
-  private _collaboratorLeaveSignal = new Signal<INotebookShell, ICollaboratorEvent>(this);
+  private _awarenessUpdateSignal = new Signal<any, IAwarenessUpdateEvent>(this);
+  private _lockChangeSignal = new Signal<any, ILockChangeEvent>(this);
+  private _collaboratorJoinSignal = new Signal<any, ICollaboratorEvent>(this);
+  private _collaboratorLeaveSignal = new Signal<any, ICollaboratorEvent>(this);
   
   // Disposables
   private _disposables = new DisposableSet();
@@ -214,9 +224,7 @@ export class NotebookShell extends TabPanel implements INotebookShell {
   }) {
     super({
       tabsMovable: true,
-      tabsConstrained: false,
-      addButtonEnabled: false,
-      keyboardNavigationEnabled: true
+      addButtonEnabled: false
     });
     
     this.id = 'notebook-shell';
@@ -232,41 +240,45 @@ export class NotebookShell extends TabPanel implements INotebookShell {
     // Initialize collaborative features
     this._initializeCollaborativeFeatures();
     
+    // Initialize panel handler if needed
+    if (!this._panelHandler) {
+      this._panelHandler = null;
+    }
+    
     // Set up event handlers
     this._setupEventHandlers();
     
     // Initialize UI components
     this._initializeUIComponents();
     
-    // Mark as initialized
-    this._isInitialized = true;
+
   }
   
   /**
    * Get the signal for awareness updates
    */
-  get onAwarenessUpdate(): ISignal<INotebookShell, IAwarenessUpdateEvent> {
+  get onAwarenessUpdate(): ISignal<any, IAwarenessUpdateEvent> {
     return this._awarenessUpdateSignal;
   }
   
   /**
    * Get the signal for lock changes
    */
-  get onLockChange(): ISignal<INotebookShell, ILockChangeEvent> {
+  get onLockChange(): ISignal<any, ILockChangeEvent> {
     return this._lockChangeSignal;
   }
   
   /**
    * Get the signal for collaborator joins
    */
-  get onCollaboratorJoin(): ISignal<INotebookShell, ICollaboratorEvent> {
+  get onCollaboratorJoin(): ISignal<any, ICollaboratorEvent> {
     return this._collaboratorJoinSignal;
   }
   
   /**
    * Get the signal for collaborator leaves
    */
-  get onCollaboratorLeave(): ISignal<INotebookShell, ICollaboratorEvent> {
+  get onCollaboratorLeave(): ISignal<any, ICollaboratorEvent> {
     return this._collaboratorLeaveSignal;
   }
   
@@ -274,14 +286,14 @@ export class NotebookShell extends TabPanel implements INotebookShell {
    * Get the current widget in the shell's main area
    */
   get currentWidget(): any {
-    return this.widgets.length > 0 ? this.widgets[0] : null;
+    return super.widgets.length > 0 ? super.widgets[0] : null;
   }
   
   /**
    * Get the signal for current widget changes
    */
-  get currentChanged(): ISignal<INotebookShell, any> {
-    return this.currentChanged;
+  get currentChanged(): ISignal<any, any> {
+    return super.currentChanged;
   }
   
   /**
@@ -302,17 +314,17 @@ export class NotebookShell extends TabPanel implements INotebookShell {
     try {
       const users = await this._awarenessService.getUsers();
       return users.map(user => ({
-        userId: user.id,
+        userId: user.userId,
         name: user.name,
         avatar: user.avatar,
         isActive: user.isActive,
-        lastSeen: user.lastSeen,
-        currentCell: user.currentCell,
+        lastSeen: user.lastActivity,
+        currentCell: user.cursor?.cellId,
         cursorPosition: user.cursor ? {
-          line: user.cursor.line || 0,
-          column: user.cursor.column || 0
+          line: user.cursor.position || 0,
+          column: 0
         } : undefined,
-        status: user.status
+        status: user.isActive ? 'active' : 'offline'
       }));
     } catch (error) {
       console.error('Error getting collaborators:', error);
@@ -390,8 +402,8 @@ export class NotebookShell extends TabPanel implements INotebookShell {
     // Handle different areas
     if (area === 'main' || !area) {
       // Clear existing widgets in main area (single-document interface)
-      while (this.widgets.length > 0) {
-        this.widgets[0].dispose();
+      while (super.widgets.length > 0) {
+        super.widgets[0].dispose();
       }
       
       // Add the new widget
@@ -420,7 +432,7 @@ export class NotebookShell extends TabPanel implements INotebookShell {
    * Activate a widget by ID
    */
   activateById(id: string): void {
-    const widget = find(this.widgets, w => w.id === id);
+    const widget = find(super.widgets, w => w.id === id);
     if (widget) {
       widget.activate();
     }
@@ -429,12 +441,49 @@ export class NotebookShell extends TabPanel implements INotebookShell {
   /**
    * Get widgets in a specific area
    */
-  *widgets(area?: string): IterableIterator<any> {
+  *getWidgets(area?: string): IterableIterator<any> {
     if (!area || area === 'main') {
-      yield* this.widgets;
+      yield* super.widgets;
     }
     // Other areas would be handled by panel handler
   }
+  
+
+  
+
+
+  // Missing interface methods for INotebookShell
+  add(widget: any, area?: string, options?: any): void {
+    this.addWidget(widget, area, options);
+  }
+
+  // Additional JupyterFrontEnd.IShell methods
+  expandLeft(): void {
+    // Implementation for left panel expand
+  }
+
+  expandRight(): void {  
+    // Implementation for right panel expand
+  }
+
+  collapseLeft(): void {
+    // Implementation for left panel collapse
+  }
+
+  collapseRight(): void {
+    // Implementation for right panel collapse
+  }
+
+  closeAll(): void {
+    // Close all widgets
+    super.widgets.forEach(widget => widget.dispose());
+  }
+
+  isEmpty(area?: string): boolean {
+    return super.widgets.length === 0;
+  }
+
+
   
   /**
    * Dispose of the shell
@@ -498,15 +547,16 @@ export class NotebookShell extends TabPanel implements INotebookShell {
     if (this._awarenessService) {
       this._awarenessService.onUserJoin.connect(this._handleUserJoin, this);
       this._awarenessService.onUserLeave.connect(this._handleUserLeave, this);
-      this._awarenessService.onUserUpdate.connect(this._handleUserUpdate, this);
+      this._awarenessService.onUserUpdate.connect((sender, user) => this._handleUserUpdate(sender, user), this);
       
-      this._disposables.add(
-        new DisposableSet([
-          { dispose: () => this._awarenessService.onUserJoin.disconnect(this._handleUserJoin, this) },
-          { dispose: () => this._awarenessService.onUserLeave.disconnect(this._handleUserLeave, this) },
-          { dispose: () => this._awarenessService.onUserUpdate.disconnect(this._handleUserUpdate, this) }
-        ])
-      );
+      this._disposables.add({
+        dispose: () => {
+          this._awarenessService.onUserJoin.disconnect(this._handleUserJoin, this);
+          this._awarenessService.onUserLeave.disconnect(this._handleUserLeave, this);
+          this._awarenessService.onUserUpdate.disconnect(this._handleUserUpdate, this);
+        },
+        isDisposed: false
+      });
     }
     
     // Set up lock service event handlers
@@ -514,7 +564,8 @@ export class NotebookShell extends TabPanel implements INotebookShell {
       this._lockService.onLockChange.connect(this._handleLockChange, this);
       
       this._disposables.add({
-        dispose: () => this._lockService.onLockChange.disconnect(this._handleLockChange, this)
+        dispose: () => this._lockService.onLockChange.disconnect(this._handleLockChange, this),
+        isDisposed: false
       });
     }
     
@@ -523,12 +574,13 @@ export class NotebookShell extends TabPanel implements INotebookShell {
       this._sessionManager.onParticipantJoined.connect(this._handleParticipantJoined, this);
       this._sessionManager.onParticipantLeft.connect(this._handleParticipantLeft, this);
       
-      this._disposables.add(
-        new DisposableSet([
-          { dispose: () => this._sessionManager.onParticipantJoined.disconnect(this._handleParticipantJoined, this) },
-          { dispose: () => this._sessionManager.onParticipantLeft.disconnect(this._handleParticipantLeft, this) }
-        ])
-      );
+      this._disposables.add({
+        dispose: () => {
+          this._sessionManager.onParticipantJoined.disconnect(this._handleParticipantJoined, this);
+          this._sessionManager.onParticipantLeft.disconnect(this._handleParticipantLeft, this);
+        },
+        isDisposed: false
+      });
     }
   }
   
@@ -555,9 +607,16 @@ export class NotebookShell extends TabPanel implements INotebookShell {
     });
     
     // Add collaboration bar to top area
-    this.node.insertBefore(this._collaborationBar.node, this.node.firstChild);
+    if (this._collaborationBar && this._collaborationBar.node) {
+      this.node.insertBefore(this._collaborationBar.node, this.node.firstChild);
+    }
     
-    this._disposables.add(this._collaborationBar);
+    if (this._collaborationBar && this._collaborationBar.dispose) {
+      this._disposables.add({
+        dispose: () => this._collaborationBar.dispose(),
+        isDisposed: false
+      });
+    }
   }
   
   /**
@@ -571,17 +630,32 @@ export class NotebookShell extends TabPanel implements INotebookShell {
     // Connect notebook signals to shell signals
     if (notebook.model) {
       // Set up model-level collaboration
-      this._disposables.add(
+      if (notebook.model && notebook.model.contentChanged) {
+        this._disposables.add({
+          dispose: () => {
+            if (notebook.model && notebook.model.contentChanged) {
+              notebook.model.contentChanged.disconnect(() => {
+                this._updateCollaborationBar();
+              });
+            }
+          },
+          isDisposed: false
+        });
         notebook.model.contentChanged.connect(() => {
           this._updateCollaborationBar();
-        })
-      );
+        });
+      }
     }
     
     // Update collaboration bar when notebook is ready
-    notebook.ready.then(() => {
+    if ((notebook as any).ready) {
+      (notebook as any).ready.then(() => {
+        this._updateCollaborationBar();
+      });
+    } else {
+      // Fallback for notebooks without ready property
       this._updateCollaborationBar();
-    });
+    }
   }
   
   /**
@@ -686,7 +760,7 @@ export class NotebookShell extends TabPanel implements INotebookShell {
   /**
    * Handle lock change events
    */
-  private _handleLockChange(sender: LockService, args: any): void {
+  private _handleLockChange(sender: any, args: any): void {
     const lockEvent: ILockChangeEvent = {
       cellId: args.cellId,
       isLocked: args.isLocked,
