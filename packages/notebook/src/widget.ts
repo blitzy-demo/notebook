@@ -1109,9 +1109,9 @@ export class CollaborativeWidgetManager implements IDisposable {
    * @returns Disposable subscription
    */
   subscribeToEvents(callback: (sender: any, state: ICollaborativeState) => void): IDisposable {
-    const disconnect = this._stateChangedSignal.connect(callback);
     return {
-      dispose: () => this._stateChangedSignal.disconnect(callback)
+      dispose: () => this._stateChangedSignal.disconnect(callback),
+      isDisposed: false
     };
   }
   
