@@ -34,6 +34,7 @@ Documentation](notebook.md).
 
 user-documentation
 configuration
+collaboration
 migrate_to_notebook7
 contributor
 changelog
