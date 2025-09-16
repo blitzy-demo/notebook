@@ -23,9 +23,9 @@ from collections.abc import Awaitable
 from typing import Any, Optional, Union
 
 import tornado.web
-from jupyter_server import JupyterHandler
+from jupyter_server.base.handlers import JupyterHandler
 from tornado.websocket import WebSocketHandler
-from traitlets import Bool, Float, Int, Unicode
+from traitlets import Bool, Float, Int, List, Unicode
 
 
 class YjsWebSocketHandler(WebSocketHandler):
@@ -64,7 +64,7 @@ class YjsWebSocketHandler(WebSocketHandler):
     rate_limit_per_second = Int(default_value=100, help="Rate limit per connection per second").tag(
         config=True
     )
-    allowed_origins = list(
+    allowed_origins = List(
         trait=Unicode(), default_value=["*"], help="Allowed WebSocket origins"
     ).tag(config=True)
     storage_backend = Unicode(
