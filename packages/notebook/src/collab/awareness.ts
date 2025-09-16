@@ -9,11 +9,11 @@
  * cells, and idle detection with timeout handling for comprehensive presence visualization.
  */
 
-import { Awareness } from 'y-protocols';
+import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
 import { Signal } from '@lumino/signaling';
 import { UUID } from '@lumino/coreutils';
-import { ICellModel } from '@jupyterlab/cells';
+// import { ICellModel } from '@jupyterlab/cells'; // Reserved for future use
 
 import { YjsNotebookProvider } from './provider';
 import { ICollaborativeUser } from '../tokens';
@@ -116,7 +116,8 @@ interface IAwarenessState {
 export class CollaborationAwareness {
   private _awareness: Awareness;
   private _provider: YjsNotebookProvider | null = null;
-  private _config: Required<IAwarenessConfig>;
+  private _config: Required<Omit<IAwarenessConfig, 'customAwareness'>>;
+  private _isCustomAwareness: boolean = false;
   private _localUserId: string;
   private _userStates: Map<string, IAwarenessState> = new Map();
   private _userColors: Map<string, UserColor> = new Map();
@@ -143,15 +144,20 @@ export class CollaborationAwareness {
       userColors: config.userColors ?? Object.values(UserColor),
       autoAssignColors: config.autoAssignColors ?? true,
       heartbeatInterval: config.heartbeatInterval ?? 30000, // 30 seconds
-      persistAwareness: config.persistAwareness ?? false,
-      customAwareness: config.customAwareness
+      persistAwareness: config.persistAwareness ?? false
     };
 
     // Generate unique user ID
     this._localUserId = UUID.uuid4();
 
     // Initialize awareness instance
-    this._awareness = this._config.customAwareness ?? new Awareness(new Y.Doc());
+    if (config.customAwareness) {
+      this._awareness = config.customAwareness;
+      this._isCustomAwareness = true;
+    } else {
+      this._awareness = new Awareness(new Y.Doc());
+      this._isCustomAwareness = false;
+    }
 
     // Set up awareness event handlers
     this._setupAwarenessEventHandlers();
@@ -189,11 +195,11 @@ export class CollaborationAwareness {
   get activeUsers(): ICollaborativeUser[] {
     const users: ICollaborativeUser[] = [];
 
-    for (const [userId, state] of this._userStates) {
+    Array.from(this._userStates.entries()).forEach(([userId, state]) => {
       if (state.user.isActive) {
         users.push(state.user);
       }
-    }
+    });
 
     return users;
   }
@@ -303,9 +309,9 @@ export class CollaborationAwareness {
   getAllUsers(): ICollaborativeUser[] {
     const users: ICollaborativeUser[] = [];
 
-    for (const [userId, state] of this._userStates) {
+    Array.from(this._userStates.entries()).forEach(([userId, state]) => {
       users.push(state.user);
-    }
+    });
 
     return users;
   }
@@ -337,9 +343,9 @@ export class CollaborationAwareness {
     this._config.presenceTimeout = timeout;
 
     // Reset all existing timers with new timeout
-    for (const [userId, state] of this._userStates) {
+    Array.from(this._userStates.entries()).forEach(([userId, state]) => {
       this._resetUserTimeout(userId, state);
-    }
+    });
 
     console.log('Presence timeout updated to:', timeout, 'ms');
   }
@@ -353,7 +359,17 @@ export class CollaborationAwareness {
     // Update user state if exists
     const state = this._userStates.get(userId);
     if (state) {
-      const updatedUser = { ...state.user, color };
+      const updatedUser: ICollaborativeUser = {
+        userId: state.user.userId,
+        username: state.user.username,
+        displayName: state.user.displayName,
+        avatar: state.user.avatar,
+        color: color,
+        cursorPosition: state.user.cursorPosition,
+        selectedCells: state.user.selectedCells,
+        isActive: state.user.isActive,
+        lastActivity: state.user.lastActivity
+      };
 
       if (userId === this._localUserId) {
         this.updateLocalUser({ color });
@@ -494,14 +510,14 @@ export class CollaborationAwareness {
       this._globalHeartbeatTimer = null;
     }
 
-    for (const [userId, state] of this._userStates) {
+    Array.from(this._userStates.entries()).forEach(([userId, state]) => {
       if (state.heartbeatTimer) {
         clearTimeout(state.heartbeatTimer);
       }
       if (state.timeoutTimer) {
         clearTimeout(state.timeoutTimer);
       }
-    }
+    });
 
     // Clear collections
     this._userStates.clear();
@@ -511,7 +527,7 @@ export class CollaborationAwareness {
     this._awareness.off('change', this._handleAwarenessChange);
 
     // Destroy awareness if we own it
-    if (!this._config.customAwareness) {
+    if (!this._isCustomAwareness) {
       this._awareness.destroy();
     }
 
@@ -560,7 +576,8 @@ export class CollaborationAwareness {
       for (const clientId of changes.removed) {
         // We need to track user IDs separately since state is gone
         // Find user by client ID in our local tracking
-        for (const [userId, userState] of this._userStates) {
+        const entries = Array.from(this._userStates.entries());
+        for (const [, userState] of entries) {
           if (userState.user.userId === clientId.toString()) {
             this._handleUserLeft(userState.user);
             break;
@@ -581,17 +598,26 @@ export class CollaborationAwareness {
       return;
     }
 
-    // Create user state
+    // Create user state with proper color assignment
+    const assignedColor = (!user.color || user.color === '')
+      ? this._assignUserColor(user.userId)
+      : user.color;
+
     const userState: IAwarenessState = {
-      user: { ...user },
+      user: {
+        userId: user.userId,
+        username: user.username,
+        displayName: user.displayName,
+        avatar: user.avatar,
+        color: assignedColor,
+        cursorPosition: user.cursorPosition,
+        selectedCells: user.selectedCells,
+        isActive: user.isActive,
+        lastActivity: user.lastActivity
+      },
       lastActivity: Date.now(),
       backoffLevel: 0
     };
-
-    // Assign color if not set
-    if (!user.color || user.color === '') {
-      userState.user.color = this._assignUserColor(user.userId);
-    }
 
     this._userStates.set(user.userId, userState);
 
