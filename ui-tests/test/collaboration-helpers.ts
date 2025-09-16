@@ -7,9 +7,7 @@
  */
 
 // External imports from packages
-import type { BrowserContext } from '@playwright/test';
 import { IJupyterLabPageFixture } from '@jupyterlab/galata';
-import type { Array as YArray } from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import * as Y from 'yjs';
 

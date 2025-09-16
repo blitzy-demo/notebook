@@ -2,8 +2,6 @@ import { IJupyterLabPageFixture } from '@jupyterlab/galata';
 
 import { Page, BrowserContext, Browser } from '@playwright/test';
 
-import { cleanupCollaborationSession } from './collaboration-helpers';
-
 /**
  * Run the selected cell and advance.
  */

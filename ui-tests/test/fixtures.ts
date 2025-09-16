@@ -1,5 +1,4 @@
 import { test as base } from '@jupyterlab/galata';
-import type { Browser } from '@playwright/test';
 import {
   setupCollaborationServer,
   generateMockUsers,
@@ -9,7 +8,15 @@ import {
   COLLABORATION_TIMEOUTS
 } from './collaboration-helpers';
 
-export const test = base.extend({
+export const test = base.extend<{
+  collaborationServer: MockWebSocketServer | null;
+  collaborationEnabled: boolean;
+  mockUsers: CollaborationUser[];
+  yjsDocumentFixture: any;
+  awarenessFixture: any;
+  waitForCollaboration: (timeoutMs?: number) => Promise<boolean>;
+  createMultipleContexts: (count: number) => Promise<any[]>;
+}>({
   waitForApplication: async ({ baseURL }, use, testInfo) => {
     const waitIsReady = async (page: any): Promise<void> => {
       await page.waitForSelector('#main-panel');
