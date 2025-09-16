@@ -9,6 +9,8 @@ import { find } from '@lumino/algorithm';
 import { JSONExt, PromiseDelegate, Token } from '@lumino/coreutils';
 import { ISignal, Signal } from '@lumino/signaling';
 
+import { ICollaborationBar } from './tokens';
+
 import {
   BoxLayout,
   FocusTracker,
@@ -191,6 +193,11 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
 
     this.add(skipLinkWidgetHandler.skipLinkWidget, 'top', { rank: 0 });
     this._skipLinkWidgetHandler.show();
+
+    // Initialize collaboration features if enabled
+    // Note: Collaboration bar will be injected later via dependency injection
+    // This initialization is handled in the application plugins
+    this._collaborationBar = null;
   }
 
   /**
@@ -287,6 +294,14 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
    */
   get userLayout() {
     return JSONExt.deepCopy(this._userLayout as any);
+  }
+
+  /**
+   * Get the collaboration bar widget.
+   * Returns null if collaboration is not enabled or not initialized.
+   */
+  get collaborationBar(): ICollaborationBar | null {
+    return this._collaborationBar;
   }
 
   /**
@@ -468,6 +483,93 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
   }
 
   /**
+   * Show the collaboration status bar.
+   * Displays the collaboration bar widget if collaboration is enabled.
+   */
+  showCollaborationStatus(): void {
+    if (this._collaborationBar) {
+      // Show connection status for any currently connected users
+      this._collaborationBar.showConnectionStatus(true);
+      const activeUsers = this._collaborationBar.getActiveUsers();
+      this._collaborationBar.updatePresence(activeUsers);
+    }
+  }
+
+  /**
+   * Hide the collaboration status bar.
+   * Hides the collaboration bar widget if it exists.
+   */
+  hideCollaborationStatus(): void {
+    if (this._collaborationBar) {
+      this._collaborationBar.showConnectionStatus(false);
+    }
+  }
+
+  /**
+   * Handle collaboration WebSocket connection state changes.
+   * Updates the collaboration bar and emits notifications about connection state.
+   *
+   * @param connected - Whether the collaboration service is connected
+   */
+  handleCollaborationConnection(connected: boolean): void {
+    if (this._collaborationBar) {
+      this._collaborationBar.showConnectionStatus(connected);
+
+      // Emit connection state changes through existing notification system
+      const message = connected
+        ? 'Collaboration service connected'
+        : 'Collaboration service disconnected';
+
+      // Use console for now as notification system integration would require additional dependencies
+      console.log(`Collaboration: ${message}`);
+
+      if (!connected) {
+        // Clear user presence when disconnected
+        this._collaborationBar.updatePresence([]);
+      }
+    }
+  }
+
+  /**
+   * Set the collaboration bar instance.
+   * This method is called by the plugin system when collaboration features are enabled.
+   *
+   * @param collaborationBar - The collaboration bar instance to set
+   */
+  setCollaborationBar(collaborationBar: ICollaborationBar | null): void {
+    this._collaborationBar = collaborationBar;
+    if (this._collaborationBar) {
+      // Initialize with empty user list and disconnected state
+      this._collaborationBar.updatePresence([]);
+      this._collaborationBar.showConnectionStatus(false);
+    }
+  }
+
+  /**
+   * Add a user to the collaboration presence display.
+   * This method is called when a new user joins the collaborative session.
+   *
+   * @param user - The user information to add to the presence display
+   */
+  addCollaboratorUser(user: any): void {
+    if (this._collaborationBar) {
+      this._collaborationBar.addUser(user);
+    }
+  }
+
+  /**
+   * Remove a user from the collaboration presence display.
+   * This method is called when a user leaves the collaborative session.
+   *
+   * @param userId - The ID of the user to remove from the presence display
+   */
+  removeCollaboratorUser(userId: string): void {
+    if (this._collaborationBar) {
+      this._collaborationBar.removeUser(userId);
+    }
+  }
+
+  /**
    * Handle a change on the down panel widgets
    */
   private _onTabPanelChanged(): void {
@@ -493,6 +595,7 @@ export class NotebookShell extends Widget implements JupyterFrontEnd.IShell {
   );
   private _mainWidgetLoaded = new PromiseDelegate<void>();
   private _userLayout: INotebookShell.IUserLayout;
+  private _collaborationBar: ICollaborationBar | null = null;
 }
 
 export namespace Private {
