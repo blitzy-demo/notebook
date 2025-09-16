@@ -7,11 +7,10 @@
  */
 
 // External imports from packages
-import { BrowserContext } from '@playwright/test';
+import type { BrowserContext } from '@playwright/test';
 import { IJupyterLabPageFixture } from '@jupyterlab/galata';
-import { Array as YArray } from 'yjs';
+import type { Array as YArray } from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
-import { encoding } from 'lib0';
 import * as Y from 'yjs';
 
 // Type definitions for collaboration testing
@@ -95,11 +94,11 @@ export class MockWebSocketServer {
     }
 
     // Close all connections
-    for (const connection of this.connections) {
+    this.connections.forEach(connection => {
       if (connection.readyState === WebSocket.OPEN) {
         connection.close();
       }
-    }
+    });
 
     this.connections.clear();
 
@@ -121,11 +120,11 @@ export class MockWebSocketServer {
 
     this.messageHistory.push(messageData);
 
-    for (const connection of this.connections) {
+    this.connections.forEach(connection => {
       if (connection.readyState === WebSocket.OPEN) {
         connection.send(JSON.stringify(message));
       }
-    }
+    });
   }
 
   /**
@@ -148,11 +147,11 @@ export class MockWebSocketServer {
     this.messageHistory.push(messageData);
 
     // Broadcast to other connections (excluding sender)
-    for (const connection of this.connections) {
+    this.connections.forEach(connection => {
       if (connection.readyState === WebSocket.OPEN) {
         connection.send(JSON.stringify(message));
       }
-    }
+    });
   }
 
   /**
@@ -190,7 +189,7 @@ export function createYjsDocument(): Y.Doc {
   const doc = new Y.Doc();
 
   // Initialize with basic notebook structure
-  const cells = doc.getArray('cells');
+  doc.getArray('cells'); // Initialize cells array
   const metadata = doc.getMap('metadata');
 
   // Set up basic notebook metadata
@@ -231,7 +230,7 @@ export async function capturePerformanceMetrics(
   page: IJupyterLabPageFixture
 ): Promise<{
   editLatency: number;
-  memoryUsage: number;
+  memoryUsage: any;
   networkTiming: any;
   renderingMetrics: any;
 }> {
@@ -253,8 +252,8 @@ export async function capturePerformanceMetrics(
         responseTime: navigation.responseEnd - navigation.responseStart
       },
       renderingMetrics: {
-        domContentLoaded: navigation.domContentLoadedEventEnd - navigation.navigationStart,
-        loadComplete: navigation.loadEventEnd - navigation.navigationStart
+        domContentLoaded: navigation.domContentLoadedEventEnd - (navigation.startTime || 0),
+        loadComplete: navigation.loadEventEnd - (navigation.startTime || 0)
       }
     };
   });
@@ -267,20 +266,9 @@ export async function capturePerformanceMetrics(
  */
 export function verifyYjsSync(doc1: Y.Doc, doc2: Y.Doc): boolean {
   try {
-    // Compare document states by encoding and comparing updates
-    const state1 = encoding.encodeStateAsUpdate(doc1);
-    const state2 = encoding.encodeStateAsUpdate(doc2);
-
-    // Apply each document's update to a new document and compare
-    const testDoc1 = new Y.Doc();
-    const testDoc2 = new Y.Doc();
-
-    encoding.applyUpdate(testDoc1, state1);
-    encoding.applyUpdate(testDoc2, state2);
-
-    // Compare cell arrays
-    const cells1 = testDoc1.getArray('cells');
-    const cells2 = testDoc2.getArray('cells');
+    // Simple approach: compare the document states by comparing arrays directly
+    const cells1 = doc1.getArray('cells');
+    const cells2 = doc2.getArray('cells');
 
     if (cells1.length !== cells2.length) {
       return false;
@@ -294,6 +282,17 @@ export function verifyYjsSync(doc1: Y.Doc, doc2: Y.Doc): boolean {
       if (JSON.stringify(cell1) !== JSON.stringify(cell2)) {
         return false;
       }
+    }
+
+    // Compare metadata
+    const meta1 = doc1.getMap('metadata');
+    const meta2 = doc2.getMap('metadata');
+
+    const metaEntries1 = Array.from(meta1.entries());
+    const metaEntries2 = Array.from(meta2.entries());
+
+    if (metaEntries1.length !== metaEntries2.length) {
+      return false;
     }
 
     return true;

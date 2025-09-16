@@ -1,19 +1,17 @@
 import { test as base } from '@jupyterlab/galata';
-import { Browser } from '@playwright/test';
+import type { Browser } from '@playwright/test';
 import {
-  cleanupCollaborationSession,
   setupCollaborationServer,
   generateMockUsers,
   createYjsDocument,
   MockWebSocketServer,
-  CollaborationSession,
   CollaborationUser,
   COLLABORATION_TIMEOUTS
 } from './collaboration-helpers';
 
 export const test = base.extend({
   waitForApplication: async ({ baseURL }, use, testInfo) => {
-    const waitIsReady = async (page): Promise<void> => {
+    const waitIsReady = async (page: any): Promise<void> => {
       await page.waitForSelector('#main-panel');
     };
     await use(waitIsReady);
@@ -24,7 +22,7 @@ export const test = base.extend({
   /**
    * Fixture to manage WebSocket server connection for collaboration testing
    */
-  collaborationServer: async ({}, use, testInfo) => {
+  collaborationServer: async ({}, use: any, testInfo: any) => {
     let server: MockWebSocketServer | null = null;
 
     try {
@@ -40,7 +38,7 @@ export const test = base.extend({
   /**
    * Fixture to toggle collaboration mode on/off
    */
-  collaborationEnabled: async ({}, use) => {
+  collaborationEnabled: async ({}, use: any) => {
     // Enable collaboration mode for multi-user testing
     await use(true);
   },
@@ -48,7 +46,7 @@ export const test = base.extend({
   /**
    * Fixture providing predefined user profiles (names, avatars, colors) for collaborative testing
    */
-  mockUsers: async ({}, use) => {
+  mockUsers: async ({}, use: any) => {
     const users = generateMockUsers(4); // Generate 4 test users by default
     await use(users);
   },
@@ -56,7 +54,7 @@ export const test = base.extend({
   /**
    * Fixture for setting up initial Yjs document states
    */
-  yjsDocumentFixture: async ({}, use) => {
+  yjsDocumentFixture: async ({}, use: any) => {
     let doc: any = null;
 
     try {
@@ -72,7 +70,7 @@ export const test = base.extend({
   /**
    * Fixture for user presence and cursor tracking setup
    */
-  awarenessFixture: async ({ collaborationServer }, use) => {
+  awarenessFixture: async ({ collaborationServer }: any, use: any) => {
     const awarenessData = {
       users: new Map(),
       cursors: new Map(),
@@ -114,7 +112,7 @@ export const test = base.extend({
   /**
    * Hook that ensures WebSocket connection is established before proceeding with tests
    */
-  waitForCollaboration: async ({ collaborationServer }, use) => {
+  waitForCollaboration: async ({ collaborationServer }: any, use: any) => {
     const waitForConnection = async (timeoutMs: number = COLLABORATION_TIMEOUTS.WEBSOCKET_CONNECT): Promise<boolean> => {
       if (!collaborationServer) {
         return false;
@@ -165,7 +163,7 @@ export const test = base.extend({
   /**
    * Fixture for creating multiple browser contexts for multi-user testing
    */
-  createMultipleContexts: async ({ browser }, use) => {
+  createMultipleContexts: async ({ browser }: any, use: any) => {
     const contexts: any[] = [];
 
     const createContexts = async (count: number) => {
