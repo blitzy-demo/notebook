@@ -309,7 +309,7 @@ export class NotebookModel implements INotebookModel {
    * Convert notebook model to JSON format
    */
   toJSON(): any {
-    const cells = this.cells.map(cell => this._cellToJSON(cell));
+    const cells = this.cells.map((cell: ICellModel) => this._cellToJSON(cell));
     const metadata = { ...this.metadata };
 
     return {

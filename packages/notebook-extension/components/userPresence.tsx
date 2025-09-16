@@ -10,14 +10,30 @@
  * via Yjs awareness integration.
  */
 
-import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
+import * as React from 'react';
+const { useState, useEffect, useCallback, useMemo, memo } = React;
 import { ReactWidget } from '@jupyterlab/apputils';
 import { ICellModel, CodeCell, MarkdownCell } from '@jupyterlab/cells';
-import { Decoration, WidgetType, ViewPlugin, DecorationSet } from '@jupyterlab/codemirror';
+import { Decoration, WidgetType, ViewPlugin, DecorationSet } from '@codemirror/view';
 
 import { CollaborationAwareness } from '../../notebook/src/collab/awareness';
-import { ICollaborationAwareness } from '../../application/src/tokens';
-import { ICollaborativeUser, UserColor } from '../../notebook/src/tokens';
+import { ICollaborativeUser } from '../../notebook/src/tokens';
+
+/**
+ * User color enumeration for collaborative presence indicators
+ */
+export enum UserColor {
+  BLUE = '#4285f4',
+  GREEN = '#34a853',
+  RED = '#ea4335',
+  YELLOW = '#fbbc05',
+  PURPLE = '#9c27b0',
+  ORANGE = '#ff9800',
+  TEAL = '#009688',
+  INDIGO = '#3f51b5',
+  PINK = '#e91e63',
+  CYAN = '#00bcd4'
+}
 
 /**
  * Props interface for UserPresence component
@@ -188,7 +204,7 @@ const UserPresence: React.FC<IUserPresenceProps> = memo(({
   }, [awareness, presenceTimeout]);
 
   // Handle awareness updates for user join/leave events
-  const handleUserJoin = useCallback((user: ICollaborativeUser) => {
+  const handleUserJoin = useCallback((sender: CollaborationAwareness, user: ICollaborativeUser) => {
     setRemoteUsers(prev => {
       const existing = prev.find(u => u.userId === user.userId);
       if (existing) {
@@ -215,7 +231,7 @@ const UserPresence: React.FC<IUserPresenceProps> = memo(({
     }
   }, [awareness]);
 
-  const handleUserLeave = useCallback((user: ICollaborativeUser) => {
+  const handleUserLeave = useCallback((sender: CollaborationAwareness, user: ICollaborativeUser) => {
     setRemoteUsers(prev => prev.filter(u => u.userId !== user.userId));
     setCursorPositions(prev => {
       const newMap = new Map(prev);
