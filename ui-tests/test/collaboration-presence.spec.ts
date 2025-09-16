@@ -1,14 +1,12 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import path from 'path';
+import * as path from 'path';
 
 import { expect } from '@jupyterlab/galata';
-import { Page } from '@playwright/test';
 
 import { test } from './fixtures';
 import { waitForAwarenessUpdate } from './utils';
-import { cleanupCollaborationSession } from './collaboration-helpers';
 
 const NOTEBOOK = 'collaborative-test.ipynb';
 
@@ -308,6 +306,10 @@ test.describe('User Presence and Awareness', () => {
           }
         });
         // Note: Being flexible with color matching as CSS representation may vary
+        // We expect at least some of the colors to match, but due to CSS variations we don't require exact matches
+        if (colorFound) {
+          console.log(`✓ Found expected color ${expectedColor} in UI`);
+        }
       });
 
     } finally {
