@@ -8,10 +8,7 @@
  * cell locking, change history, permissions, and comment systems.
  */
 
-import path from 'path';
-
 import { expect } from '@jupyterlab/galata';
-import { BrowserContext } from '@playwright/test';
 
 import { test } from './fixtures';
 import {
@@ -21,17 +18,14 @@ import {
   waitForSync,
   simulateConcurrentEdits,
   verifyPresenceIndicators,
-  checkCellLock,
   measureSyncLatency,
   createCollaborativeSession,
   waitForAwarenessUpdate
 } from './utils';
 import {
-  cleanupCollaborationSession,
   generateCollaborativeNotebook,
   PERFORMANCE_THRESHOLDS,
-  COLLABORATION_TIMEOUTS,
-  CollaborationSession
+  COLLABORATION_TIMEOUTS
 } from './collaboration-helpers';
 
 // Test notebook configuration
@@ -48,10 +42,10 @@ test.describe('Multi-User Collaboration', () => {
     notebookContent = generateCollaborativeNotebook();
 
     // Upload notebook for testing
-    await page.contents.uploadFile(
+    await page.contents.uploadContent(
       JSON.stringify(notebookContent),
-      `${tmpPath}/${COLLABORATION_NOTEBOOK}`,
-      'application/json'
+      'json',
+      `${tmpPath}/${COLLABORATION_NOTEBOOK}`
     );
   });
 
@@ -70,7 +64,7 @@ test.describe('Multi-User Collaboration', () => {
     waitForCollaboration: waitForCollaborationFixture
   }) => {
     // Validate Real-Time Document Synchronization (F-024) with basic two-user sync
-    const contexts = await createMultipleContexts(browser, 2);
+    const contexts = await createMultipleContexts(browser as any, 2);
     const notebookPath = `notebooks/${tmpPath}/${COLLABORATION_NOTEBOOK}`;
 
     try {
@@ -142,7 +136,7 @@ test.describe('Multi-User Collaboration', () => {
     mockUsers
   }) => {
     // Test CRDT conflict resolution and operational transformation
-    const contexts = await createMultipleContexts(browser, 2);
+    const contexts = await createMultipleContexts(browser as any, 2);
     const notebookPath = `notebooks/${tmpPath}/${COLLABORATION_NOTEBOOK}`;
 
     try {
@@ -200,7 +194,7 @@ test.describe('Multi-User Collaboration', () => {
   }) => {
     // Test multi-user document consistency with 3 concurrent users
     const userCount = 3;
-    const contexts = await createMultipleContexts(browser, userCount);
+    const contexts = await createMultipleContexts(browser as any, userCount);
     const notebookPath = `notebooks/${tmpPath}/${COLLABORATION_NOTEBOOK}`;
 
     try {
@@ -270,7 +264,7 @@ test.describe('Multi-User Collaboration', () => {
     collaborationServer
   }) => {
     // Stress testing rapid edits to validate performance under load
-    const contexts = await createMultipleContexts(browser, 2);
+    const contexts = await createMultipleContexts(browser as any, 2);
     const notebookPath = `notebooks/${tmpPath}/${COLLABORATION_NOTEBOOK}`;
 
     try {
@@ -333,7 +327,7 @@ test.describe('Multi-User Collaboration', () => {
     collaborationServer
   }) => {
     // Test structural changes sync (cell additions/deletions)
-    const contexts = await createMultipleContexts(browser, 2);
+    const contexts = await createMultipleContexts(browser as any, 2);
     const notebookPath = `notebooks/${tmpPath}/${COLLABORATION_NOTEBOOK}`;
 
     try {
@@ -420,7 +414,7 @@ test.describe('Multi-User Collaboration', () => {
     collaborationServer
   }) => {
     // Test markdown/code cell type conversions during collaboration
-    const contexts = await createMultipleContexts(browser, 2);
+    const contexts = await createMultipleContexts(browser as any, 2);
     const notebookPath = `notebooks/${tmpPath}/${COLLABORATION_NOTEBOOK}`;
 
     try {
@@ -495,7 +489,7 @@ test.describe('Multi-User Collaboration', () => {
   }) => {
     // Performance validation with maximum user count as per requirements
     const maxUsers = PERFORMANCE_THRESHOLDS.MIN_CONCURRENT_USERS;
-    const contexts = await createMultipleContexts(browser, maxUsers);
+    const contexts = await createMultipleContexts(browser as any, maxUsers);
     const notebookPath = `notebooks/${tmpPath}/${COLLABORATION_NOTEBOOK}`;
 
     try {
@@ -577,7 +571,7 @@ test.describe('Multi-User Collaboration', () => {
     mockUsers
   }) => {
     // Test user leaving scenario and cleanup
-    const contexts = await createMultipleContexts(browser, 3);
+    const contexts = await createMultipleContexts(browser as any, 3);
     const notebookPath = `notebooks/${tmpPath}/${COLLABORATION_NOTEBOOK}`;
 
     try {
