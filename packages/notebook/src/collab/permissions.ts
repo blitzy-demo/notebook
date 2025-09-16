@@ -12,7 +12,6 @@
 
 import * as Y from 'yjs';
 import { Signal } from '@lumino/signaling';
-import { Time } from '@lumino/coreutils';
 import { ServerConnection } from '@jupyterlab/services';
 
 import { YjsNotebookProvider } from './provider';
@@ -514,11 +513,11 @@ export class PermissionManager {
   getCachedPermissions(): Map<string, CollaborativeRole> {
     const result = new Map<string, CollaborativeRole>();
 
-    for (const [userId, entry] of this._permissionCache.entries()) {
+    Array.from(this._permissionCache.entries()).forEach(([userId, entry]) => {
       if (entry.expiresAt > Date.now()) {
         result.set(userId, entry.role);
       }
-    }
+    });
 
     return result;
   }
@@ -531,9 +530,9 @@ export class PermissionManager {
     this._permissionCache.clear();
 
     // Clear timeout handlers
-    for (const timeout of this._cacheTimeouts.values()) {
-      Time.clearTimeout(timeout);
-    }
+    Array.from(this._cacheTimeouts.values()).forEach(timeout => {
+      clearTimeout(timeout);
+    });
     this._cacheTimeouts.clear();
 
     console.log('Permission cache cleared');
@@ -610,8 +609,8 @@ export class PermissionManager {
       return;
     }
 
-    this._rolesMap.observe((event) => {
-      event.changes.keys.forEach((change, userId) => {
+    this._rolesMap.observe((event: Y.YMapEvent<string>) => {
+      event.changes.keys.forEach((change: { action: 'add' | 'update' | 'delete', oldValue?: string }, userId: string) => {
         if (change.action === 'add' || change.action === 'update') {
           const newRole = this._rolesMap!.get(userId) as CollaborativeRole;
           const previousRole = this._getCachedRole(userId) || this._config.defaultRole!;
@@ -698,7 +697,7 @@ export class PermissionManager {
     // Clear existing timeout
     const existingTimeout = this._cacheTimeouts.get(userId);
     if (existingTimeout) {
-      Time.clearTimeout(existingTimeout);
+      clearTimeout(existingTimeout);
     }
 
     // Set cache entry
@@ -709,7 +708,7 @@ export class PermissionManager {
     });
 
     // Set expiration timeout
-    const timeout = Time.setTimeout(() => {
+    const timeout = setTimeout(() => {
       this._permissionCache.delete(userId);
       this._cacheTimeouts.delete(userId);
     }, this._config.cacheTtlMs!);
@@ -742,7 +741,7 @@ export class PermissionManager {
 
     const timeout = this._cacheTimeouts.get(userId);
     if (timeout) {
-      Time.clearTimeout(timeout);
+      clearTimeout(timeout);
       this._cacheTimeouts.delete(userId);
     }
   }
@@ -798,7 +797,7 @@ export class PermissionManager {
 
       const response = await ServerConnection.makeRequest(
         url,
-        { method: 'GET', timeout: this._config.apiTimeoutMs },
+        { method: 'GET' },
         settings
       );
 
@@ -827,7 +826,7 @@ export class PermissionManager {
 
       const response = await ServerConnection.makeRequest(
         url,
-        { method: 'GET', timeout: this._config.apiTimeoutMs },
+        { method: 'GET' },
         settings
       );
 
@@ -862,8 +861,7 @@ export class PermissionManager {
         url,
         {
           method: 'PATCH',
-          body: JSON.stringify({ role: hubRole }),
-          timeout: this._config.apiTimeoutMs
+          body: JSON.stringify({ role: hubRole })
         },
         settings
       );
@@ -881,7 +879,13 @@ export class PermissionManager {
     );
 
     try {
-      await Promise.allSettled(syncPromises);
+      // Use Promise.all with individual error handling for compatibility with ES2018 target
+      await Promise.all(syncPromises.map(promise =>
+        promise.catch(error => {
+          console.warn('Individual sync error:', error);
+          return null; // Continue with other promises
+        })
+      ));
     } catch (error) {
       console.warn('Error in batch sync with JupyterHub:', error);
     }
