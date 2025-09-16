@@ -465,7 +465,9 @@ class YjsWebSocketHandler(WebSocketHandler):
 
         # Check sustained rate limit
         window_duration = current_time - self.rate_limit_window_start
-        if window_duration > 0:
+        # Only check sustained rate if we have a meaningful window duration (>= 10ms)
+        # This prevents rate calculation issues with rapid successive calls
+        if window_duration >= 0.01:
             rate = self.message_count / window_duration
             if rate > self.RATE_LIMIT_PER_SECOND:
                 return False
@@ -496,7 +498,11 @@ class YjsWebSocketHandler(WebSocketHandler):
         """Load document state from SQLite or file-based storage."""
         try:
             # Create SQLite connection for document persistence
-            db_path = f"/tmp/collaboration_{self.document_id}.db"
+            import tempfile
+            from pathlib import Path
+
+            temp_dir = Path(tempfile.gettempdir())
+            db_path = temp_dir / f"collaboration_{self.document_id}.db"
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
 
@@ -816,7 +822,11 @@ class YjsWebSocketHandler(WebSocketHandler):
     def _persist_document_state(self, yjs_state: bytes) -> None:
         """Persist document state to storage."""
         try:
-            db_path = f"/tmp/collaboration_{self.document_id}.db"
+            import tempfile
+            from pathlib import Path
+
+            temp_dir = Path(tempfile.gettempdir())
+            db_path = temp_dir / f"collaboration_{self.document_id}.db"
             conn = sqlite3.connect(db_path)
 
             cursor = conn.cursor()
@@ -840,7 +850,11 @@ class YjsWebSocketHandler(WebSocketHandler):
     def _persist_lock_state(self, cell_id: str, lock_info: dict[str, Any]) -> None:
         """Persist lock state to storage."""
         try:
-            db_path = f"/tmp/collaboration_{self.document_id}.db"
+            import tempfile
+            from pathlib import Path
+
+            temp_dir = Path(tempfile.gettempdir())
+            db_path = temp_dir / f"collaboration_{self.document_id}.db"
             conn = sqlite3.connect(db_path)
 
             cursor = conn.cursor()
@@ -868,7 +882,11 @@ class YjsWebSocketHandler(WebSocketHandler):
     def _remove_lock_from_storage(self, cell_id: str) -> None:
         """Remove lock from persistent storage."""
         try:
-            db_path = f"/tmp/collaboration_{self.document_id}.db"
+            import tempfile
+            from pathlib import Path
+
+            temp_dir = Path(tempfile.gettempdir())
+            db_path = temp_dir / f"collaboration_{self.document_id}.db"
             conn = sqlite3.connect(db_path)
 
             cursor = conn.cursor()
