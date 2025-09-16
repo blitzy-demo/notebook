@@ -12,7 +12,7 @@
  * Integrates with CellLockManager for real-time lock state updates.
  */
 
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import * as React from 'react';
 import { ReactWidget } from '@jupyterlab/apputils';
 import { Cell } from '@jupyterlab/cells';
 import { ITranslator } from '@jupyterlab/translation';
@@ -63,7 +63,7 @@ export const CellLockIndicator: React.FC<ICellLockIndicatorProps> = ({
   const trans = translator.load('notebook');
 
   // State for tracking lock information
-  const [lockInfo, setLockInfo] = useState<ILockInfo>({
+  const [lockInfo, setLockInfo] = React.useState<ILockInfo>({
     cellId: cell.model.id,
     isLocked: false,
     lockOwner: null,
@@ -74,13 +74,13 @@ export const CellLockIndicator: React.FC<ICellLockIndicatorProps> = ({
   });
 
   // Refs for managing timers
-  const countdownTimer = useRef<NodeJS.Timeout | null>(null);
-  const pulseAnimationEnabled = useRef<boolean>(false);
+  const countdownTimer = React.useRef<number | null>(null);
+  const pulseAnimationEnabled = React.useRef<boolean>(false);
 
   /**
    * Update lock information from ICellLockStatus
    */
-  const updateLockInfo = useCallback((status: ICellLockStatus | null) => {
+  const updateLockInfo = React.useCallback((status: ICellLockStatus | null) => {
     if (!status) {
       setLockInfo(prev => ({
         ...prev,
@@ -111,7 +111,7 @@ export const CellLockIndicator: React.FC<ICellLockIndicatorProps> = ({
   /**
    * Start countdown timer for lock expiration
    */
-  const startCountdownTimer = useCallback(() => {
+  const startCountdownTimer = React.useCallback(() => {
     if (countdownTimer.current) {
       clearInterval(countdownTimer.current);
     }
@@ -120,7 +120,7 @@ export const CellLockIndicator: React.FC<ICellLockIndicatorProps> = ({
       return;
     }
 
-    countdownTimer.current = setInterval(() => {
+    countdownTimer.current = window.setInterval(() => {
       const now = Date.now();
       const elapsed = now - lockInfo.lockTime!.getTime();
       const remaining = Math.max(0, lockInfo.timeout - elapsed);
@@ -136,7 +136,7 @@ export const CellLockIndicator: React.FC<ICellLockIndicatorProps> = ({
 
       // Clear timer when expired
       if (secondsRemaining <= 0 && countdownTimer.current) {
-        clearInterval(countdownTimer.current);
+        window.clearInterval(countdownTimer.current);
         countdownTimer.current = null;
       }
     }, 1000);
@@ -145,7 +145,7 @@ export const CellLockIndicator: React.FC<ICellLockIndicatorProps> = ({
   /**
    * Handle lock state changes from the lock manager
    */
-  const handleLockChange = useCallback((_: CellLockManager, data: { cellId: string; status: ICellLockStatus }) => {
+  const handleLockChange = React.useCallback((_: CellLockManager, data: { cellId: string; status: ICellLockStatus }) => {
     if (data.cellId === cell.model.id) {
       updateLockInfo(data.status);
     }
@@ -154,7 +154,7 @@ export const CellLockIndicator: React.FC<ICellLockIndicatorProps> = ({
   /**
    * Handle click attempts on locked cells
    */
-  const handleLockedCellClick = useCallback((event: React.MouseEvent) => {
+  const handleLockedCellClick = React.useCallback((event: React.MouseEvent) => {
     if (lockInfo.isLocked) {
       event.preventDefault();
       event.stopPropagation();
@@ -191,7 +191,7 @@ export const CellLockIndicator: React.FC<ICellLockIndicatorProps> = ({
   /**
    * Get user display information for lock owner
    */
-  const getUserDisplayInfo = useCallback((userId: string | null) => {
+  const getUserDisplayInfo = React.useCallback((userId: string | null) => {
     if (!userId) return null;
 
     // For now, return basic user info - this could be enhanced with actual user lookup
@@ -203,7 +203,7 @@ export const CellLockIndicator: React.FC<ICellLockIndicatorProps> = ({
   }, []);
 
   // Set up effect for lock state monitoring and timer management
-  useEffect(() => {
+  React.useEffect(() => {
     if (cell.isDisposed || !lockManager) {
       return;
     }
@@ -235,7 +235,7 @@ export const CellLockIndicator: React.FC<ICellLockIndicatorProps> = ({
       isComponentMounted = false;
 
       if (countdownTimer.current) {
-        clearInterval(countdownTimer.current);
+        window.clearInterval(countdownTimer.current);
         countdownTimer.current = null;
       }
 
@@ -250,11 +250,11 @@ export const CellLockIndicator: React.FC<ICellLockIndicatorProps> = ({
   }, [cell.model.id, cell.isDisposed, lockManager, handleLockChange, updateLockInfo]);
 
   // Update countdown timer when lock state changes
-  useEffect(() => {
+  React.useEffect(() => {
     if (lockInfo.isLocked) {
       startCountdownTimer();
     } else if (countdownTimer.current) {
-      clearInterval(countdownTimer.current);
+      window.clearInterval(countdownTimer.current);
       countdownTimer.current = null;
     }
   }, [lockInfo.isLocked, startCountdownTimer]);
