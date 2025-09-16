@@ -39,8 +39,7 @@ export type {
   ICollaborativeSession,
   IVersionSnapshot,
   IComment,
-  ICellLockStatus,
-  CollaborativeRole
+  ICellLockStatus
 } from './tokens';
 
 // Re-export collaboration enums for external use
@@ -201,12 +200,11 @@ export function isCollaborationSupported(): boolean {
 export function getCollaborationCapabilities(): Record<string, boolean> {
   const isSupported = isCollaborationSupported();
 
-  return Object.fromEntries(
-    Object.entries(COLLABORATION_FEATURES).map(([key, value]) => [
-      key,
-      isSupported && value
-    ])
-  );
+  const result: Record<string, boolean> = {};
+  Object.entries(COLLABORATION_FEATURES).forEach(([key, value]) => {
+    result[key] = isSupported && value;
+  });
+  return result;
 }
 
 /**
@@ -241,12 +239,12 @@ export async function initializeCollaboration(options: {
   permissionConfig?: Partial<any>;
   commentConfig?: Partial<any>;
 } = {}): Promise<{
-  provider: YjsNotebookProvider | null;
-  awareness: CollaborationAwareness | null;
-  lockManager: CellLockManager | null;
-  historyTracker: HistoryTracker | null;
-  permissionManager: PermissionManager | null;
-  commentStore: CommentStore | null;
+  provider: any | null;
+  awareness: any | null;
+  lockManager: any | null;
+  historyTracker: any | null;
+  permissionManager: any | null;
+  commentStore: any | null;
 }> {
 
   if (!isCollaborationSupported()) {
@@ -262,6 +260,23 @@ export async function initializeCollaboration(options: {
   }
 
   try {
+    // Dynamically import the classes to avoid compilation issues
+    const [
+      { CollaborationAwareness },
+      { PermissionManager },
+      { YjsNotebookProvider },
+      { CellLockManager },
+      { HistoryTracker },
+      { CommentStore }
+    ] = await Promise.all([
+      import('./collab/awareness'),
+      import('./collab/permissions'),
+      import('./collab/provider'),
+      import('./collab/locks'),
+      import('./collab/history'),
+      import('./collab/comments')
+    ]);
+
     // Initialize awareness first (can work without provider)
     const awareness = new CollaborationAwareness(options.awarenessConfig || {});
 
@@ -272,15 +287,16 @@ export async function initializeCollaboration(options: {
       ...options.permissionConfig
     });
 
-    let provider: YjsNotebookProvider | null = null;
-    let lockManager: CellLockManager | null = null;
-    let historyTracker: HistoryTracker | null = null;
-    let commentStore: CommentStore | null = null;
+    let provider: any | null = null;
+    let lockManager: any | null = null;
+    let historyTracker: any | null = null;
+    let commentStore: any | null = null;
 
     // Initialize provider if WebSocket URL is available
     if (options.websocketUrl) {
       provider = new YjsNotebookProvider({
         websocketUrl: options.websocketUrl,
+        roomName: 'default-room', // Default room name
         ...options.providerConfig
       });
 
@@ -329,12 +345,12 @@ export async function initializeCollaboration(options: {
  * Gracefully dispose of collaboration infrastructure
  */
 export function disposeCollaboration(components: {
-  provider?: YjsNotebookProvider | null;
-  awareness?: CollaborationAwareness | null;
-  lockManager?: CellLockManager | null;
-  historyTracker?: HistoryTracker | null;
-  permissionManager?: PermissionManager | null;
-  commentStore?: CommentStore | null;
+  provider?: any | null;
+  awareness?: any | null;
+  lockManager?: any | null;
+  historyTracker?: any | null;
+  permissionManager?: any | null;
+  commentStore?: any | null;
 }): void {
 
   try {
