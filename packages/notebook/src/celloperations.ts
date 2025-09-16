@@ -82,6 +82,70 @@ export interface CellLockStatus {
 }
 
 /**
+ * React component for displaying cell lock status
+ */
+export class CellLockStatusComponent extends React.Component<{
+  cellId: string;
+  lockStatus: CellLockStatus | null;
+  onLockRelease?: () => void;
+}> {
+  render() {
+    const { cellId, lockStatus, onLockRelease } = this.props;
+
+    if (!lockStatus || !lockStatus.isLocked) {
+      return null;
+    }
+
+    const lockDuration = lockStatus.lockTime
+      ? Date.now() - lockStatus.lockTime.getTime()
+      : 0;
+
+    return React.createElement(
+      'div',
+      {
+        className: 'jp-cell-lock-status',
+        style: {
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '4px 8px',
+          background: '#fff3cd',
+          border: '1px solid #ffeaa7',
+          borderRadius: '4px',
+          fontSize: '12px',
+          color: '#856404'
+        }
+      },
+      React.createElement('span', { className: 'lock-icon' }, '🔒'),
+      React.createElement(
+        'span',
+        { className: 'lock-message' },
+        `Locked by ${lockStatus.lockedBy} (${Math.round(lockDuration / 1000)}s ago)`
+      ),
+      lockStatus.queuedUsers.length > 0 && React.createElement(
+        'span',
+        { className: 'queue-info' },
+        `Queue: ${lockStatus.queuedUsers.length} waiting`
+      ),
+      onLockRelease && React.createElement(
+        'button',
+        {
+          onClick: onLockRelease,
+          style: {
+            background: 'none',
+            border: 'none',
+            color: '#007bff',
+            cursor: 'pointer',
+            textDecoration: 'underline'
+          }
+        },
+        'Force Release'
+      )
+    );
+  }
+}
+
+/**
  * Options for cell operation configuration
  */
 interface ICellOperationOptions {
@@ -128,6 +192,72 @@ export const CellOperations = {
     this._lockManager = lockManager;
     this._userId = userId;
     this._collaborationEnabled = collaborationEnabled;
+
+    // Set up lock change listener for reactive UI updates
+    if (lockManager) {
+      lockManager.onLockChange.connect((sender, args) => {
+        this._handleLockChange(args.cellId, args.status);
+      });
+    }
+  },
+
+  /**
+   * Configure lock timeout for automatic release
+   */
+  configureLockTimeout(timeoutMs: number): void {
+    if (this._lockManager) {
+      this._lockManager.setLockTimeout(timeoutMs);
+    }
+  },
+
+  /**
+   * Perform cleanup of expired locks
+   */
+  async performLockCleanup(): Promise<void> {
+    if (this._lockManager) {
+      await this._lockManager.cleanupLocks();
+    }
+  },
+
+  /**
+   * Handle lock change events for UI updates
+   */
+  _handleLockChange(cellId: string, status: CellLockStatus): void {
+    console.log(`Lock status changed for cell ${cellId}:`, status);
+
+    // Create visual lock indicator using React
+    if (status.isLocked) {
+      const lockIndicator = this._createLockIndicator(cellId, status);
+      console.log(`Cell ${cellId} locked by user ${status.lockedBy}`, lockIndicator);
+    } else {
+      console.log(`Cell ${cellId} unlocked`);
+    }
+  },
+
+  /**
+   * Create a lock indicator component using React
+   */
+  _createLockIndicator(cellId: string, status: CellLockStatus) {
+    return React.createElement(
+      'div',
+      {
+        key: cellId,
+        className: 'cell-lock-indicator',
+        title: `Locked by ${status.lockedBy}`,
+        style: {
+          position: 'absolute',
+          top: '5px',
+          right: '5px',
+          background: '#ff6b6b',
+          color: 'white',
+          padding: '2px 6px',
+          borderRadius: '3px',
+          fontSize: '12px',
+          zIndex: 1000
+        }
+      },
+      '🔒 ' + (status.lockedBy || 'Unknown')
+    );
   },
 
   /**
