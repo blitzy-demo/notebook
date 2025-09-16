@@ -111,7 +111,7 @@ class CellLockManager:
                 # Verify we still own the lock before removing
                 current_lock = self.locks_map.get(cell_id)
                 if current_lock and current_lock.get("user_id") == self.user_id:
-                    self.locks_map.delete(txn, cell_id)
+                    self.locks_map.pop(txn, cell_id)
                     self.local_locks.discard(cell_id)
                     self.lock_acquisition_times.pop(cell_id, None)
                     return True
@@ -153,7 +153,7 @@ class CellLockManager:
                     # Double-check lock is still expired
                     lock_data = self.locks_map.get(cell_id)
                     if lock_data and self._is_lock_expired(lock_data):
-                        self.locks_map.delete(txn, cell_id)
+                        self.locks_map.pop(txn, cell_id)
                         self.local_locks.discard(cell_id)
 
     async def release_all_locks(self):
@@ -846,7 +846,19 @@ async def test_integration_with_multi_user_session(
             pass
 
         def __call__(self, notebook_path, user_id):
-            from tests.collaboration.conftest import MockWebSocketClient
+            # Create a simple mock WebSocket client for testing
+            class MockWebSocketClient:
+                def __init__(self, notebook_path: str, user_id: str):
+                    self.notebook_path = notebook_path
+                    self.user_id = user_id
+                    self.connected = False
+
+                async def connect(self, websocket_url: str):
+                    self.connected = True
+                    return True
+
+                def get_message_history(self):
+                    return {"sent": [], "received": [], "total_messages": 0}
 
             return MockWebSocketClient(notebook_path, user_id)
 
