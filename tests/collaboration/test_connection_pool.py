@@ -53,32 +53,60 @@ class TestConnectionPoolInitialization:
 
     def test_pool_initialization_with_custom_config(self, collab_app):
         """Test connection pool accepts custom configuration parameters."""
-        # Create handler with custom configuration
-        handler = YjsWebSocketHandler()
-        handler.max_message_size = 2048 * 1024  # 2MB
-        handler.batch_window_ms = 100.0  # 100ms
-        handler.lock_timeout_seconds = 60  # 60 seconds
-        handler.rate_limit_per_second = 200  # 200/second
+        # Test that configuration attributes can be set via class attributes
+        # rather than instance creation (which requires application and request)
 
-        # Verify custom configuration is applied
-        assert handler.max_message_size == 2048 * 1024
-        assert handler.batch_window_ms == 100.0
-        assert handler.lock_timeout_seconds == 60
-        assert handler.rate_limit_per_second == 200
+        # Store original values
+        orig_max_message = YjsWebSocketHandler.MAX_MESSAGE_SIZE
+        orig_batch_window = YjsWebSocketHandler.BATCH_WINDOW_MS
+        orig_lock_timeout = YjsWebSocketHandler.LOCK_TIMEOUT_SECONDS
+        orig_rate_limit = YjsWebSocketHandler.RATE_LIMIT_PER_SECOND
+
+        try:
+            # Set custom configuration via class attributes
+            YjsWebSocketHandler.MAX_MESSAGE_SIZE = 2048 * 1024  # 2MB
+            YjsWebSocketHandler.BATCH_WINDOW_MS = 100  # 100ms
+            YjsWebSocketHandler.LOCK_TIMEOUT_SECONDS = 60  # 60 seconds
+            YjsWebSocketHandler.RATE_LIMIT_PER_SECOND = 200  # 200/second
+
+            # Verify custom configuration is applied
+            assert YjsWebSocketHandler.MAX_MESSAGE_SIZE == 2048 * 1024
+            assert YjsWebSocketHandler.BATCH_WINDOW_MS == 100
+            assert YjsWebSocketHandler.LOCK_TIMEOUT_SECONDS == 60
+            assert YjsWebSocketHandler.RATE_LIMIT_PER_SECOND == 200
+
+        finally:
+            # Restore original values
+            YjsWebSocketHandler.MAX_MESSAGE_SIZE = orig_max_message
+            YjsWebSocketHandler.BATCH_WINDOW_MS = orig_batch_window
+            YjsWebSocketHandler.LOCK_TIMEOUT_SECONDS = orig_lock_timeout
+            YjsWebSocketHandler.RATE_LIMIT_PER_SECOND = orig_rate_limit
 
     def test_pool_configuration_validation(self, collab_app):
         """Test connection pool validates configuration parameters."""
-        handler = YjsWebSocketHandler()
+        # Test that configuration can be set and validated via class attributes
 
-        # Test boundary conditions
-        handler.max_message_size = 1  # Minimum
-        assert handler.max_message_size == 1
+        # Store original values
+        orig_max_message = YjsWebSocketHandler.MAX_MESSAGE_SIZE
+        orig_batch_window = YjsWebSocketHandler.BATCH_WINDOW_MS
+        orig_rate_limit = YjsWebSocketHandler.RATE_LIMIT_PER_SECOND
 
-        handler.batch_window_ms = 0.1  # Very small window
-        assert handler.batch_window_ms == 0.1
+        try:
+            # Test boundary conditions via class attributes
+            YjsWebSocketHandler.MAX_MESSAGE_SIZE = 1  # Minimum
+            assert YjsWebSocketHandler.MAX_MESSAGE_SIZE == 1
 
-        handler.rate_limit_per_second = 1  # Very low rate
-        assert handler.rate_limit_per_second == 1
+            YjsWebSocketHandler.BATCH_WINDOW_MS = 0.1  # Very small window
+            assert YjsWebSocketHandler.BATCH_WINDOW_MS == 0.1
+
+            YjsWebSocketHandler.RATE_LIMIT_PER_SECOND = 1  # Very low rate
+            assert YjsWebSocketHandler.RATE_LIMIT_PER_SECOND == 1
+
+        finally:
+            # Restore original values
+            YjsWebSocketHandler.MAX_MESSAGE_SIZE = orig_max_message
+            YjsWebSocketHandler.BATCH_WINDOW_MS = orig_batch_window
+            YjsWebSocketHandler.RATE_LIMIT_PER_SECOND = orig_rate_limit
 
 
 class TestConnectionAcquisitionRelease:
@@ -89,8 +117,9 @@ class TestConnectionAcquisitionRelease:
         """Test basic connection acquisition and release lifecycle."""
         start_time = time.perf_counter()
 
-        # Simulate connection acquisition
-        client = await websocket_client("test_document_1")
+        # Simulate connection acquisition with proper authentication
+        headers = {"Authorization": "Bearer test_token_user123"}
+        client = await websocket_client("/api/collaboration/ws/test_document_1", headers)
 
         # Verify connection is tracked in active connections
         assert len(YjsWebSocketHandler._active_connections) >= 1
@@ -287,8 +316,8 @@ class TestPoolSizeLimits:
 
     def test_pool_size_configuration(self, collab_app):
         """Test pool size can be configured appropriately."""
-        # Verify pool size configuration is accessible
-        handler = YjsWebSocketHandler()
+        # Verify pool size configuration is accessible via class attributes
+        # rather than instance creation (which requires application and request)
 
         # Check that pool-related class variables exist
         assert hasattr(YjsWebSocketHandler, "_connection_pools")
@@ -377,11 +406,12 @@ class TestRedisClusterIntegration:
 
         # Test basic Redis operations
         mock_redis.set("test_key", "test_value")
-        assert mock_redis.get("test_key") == b"test_value"
+        # Note: mock_redis is configured with decode_responses=True, so returns strings
+        assert mock_redis.get("test_key") == "test_value"
 
         # Test hash operations for connection pooling
         mock_redis.hset("connection_pool", "doc1", "handler1")
-        assert mock_redis.hget("connection_pool", "doc1") == b"handler1"
+        assert mock_redis.hget("connection_pool", "doc1") == "handler1"
 
     def test_redis_connection_pool_storage(self, mock_redis):
         """Test connection pool state storage in Redis."""
@@ -398,7 +428,8 @@ class TestRedisClusterIntegration:
 
         # Retrieve and verify
         retrieved_data = mock_redis.hget("pool_metadata", "test_doc_redis")
-        parsed_data = json.loads(retrieved_data.decode("utf-8"))
+        # Note: mock_redis returns strings, not bytes, so no need to decode
+        parsed_data = json.loads(retrieved_data)
 
         assert parsed_data["document_id"] == "test_doc_redis"
         assert parsed_data["active_connections"] == 3
@@ -441,7 +472,8 @@ class TestRedisClusterIntegration:
 
         # Verify coordination data
         stored_data = mock_redis.hget("active_connections", connection_data["session_id"])
-        parsed_data = json.loads(stored_data.decode("utf-8"))
+        # Note: mock_redis returns strings, not bytes
+        parsed_data = json.loads(stored_data)
 
         assert parsed_data["document_id"] == "redis_coord_test"
         assert parsed_data["user_id"] == "test_user"
@@ -510,15 +542,13 @@ class TestLoadBalancing:
 
     def test_load_balancing_configuration(self, collab_app):
         """Test load balancing configuration parameters."""
-        handler = YjsWebSocketHandler()
-
-        # Verify load balancing related configuration exists
-        assert hasattr(handler, "rate_limit_per_second")
-        assert hasattr(handler, "batch_window_ms")
+        # Verify load balancing related configuration exists via class attributes
+        assert hasattr(YjsWebSocketHandler, "RATE_LIMIT_PER_SECOND")
+        assert hasattr(YjsWebSocketHandler, "BATCH_WINDOW_MS")
 
         # Check reasonable default values for load balancing
-        assert handler.rate_limit_per_second >= 1
-        assert handler.batch_window_ms >= 1.0
+        assert YjsWebSocketHandler.RATE_LIMIT_PER_SECOND >= 1
+        assert YjsWebSocketHandler.BATCH_WINDOW_MS >= 1.0
 
 
 class TestConcurrentUserStressTesting:
@@ -760,17 +790,15 @@ class TestConnectionHealthMonitoring:
 
     def test_health_monitoring_configuration(self, collab_app):
         """Test health monitoring configuration parameters."""
-        handler = YjsWebSocketHandler()
-
-        # Verify health-related configuration exists
-        assert hasattr(handler, "rate_limit_per_second")
-        assert hasattr(handler, "batch_window_ms")
-        assert hasattr(handler, "lock_timeout_seconds")
+        # Verify health-related configuration exists via class attributes
+        assert hasattr(YjsWebSocketHandler, "RATE_LIMIT_PER_SECOND")
+        assert hasattr(YjsWebSocketHandler, "BATCH_WINDOW_MS")
+        assert hasattr(YjsWebSocketHandler, "LOCK_TIMEOUT_SECONDS")
 
         # Verify reasonable values for health monitoring
-        assert handler.rate_limit_per_second > 0
-        assert handler.batch_window_ms > 0
-        assert handler.lock_timeout_seconds > 0
+        assert YjsWebSocketHandler.RATE_LIMIT_PER_SECOND > 0
+        assert YjsWebSocketHandler.BATCH_WINDOW_MS > 0
+        assert YjsWebSocketHandler.LOCK_TIMEOUT_SECONDS > 0
 
 
 class TestFailoverHandling:
@@ -852,7 +880,8 @@ class TestFailoverHandling:
         # Verify state can be restored
         restored_data = original_redis.get("connection_state")
         if restored_data:
-            restored_state = json.loads(restored_data.decode("utf-8"))
+            # Note: mock_redis returns strings, not bytes
+            restored_state = json.loads(restored_data)
             assert restored_state["status"] == "recovered"
 
         await client.close()
@@ -898,18 +927,18 @@ class TestFailoverHandling:
 
     def test_error_handling_configuration(self, collab_app):
         """Test error handling and recovery configuration."""
-        handler = YjsWebSocketHandler()
-
-        # Verify error handling infrastructure exists
-        assert hasattr(handler, "logger")
-        assert hasattr(handler, "_cleanup_connection_ref")
+        # Verify error handling infrastructure exists at class level
+        assert hasattr(YjsWebSocketHandler, "_cleanup_connection_ref")
+        assert hasattr(YjsWebSocketHandler, "_active_connections")
 
         # Test cleanup callback functionality
         try:
             # Create weak reference for cleanup testing
             import weakref
 
-            test_ref = weakref.ref(handler)
+            # Create a dummy object to test with
+            dummy_obj = object()
+            test_ref = weakref.ref(dummy_obj)
             YjsWebSocketHandler._cleanup_connection_ref(test_ref)
             # Should not raise exception
         except Exception as e:
