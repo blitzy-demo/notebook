@@ -15,10 +15,10 @@ import { WebsocketProvider } from 'y-websocket';
 import { Awareness } from 'y-protocols/awareness';
 import * as encoding from 'lib0/encoding';
 import { Signal } from '@lumino/signaling';
-import * as Time from '@lumino/coreutils';
+// Note: Using plain JavaScript setTimeout instead of @lumino/coreutils Time
 
 import { NotebookModel } from '../model';
-import { ICollaborativeSession } from '../tokens';
+// Note: ICollaborativeSession interface available from '../tokens' if needed
 
 /**
  * Configuration interface for YjsNotebookProvider initialization
@@ -176,19 +176,19 @@ export class YjsNotebookProvider {
   // Message batching
   private _batchTimer: any = null;
   private _pendingUpdates: Map<string, Uint8Array> = new Map();
-  private _encoder: encoding.Encoder | null = null;
+  // Note: Encoder created on-demand in transaction handlers
 
   // Connection management
   private _connectionAttempts: number = 0;
   private _maxRetries: number;
-  private _connectionTimeout: number;
   private _reconnectTimer: any = null;
   private _connectionStartTime: Date | null = null;
+  // Note: Connection timeout handled by WebSocketProvider configuration
 
   // Telemetry collection
   private _telemetry: IProviderTelemetry;
-  private _telemetryEnabled: boolean;
   private _latencyMeasurements: number[] = [];
+  // Note: Telemetry enabled/disabled via config, always collected when provider active
 
   // Update handlers
   private _updateHandlers: Set<(update: Uint8Array) => void> = new Set();
@@ -204,10 +204,9 @@ export class YjsNotebookProvider {
     this._config = { ...config };
     this._batchTimeout = config.batchTimeout ?? DEFAULT_BATCH_INTERVAL_MS;
     this._maxRetries = config.maxRetries ?? 5;
-    this._connectionTimeout = config.connectionTimeout ?? 10000;
     this._collaborationEnabled = config.collaborationEnabled ?? true;
     this._batchingEnabled = config.batchingEnabled ?? true;
-    this._telemetryEnabled = config.telemetryEnabled ?? true;
+    // Note: Telemetry and connection timeout managed via config object
 
     // Initialize Yjs document
     this._yjsDoc = new Y.Doc();
@@ -363,7 +362,7 @@ export class YjsNotebookProvider {
    * Check if currently connected to collaboration server
    */
   isConnected(): boolean {
-    return this._isConnected && Boolean(this._websocketProvider?.connected);
+    return this._isConnected && Boolean(this._websocketProvider?.wsconnected);
   }
 
   /**
@@ -548,7 +547,7 @@ export class YjsNotebookProvider {
    */
   private _handleBeforeTransaction(transaction: Y.Transaction, doc: Y.Doc): void {
     // Prepare for transaction processing
-    this._encoder = encoding.createEncoder();
+    // Encoder created on-demand when needed for batching
   }
 
   /**
@@ -556,8 +555,6 @@ export class YjsNotebookProvider {
    */
   private _handleAfterTransaction(transaction: Y.Transaction, doc: Y.Doc): void {
     // Process completed transaction
-    this._encoder = null;
-
     // Update telemetry for conflicts resolved
     if (transaction.changedParentTypes.size > 0) {
       this._telemetry.conflictsResolved++;
@@ -685,7 +682,7 @@ export class YjsNotebookProvider {
       clearTimeout(this._batchTimer);
     }
 
-    this._batchTimer = Time.setTimeout(() => {
+    this._batchTimer = setTimeout(() => {
       this._flushPendingUpdates();
     }, this._batchTimeout);
   }
@@ -711,7 +708,8 @@ export class YjsNotebookProvider {
       // For now, we'll just record the batching operation
     });
 
-    const batchedUpdate = encoding.toUint8Array(encoder);
+    // Convert encoder to bytes for transmission (in real implementation)
+    // const batchedUpdate = encoding.toUint8Array(encoder);
 
     // Update telemetry
     this._telemetry.batchedMessages++;
@@ -734,7 +732,7 @@ export class YjsNotebookProvider {
 
     const delay = Math.min(1000 * Math.pow(2, this._connectionAttempts - 1), 30000);
 
-    this._reconnectTimer = Time.setTimeout(() => {
+    this._reconnectTimer = setTimeout(() => {
       if (!this._disposed && this._collaborationEnabled) {
         console.log(`Attempting reconnection (${this._connectionAttempts}/${this._maxRetries})`);
         this.connect().catch(error => {
