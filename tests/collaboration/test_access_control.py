@@ -29,7 +29,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-from tornado import HTTPClientError
+from tornado.httpclient import HTTPClientError
 
 from notebook.app import JupyterNotebookApp
 from notebook.handlers import YjsWebSocketHandler
