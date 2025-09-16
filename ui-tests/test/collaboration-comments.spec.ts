@@ -1,14 +1,10 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import path from 'path';
-
 import { expect } from '@jupyterlab/galata';
-import { Page } from '@playwright/test';
 
 import { test } from './fixtures';
 import { createCollaborativeSession } from './utils';
-import { generateMockUsers } from './collaboration-helpers';
 
 /**
  * Test suite for Comment and Review System in collaborative notebooks
