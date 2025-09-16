@@ -29,6 +29,48 @@ import pytest
 from notebook.app import JupyterNotebookApp
 
 
+class MockWebApp:
+    """Mock web application for testing."""
+
+    def __init__(self, settings=None):
+        self.settings = settings or {}
+        # Ensure required keys are always present
+        if "base_url" not in self.settings:
+            self.settings["base_url"] = "/"
+        if "static_handler_class" not in self.settings:
+            self.settings["static_handler_class"] = None
+
+    def add_handlers(self, pattern, handlers):
+        """Mock handler addition method."""
+
+
+class MockServerApp:
+    """Mock server application for testing."""
+
+    def __init__(
+        self,
+        web_app=None,
+        tornado_settings=None,
+        extension_manager=None,
+        base_url="/",
+        stop=None,
+        clear_instance=None,
+    ):
+        self.web_app = web_app or MockWebApp()
+        self.tornado_settings = tornado_settings or {}
+        self.extension_manager = extension_manager
+        self.base_url = base_url
+        self.stop = stop or (lambda: None)
+        self.clear_instance = clear_instance or (lambda: None)
+
+
+class MockExtensionManager:
+    """Mock extension manager for testing."""
+
+    def __init__(self, extensions=None):
+        self.extensions = extensions or {}
+
+
 class TestDegradationBasicConfiguration:
     """Test basic configuration scenarios for collaboration degradation."""
 
@@ -52,11 +94,12 @@ class TestDegradationBasicConfiguration:
 
         # Initialize handlers (should not add collaboration handlers)
         app.handlers = []
-        app.serverapp = type(
-            "MockServerApp",
-            (),
-            {"web_app": type("MockWebApp", (), {"settings": {}}), "tornado_settings": {}},
-        )()
+        app.serverapp = MockServerApp(
+            web_app=MockWebApp({"static_handler_class": None}),
+            tornado_settings={},
+            base_url="/",
+            stop=lambda: None,
+        )
 
         app.initialize_handlers()
 
@@ -132,15 +175,14 @@ class TestDegradationSingleUserMode:
         app.collaboration_enabled = False
 
         # Mock serverapp for initialization
-        app.serverapp = type(
-            "MockServerApp",
-            (),
-            {
-                "web_app": type("MockWebApp", (), {"settings": {"page_config_data": {}}}),
-                "tornado_settings": {},
-                "extension_manager": type("MockExtensionManager", (), {"extensions": {}})(),
-            },
-        )()
+        app.serverapp = MockServerApp(
+            web_app=MockWebApp({"page_config_data": {}}),
+            tornado_settings={},
+            extension_manager=MockExtensionManager({}),
+            base_url="/",
+            stop=lambda: None,
+            clear_instance=lambda: None,
+        )
 
         # Initialize the app
         app.initialize()
@@ -162,15 +204,13 @@ class TestDegradationSingleUserMode:
         app.handlers = []
 
         # Mock serverapp
-        app.serverapp = type(
-            "MockServerApp",
-            (),
-            {
-                "web_app": type("MockWebApp", (), {"settings": {"page_config_data": {}}}),
-                "tornado_settings": {},
-                "extension_manager": type("MockExtensionManager", (), {"extensions": {}})(),
-            },
-        )()
+        app.serverapp = MockServerApp(
+            web_app=MockWebApp({"page_config_data": {}}),
+            tornado_settings={},
+            extension_manager=MockExtensionManager({}),
+            base_url="/",
+            stop=lambda: None,
+        )
 
         app.initialize_handlers()
 
@@ -181,7 +221,7 @@ class TestDegradationSingleUserMode:
             "/notebooks(.*)",
             "/edit(.*)",
             "/consoles/(.*)",
-            "/terminals(.*)",
+            "/terminals/(.*)",
         ]
 
         for expected in expected_handlers:
@@ -202,17 +242,15 @@ class TestDegradationSingleUserMode:
         app.collaboration_enabled = False
 
         page_config_data = {}
-        app.serverapp = type(
-            "MockServerApp",
-            (),
-            {
-                "web_app": type(
-                    "MockWebApp", (), {"settings": {"page_config_data": page_config_data}}
-                ),
-                "tornado_settings": {},
-                "extension_manager": type("MockExtensionManager", (), {"extensions": {}})(),
-            },
-        )()
+        app.serverapp = MockServerApp(
+            web_app=MockWebApp(
+                {"page_config_data": page_config_data, "static_handler_class": None}
+            ),
+            tornado_settings={},
+            extension_manager=MockExtensionManager({}),
+            base_url="/",
+            stop=lambda: None,
+        )
 
         app.initialize_handlers()
 
@@ -275,15 +313,14 @@ class TestDegradationPerformanceParity:
 
             app = JupyterNotebookApp()
             app.collaboration_enabled = False
-            app.serverapp = type(
-                "MockServerApp",
-                (),
-                {
-                    "web_app": type("MockWebApp", (), {"settings": {"page_config_data": {}}}),
-                    "tornado_settings": {},
-                    "extension_manager": type("MockExtensionManager", (), {"extensions": {}})(),
-                },
-            )()
+            app.serverapp = MockServerApp(
+                web_app=MockWebApp({"page_config_data": {}}),
+                tornado_settings={},
+                extension_manager=MockExtensionManager({}),
+                base_url="/",
+                stop=lambda: None,
+                clear_instance=lambda: None,
+            )
             app.initialize()
 
             end_time = time.perf_counter()
@@ -299,15 +336,14 @@ class TestDegradationPerformanceParity:
 
             app = JupyterNotebookApp()
             app.collaboration_enabled = True
-            app.serverapp = type(
-                "MockServerApp",
-                (),
-                {
-                    "web_app": type("MockWebApp", (), {"settings": {"page_config_data": {}}}),
-                    "tornado_settings": {},
-                    "extension_manager": type("MockExtensionManager", (), {"extensions": {}})(),
-                },
-            )()
+            app.serverapp = MockServerApp(
+                web_app=MockWebApp({"page_config_data": {}}),
+                tornado_settings={},
+                extension_manager=MockExtensionManager({}),
+                base_url="/",
+                stop=lambda: None,
+                clear_instance=lambda: None,
+            )
             app.initialize()
 
             end_time = time.perf_counter()
@@ -342,15 +378,14 @@ class TestDegradationPerformanceParity:
         # Create single-user app
         app_single = JupyterNotebookApp()
         app_single.collaboration_enabled = False
-        app_single.serverapp = type(
-            "MockServerApp",
-            (),
-            {
-                "web_app": type("MockWebApp", (), {"settings": {"page_config_data": {}}}),
-                "tornado_settings": {},
-                "extension_manager": type("MockExtensionManager", (), {"extensions": {}})(),
-            },
-        )()
+        app_single.serverapp = MockServerApp(
+            web_app=MockWebApp({"page_config_data": {}}),
+            tornado_settings={},
+            extension_manager=MockExtensionManager({}),
+            base_url="/",
+            stop=lambda: None,
+            clear_instance=lambda: None,
+        )
         app_single.initialize()
 
         single_user_memory = process.memory_info().rss
@@ -361,15 +396,14 @@ class TestDegradationPerformanceParity:
         # Create collaborative app
         app_collab = JupyterNotebookApp()
         app_collab.collaboration_enabled = True
-        app_collab.serverapp = type(
-            "MockServerApp",
-            (),
-            {
-                "web_app": type("MockWebApp", (), {"settings": {"page_config_data": {}}}),
-                "tornado_settings": {},
-                "extension_manager": type("MockExtensionManager", (), {"extensions": {}})(),
-            },
-        )()
+        app_collab.serverapp = MockServerApp(
+            web_app=MockWebApp({"page_config_data": {}}),
+            tornado_settings={},
+            extension_manager=MockExtensionManager({}),
+            base_url="/",
+            stop=lambda: None,
+            clear_instance=lambda: None,
+        )
         app_collab.initialize()
 
         collaborative_memory = process.memory_info().rss
@@ -408,15 +442,13 @@ class TestDegradationWebSocketFailures:
 
         app = JupyterNotebookApp()
         app.collaboration_enabled = True
-        app.serverapp = type(
-            "MockServerApp",
-            (),
-            {
-                "web_app": type("MockWebApp", (), {"settings": {"page_config_data": {}}}),
-                "tornado_settings": {},
-                "extension_manager": type("MockExtensionManager", (), {"extensions": {}})(),
-            },
-        )()
+        app.serverapp = MockServerApp(
+            web_app=MockWebApp({"page_config_data": {}, "static_handler_class": None}),
+            tornado_settings={},
+            extension_manager=MockExtensionManager({}),
+            base_url="/",
+            stop=lambda: None,
+        )
 
         # App should still initialize despite WebSocket handler failure
         try:
@@ -434,15 +466,14 @@ class TestDegradationWebSocketFailures:
         app.collaboration_enabled = True
         app.collaboration_server_url = "ws://nonexistent-server:8888/api/collaboration/ws"
 
-        app.serverapp = type(
-            "MockServerApp",
-            (),
-            {
-                "web_app": type("MockWebApp", (), {"settings": {"page_config_data": {}}}),
-                "tornado_settings": {},
-                "extension_manager": type("MockExtensionManager", (), {"extensions": {}})(),
-            },
-        )()
+        app.serverapp = MockServerApp(
+            web_app=MockWebApp({"page_config_data": {}}),
+            tornado_settings={},
+            extension_manager=MockExtensionManager({}),
+            base_url="/",
+            stop=lambda: None,
+            clear_instance=lambda: None,
+        )
 
         # App should initialize and mark collaboration as unavailable
         app.initialize()
@@ -466,15 +497,14 @@ class TestDegradationWebSocketFailures:
         app.collaboration_enabled = True
         app.collaboration_lock_timeout_seconds = 5  # Short timeout for testing
 
-        app.serverapp = type(
-            "MockServerApp",
-            (),
-            {
-                "web_app": type("MockWebApp", (), {"settings": {"page_config_data": {}}}),
-                "tornado_settings": {},
-                "extension_manager": type("MockExtensionManager", (), {"extensions": {}})(),
-            },
-        )()
+        app.serverapp = MockServerApp(
+            web_app=MockWebApp({"page_config_data": {}}),
+            tornado_settings={},
+            extension_manager=MockExtensionManager({}),
+            base_url="/",
+            stop=lambda: None,
+            clear_instance=lambda: None,
+        )
 
         # Should handle timeout gracefully
         try:
@@ -610,9 +640,11 @@ class TestDegradationOfflineEditing:
             # Verify final state reflects all queued changes
             assert len(content["cells"]) == 2  # Original + added cell
             assert (
-                "Change during disconnect 2" in content["cells"][1]["source"]
+                "Change during disconnect 2" in content["cells"][0]["source"]
             )  # Last edit to cell 0
-            assert "New cell added offline" in content["cells"][0]["source"]  # Added cell
+            assert (
+                "New cell added offline" in content["cells"][1]["source"]
+            )  # Added cell (inserted at index 1)
 
 
 class TestDegradationUICleanup:
@@ -624,17 +656,15 @@ class TestDegradationUICleanup:
         app.collaboration_enabled = False
 
         page_config_data = {}
-        app.serverapp = type(
-            "MockServerApp",
-            (),
-            {
-                "web_app": type(
-                    "MockWebApp", (), {"settings": {"page_config_data": page_config_data}}
-                ),
-                "tornado_settings": {},
-                "extension_manager": type("MockExtensionManager", (), {"extensions": {}})(),
-            },
-        )()
+        app.serverapp = MockServerApp(
+            web_app=MockWebApp(
+                {"page_config_data": page_config_data, "static_handler_class": None}
+            ),
+            tornado_settings={},
+            extension_manager=MockExtensionManager({}),
+            base_url="/",
+            stop=lambda: None,
+        )
 
         app.initialize_handlers()
 
@@ -682,15 +712,14 @@ class TestDegradationTransitions:
         # Start in collaborative mode
         collab_app = JupyterNotebookApp()
         collab_app.collaboration_enabled = True
-        collab_app.serverapp = type(
-            "MockServerApp",
-            (),
-            {
-                "web_app": type("MockWebApp", (), {"settings": {"page_config_data": {}}}),
-                "tornado_settings": {},
-                "extension_manager": type("MockExtensionManager", (), {"extensions": {}})(),
-            },
-        )()
+        collab_app.serverapp = MockServerApp(
+            web_app=MockWebApp({"page_config_data": {}}),
+            tornado_settings={},
+            extension_manager=MockExtensionManager({}),
+            base_url="/",
+            stop=lambda: None,
+            clear_instance=lambda: None,
+        )
 
         collab_app.initialize()
 
@@ -705,15 +734,14 @@ class TestDegradationTransitions:
         # Simulate transition to single-user mode
         single_app = JupyterNotebookApp()
         single_app.collaboration_enabled = False
-        single_app.serverapp = type(
-            "MockServerApp",
-            (),
-            {
-                "web_app": type("MockWebApp", (), {"settings": {"page_config_data": {}}}),
-                "tornado_settings": {},
-                "extension_manager": type("MockExtensionManager", (), {"extensions": {}})(),
-            },
-        )()
+        single_app.serverapp = MockServerApp(
+            web_app=MockWebApp({"page_config_data": {}}),
+            tornado_settings={},
+            extension_manager=MockExtensionManager({}),
+            base_url="/",
+            stop=lambda: None,
+            clear_instance=lambda: None,
+        )
 
         single_app.initialize()
 
@@ -760,15 +788,14 @@ class TestDegradationTransitions:
         app.collaboration_enabled = True
 
         # Mock serverapp that will cause handler initialization issues
-        mock_serverapp = type(
-            "MockServerApp",
-            (),
-            {
-                "web_app": type("MockWebApp", (), {"settings": {"page_config_data": {}}}),
-                "tornado_settings": {},
-                "extension_manager": type("MockExtensionManager", (), {"extensions": {}})(),
-            },
-        )()
+        mock_serverapp = MockServerApp(
+            web_app=MockWebApp({"page_config_data": {}}),
+            tornado_settings={},
+            extension_manager=MockExtensionManager({}),
+            base_url="/",
+            stop=lambda: None,
+            clear_instance=lambda: None,
+        )
 
         app.serverapp = mock_serverapp
 
@@ -807,15 +834,14 @@ class TestDegradationPerformanceBenchmarks:
 
             app = JupyterNotebookApp()
             app.collaboration_enabled = False
-            app.serverapp = type(
-                "MockServerApp",
-                (),
-                {
-                    "web_app": type("MockWebApp", (), {"settings": {"page_config_data": {}}}),
-                    "tornado_settings": {},
-                    "extension_manager": type("MockExtensionManager", (), {"extensions": {}})(),
-                },
-            )()
+            app.serverapp = MockServerApp(
+                web_app=MockWebApp({"page_config_data": {}}),
+                tornado_settings={},
+                extension_manager=MockExtensionManager({}),
+                base_url="/",
+                stop=lambda: None,
+                clear_instance=lambda: None,
+            )
             app.initialize()
 
             # Simulate basic operation
@@ -839,15 +865,16 @@ class TestDegradationPerformanceBenchmarks:
         """Test that single-user mode meets <100ms latency requirements."""
         app = JupyterNotebookApp()
         app.collaboration_enabled = False
-        app.serverapp = type(
-            "MockServerApp",
-            (),
-            {
-                "web_app": type("MockWebApp", (), {"settings": {"page_config_data": {}}}),
-                "tornado_settings": {},
-                "extension_manager": type("MockExtensionManager", (), {"extensions": {}})(),
-            },
-        )()
+        app.serverapp = MockServerApp(
+            web_app=MockWebApp(
+                {"page_config_data": {}, "base_url": "/", "static_handler_class": None}
+            ),
+            tornado_settings={},
+            extension_manager=MockExtensionManager({}),
+            base_url="/",
+            stop=lambda: None,
+            clear_instance=lambda: None,
+        )
 
         # Measure quick operations that should be under 100ms
         operation_times = []
