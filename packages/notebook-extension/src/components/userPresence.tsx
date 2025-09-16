@@ -10,7 +10,8 @@
  * and selection overlays with user-specific colors.
  */
 
-import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import * as React from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { Decoration, DecorationSet, WidgetType } from '@codemirror/view';
 import { Cell } from '@jupyterlab/cells';
 import { ReactWidget } from '@jupyterlab/apputils';
@@ -156,7 +157,7 @@ export function createUserCursorDecoration(
   user: ICollaborativeUser,
   position: number,
   showAvatar: boolean = true
-): Decoration {
+): any {
   return Decoration.widget({
     widget: new UserCursorWidget(user, showAvatar),
     side: 1
@@ -288,7 +289,7 @@ export function UserPresence({
 
         // Apply to entire cell content - in a real implementation, this would need
         // more sophisticated range detection
-        decorations.push(selectionDecoration.range(0, cell.editor?.model.sharedModel.source.length || 0));
+        decorations.push(selectionDecoration.range(0, (cell.editor?.model as any)?.sharedModel?.source?.length || 0));
       }
     }
 
@@ -317,7 +318,7 @@ export function UserPresence({
       awareness.setPresenceTimeout(presenceTimeout);
     }
 
-    const handleUserJoined = (user: ICollaborativeUser) => {
+    const handleUserJoined = (sender: CollaborationAwareness, user: ICollaborativeUser) => {
       setPresenceState(prev => {
         const existingUserIndex = prev.activeUsers.findIndex(u => u.userId === user.userId);
         let updatedUsers;
@@ -337,12 +338,12 @@ export function UserPresence({
       });
     };
 
-    const handleUserLeft = (user: ICollaborativeUser) => {
+    const handleUserLeft = (sender: CollaborationAwareness, user: ICollaborativeUser) => {
       setPresenceState(prev => ({
         ...prev,
         activeUsers: prev.activeUsers.filter(u => u.userId !== user.userId),
-        cursors: new Map([...prev.cursors].filter(([key]) => key !== user.userId)),
-        selections: new Map([...prev.selections].filter(([key]) => key !== user.userId))
+        cursors: new Map(Array.from(prev.cursors.entries()).filter(([key]) => key !== user.userId)),
+        selections: new Map(Array.from(prev.selections.entries()).filter(([key]) => key !== user.userId))
       }));
     };
 
@@ -403,7 +404,7 @@ export function UserPresence({
 
   // Update CodeMirror decorations
   useEffect(() => {
-    if (!cell.editor || !cell.editor.editor) {
+    if (!cell.editor) {
       return;
     }
 
@@ -549,7 +550,7 @@ export namespace UserPresenceComponent {
           }
         });
 
-        decorations.push(selectionDecoration.range(0, cell.editor?.model.sharedModel.source.length || 0));
+        decorations.push(selectionDecoration.range(0, (cell.editor?.model as any)?.sharedModel?.source?.length || 0));
       }
     }
 
