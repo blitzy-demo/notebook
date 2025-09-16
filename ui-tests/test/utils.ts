@@ -291,13 +291,13 @@ export async function measureSyncLatency(page1: Page, page2: Page): Promise<numb
 /**
  * Create a collaborative notebook session
  */
-export async function createCollaborativeSession(page: Page, notebookPath: string): Promise<void> {
+export async function createCollaborativeSession(page: IJupyterLabPageFixture | Page, notebookPath: string): Promise<void> {
   // Navigate to the notebook with collaboration enabled
   const collaborativeUrl = `${notebookPath}?collaborative=true`;
   await page.goto(collaborativeUrl);
 
   // Wait for notebook to load
-  await waitForNotebook(page);
+  await waitForNotebook(page as Page);
 
   // Wait for collaboration features to initialize
   await waitForCollaboration(page);

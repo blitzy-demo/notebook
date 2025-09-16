@@ -6,13 +6,12 @@
  * for view-only, edit, and admin roles with dynamic permission management.
  */
 
-import path from 'path';
+import * as path from 'path';
 import { expect } from '@jupyterlab/galata';
-import { Page } from '@playwright/test';
+import { expect as playwrightExpect, Page } from '@playwright/test';
 
 import { test } from './fixtures';
 import {
-  waitForCollaboration,
   createMultipleContexts,
   createCollaborativeSession
 } from './utils';
@@ -90,7 +89,7 @@ test.describe('Permissions and Access Control', () => {
     // Verify view-only permission indicators are displayed
     const permissionBadge = page.locator('[data-testid="permission-badge"]');
     await expect(permissionBadge).toBeVisible();
-    await expect(permissionBadge).toContainText('View Only');
+    await expect(permissionBadge).toHaveText('View Only');
 
     // Verify user cannot edit cells - all cells should be read-only
     const firstCell = page.locator('.jp-Cell:first-child');
@@ -113,7 +112,7 @@ test.describe('Permissions and Access Control', () => {
     // Verify toolbar shows read-only indicators
     const readOnlyIndicator = page.locator('[data-testid="readonly-indicator"]');
     await expect(readOnlyIndicator).toBeVisible();
-    await expect(readOnlyIndicator).toContainText('Read Only');
+    await expect(readOnlyIndicator).toHaveText('Read Only');
   });
 
   test('should allow editing with edit permissions', async ({
@@ -145,7 +144,7 @@ test.describe('Permissions and Access Control', () => {
     // Verify edit permission indicators
     const permissionBadge = page.locator('[data-testid="permission-badge"]');
     await expect(permissionBadge).toBeVisible();
-    await expect(permissionBadge).toContainText('Edit');
+    await expect(permissionBadge).toHaveText('Edit');
 
     // Verify user can edit cells
     const firstCell = page.locator('.jp-Cell:first-child .jp-InputArea-editor');
@@ -207,7 +206,7 @@ test.describe('Permissions and Access Control', () => {
     // Verify admin permission indicators
     const permissionBadge = page.locator('[data-testid="permission-badge"]');
     await expect(permissionBadge).toBeVisible();
-    await expect(permissionBadge).toContainText('Admin');
+    await expect(permissionBadge).toHaveText('Admin');
 
     // Verify admin can edit like regular editor
     const firstCell = page.locator('.jp-Cell:first-child .jp-InputArea-editor');
@@ -319,7 +318,7 @@ test.describe('Permissions and Access Control', () => {
     // Verify access is denied with appropriate error message
     const errorMessage = page.locator('[data-testid="access-denied-message"]');
     await expect(errorMessage).toBeVisible();
-    await expect(errorMessage).toContainText('Access denied');
+    await expect(errorMessage).toHaveText('Access denied');
 
     // Verify collaborative features are not accessible
     const collaborationFeatures = page.locator('[data-testid="collaboration-toolbar"]');
@@ -343,7 +342,7 @@ test.describe('Permissions and Access Control', () => {
     // Verify permission denied message
     const permissionDenied = page.locator('[data-testid="permission-denied-message"]');
     await expect(permissionDenied).toBeVisible();
-    await expect(permissionDenied).toContainText('You do not have permission to access this notebook');
+    await expect(permissionDenied).toHaveText('You do not have permission to access this notebook');
   });
 
   test('should update permissions dynamically', async ({
@@ -354,7 +353,7 @@ test.describe('Permissions and Access Control', () => {
     const notebook = `${tmpPath}/${SHARED_NOTEBOOK}`;
 
     // Create two browser contexts - admin and regular user
-    const [adminContext, userContext] = await createMultipleContexts(browser, 2);
+    const [adminContext, userContext] = await createMultipleContexts(browser as any, 2);
 
     const adminPage = await adminContext.newPage();
     const userPage = await userContext.newPage();
@@ -392,14 +391,14 @@ test.describe('Permissions and Access Control', () => {
 
       // Verify user starts with view-only permissions
       const userPermissionBadge = userPage.locator('[data-testid="permission-badge"]');
-      await expect(userPermissionBadge).toContainText('View Only');
+      await playwrightExpect(userPermissionBadge).toHaveText('View Only');
 
       // Admin changes user permission to edit
       await adminPage.locator('.jp-MenuBar text="Edit"').click();
       await adminPage.locator('[data-command="notebook:manage-permissions"]').click();
 
       const permissionsDialog = adminPage.locator('[data-testid="permissions-dialog"]');
-      await expect(permissionsDialog).toBeVisible();
+      await playwrightExpect(permissionsDialog).toBeVisible();
 
       // Find user in permissions list and change to edit
       const userRow = permissionsDialog.locator(`[data-user="regular-user"]`);
@@ -413,11 +412,11 @@ test.describe('Permissions and Access Control', () => {
 
       // Verify user receives permission update notification
       const permissionUpdateNotification = userPage.locator('[data-testid="permission-update-notification"]');
-      await expect(permissionUpdateNotification).toBeVisible();
-      await expect(permissionUpdateNotification).toContainText('Your permissions have been updated to: Edit');
+      await playwrightExpect(permissionUpdateNotification).toBeVisible();
+      await playwrightExpect(permissionUpdateNotification).toHaveText('Your permissions have been updated to: Edit');
 
       // Verify user permission badge updates
-      await expect(userPermissionBadge).toContainText('Edit');
+      await playwrightExpect(userPermissionBadge).toHaveText('Edit');
 
       // Verify user can now edit
       const firstCell = userPage.locator('.jp-Cell:first-child .jp-InputArea-editor');
@@ -458,7 +457,7 @@ test.describe('Permissions and Access Control', () => {
     // Verify permission badge in header
     const headerPermission = page.locator('[data-testid="notebook-header"] [data-testid="permission-badge"]');
     await expect(headerPermission).toBeVisible();
-    await expect(headerPermission).toContainText('Edit');
+    await expect(headerPermission).toHaveText('Edit');
 
     // Verify collaboration toolbar shows permission info
     const collaborationToolbar = page.locator('[data-testid="collaboration-toolbar"]');
@@ -466,7 +465,7 @@ test.describe('Permissions and Access Control', () => {
 
     const permissionInfo = collaborationToolbar.locator('[data-testid="permission-info"]');
     await expect(permissionInfo).toBeVisible();
-    await expect(permissionInfo).toContainText('You have edit access');
+    await expect(permissionInfo).toHaveText('You have edit access');
 
     // Verify permission indicators on cells (for admin users)
     await page.route('/hub/api/user', async (route) => {
@@ -492,7 +491,7 @@ test.describe('Permissions and Access Control', () => {
     const statusBar = page.locator('[data-testid="notebook-status-bar"]');
     if (await statusBar.count() > 0) {
       const statusPermission = statusBar.locator('[data-testid="status-permission"]');
-      await expect(statusPermission).toContainText('Admin');
+      await expect(statusPermission).toHaveText('Admin');
     }
   });
 
@@ -504,7 +503,7 @@ test.describe('Permissions and Access Control', () => {
     const notebook = `${tmpPath}/${SHARED_NOTEBOOK}`;
 
     // Create two admin contexts to simulate permission conflict
-    const [admin1Context, admin2Context] = await createMultipleContexts(browser, 2);
+    const [admin1Context, admin2Context] = await createMultipleContexts(browser as any, 2);
 
     const admin1Page = await admin1Context.newPage();
     const admin2Page = await admin2Context.newPage();
@@ -541,7 +540,7 @@ test.describe('Permissions and Access Control', () => {
       await admin1Page.locator('[data-command="notebook:manage-permissions"]').click();
 
       const dialog1 = admin1Page.locator('[data-testid="permissions-dialog"]');
-      await expect(dialog1).toBeVisible();
+      await playwrightExpect(dialog1).toBeVisible();
 
       // Admin2 tries to open permissions dialog simultaneously
       await admin2Page.locator('.jp-MenuBar text="Edit"').click();
@@ -549,14 +548,14 @@ test.describe('Permissions and Access Control', () => {
 
       // Admin2 should see conflict warning
       const conflictWarning = admin2Page.locator('[data-testid="permission-conflict-warning"]');
-      await expect(conflictWarning).toBeVisible();
-      await expect(conflictWarning).toContainText('Another admin is currently managing permissions');
+      await playwrightExpect(conflictWarning).toBeVisible();
+      await playwrightExpect(conflictWarning).toHaveText('Another admin is currently managing permissions');
 
       // Admin2's dialog should be read-only or blocked
       const dialog2 = admin2Page.locator('[data-testid="permissions-dialog"]');
       if (await dialog2.count() > 0) {
         const readOnlyWarning = dialog2.locator('[data-testid="readonly-permissions-warning"]');
-        await expect(readOnlyWarning).toBeVisible();
+        await playwrightExpect(readOnlyWarning).toBeVisible();
       }
 
       // Admin1 closes dialog
@@ -568,7 +567,7 @@ test.describe('Permissions and Access Control', () => {
       // Now Admin2 should be able to manage permissions
       await admin2Page.locator('[data-command="notebook:manage-permissions"]').click();
       const dialog2Active = admin2Page.locator('[data-testid="permissions-dialog"]');
-      await expect(dialog2Active).toBeVisible();
+      await playwrightExpect(dialog2Active).toBeVisible();
 
     } finally {
       await admin1Context.close();
@@ -662,9 +661,9 @@ test.describe('Permissions and Access Control', () => {
       await expect(auditLogPanel).toBeVisible();
 
       const auditEntry = auditLogPanel.locator('[data-testid="audit-entry"]:first-child');
-      await expect(auditEntry).toContainText('permission_granted');
-      await expect(auditEntry).toContainText('new-user');
-      await expect(auditEntry).toContainText('admin-user');
+      await expect(auditEntry).toHaveText('permission_granted');
+      await expect(auditEntry).toHaveText('new-user');
+      await expect(auditEntry).toHaveText('admin-user');
     }
   });
 });
