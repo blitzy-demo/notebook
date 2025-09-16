@@ -176,14 +176,12 @@ export interface ICommentIndicatorProps {
 export function CommentPanel(props: ICommentPanelProps): JSX.Element {
   const {
     commentStore,
-    notebookTracker,
     currentCell,
     translator,
     permissionManager,
     rendermime,
     userId,
-    visible = true,
-    onVisibilityChange
+    visible = true
   } = props;
 
   const trans = translator.load('notebook');
@@ -191,7 +189,6 @@ export function CommentPanel(props: ICommentPanelProps): JSX.Element {
   // Component state
   const [comments, setComments] = useState<any[]>([]);
   const [selectedThread, setSelectedThread] = useState<string | null>(null);
-  const [replyText, setReplyText] = useState('');
   const [filterMode, setFilterMode] = useState<'all' | 'unresolved' | 'mentions'>('all');
   const [sortMode, setSortMode] = useState<'newest' | 'oldest' | 'most_replies'>('newest');
   const [loading, setLoading] = useState(false);
@@ -199,7 +196,7 @@ export function CommentPanel(props: ICommentPanelProps): JSX.Element {
   const [newCommentText, setNewCommentText] = useState('');
   const [canEdit, setCanEdit] = useState(false);
 
-  const replyInputRef = useRef<HTMLTextAreaElement>(null);
+  // Remove unused replyInputRef
 
   // Check permissions
   useEffect(() => {
@@ -243,18 +240,14 @@ export function CommentPanel(props: ICommentPanelProps): JSX.Element {
 
     // Subscribe to comment changes
     if (commentStore && commentStore.subscribeToNotifications) {
-      const unsubscribe = commentStore.subscribeToNotifications((notification: any) => {
-        if (notification.comment?.cellId === currentCell) {
+      const unsubscribe = commentStore.subscribeToNotifications((comment: any, action: string) => {
+        if (comment?.cellId === currentCell) {
           // Refresh comments when there are updates
           fetchComments();
         }
       });
 
-      return () => {
-        if (unsubscribe) {
-          unsubscribe();
-        }
-      };
+      return unsubscribe;
     }
   }, [currentCell, commentStore]);
 
@@ -312,24 +305,7 @@ export function CommentPanel(props: ICommentPanelProps): JSX.Element {
     }
   };
 
-  // Handle reply to comment
-  const handleReply = async (parentId: string) => {
-    if (!replyText.trim() || !canEdit) {
-      return;
-    }
-
-    try {
-      setLoading(true);
-      await commentStore.addReply(parentId, replyText);
-      setReplyText('');
-      setSelectedThread(null);
-    } catch (error) {
-      console.error('Error adding reply:', error);
-      setError('Failed to add reply');
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Remove unused handleReply - functionality is in CommentThread component
 
   // Handle comment resolution
   const handleResolveComment = async (commentId: string) => {
@@ -385,12 +361,9 @@ export function CommentPanel(props: ICommentPanelProps): JSX.Element {
           </div>
         </div>
         <div className="jp-CommentCard-content">
-          <div
-            className="jp-CommentMarkdown"
-            dangerouslySetInnerHTML={{
-              __html: rendermime.render({ data: { 'text/markdown': comment.content }, metadata: {} })
-            }}
-          />
+          <div className="jp-CommentMarkdown">
+            {comment.content}
+          </div>
         </div>
         {canEdit && !isResolved && (
           <div className="jp-CommentCard-actions">
@@ -528,7 +501,6 @@ export function CommentThread(props: ICommentThreadProps): JSX.Element {
     comments,
     commentStore,
     permissionManager,
-    rendermime,
     userId,
     translator,
     expanded = true,
@@ -664,15 +636,11 @@ export function CommentThread(props: ICommentThreadProps): JSX.Element {
           </span>
         );
       }
-      // Regular content - render as markdown
+      // Regular content - render as text for now
       return (
-        <span
-          key={index}
-          className="jp-CommentMarkdown"
-          dangerouslySetInnerHTML={{
-            __html: rendermime.render({ data: { 'text/markdown': part }, metadata: {} })
-          }}
-        />
+        <span key={index} className="jp-CommentMarkdown">
+          {part}
+        </span>
       );
     });
   };
@@ -856,7 +824,6 @@ export function CommentIndicator(props: ICommentIndicatorProps): JSX.Element {
     cellId,
     commentCount,
     hasUnresolved,
-    cell,
     commentStore,
     translator,
     onClick,
@@ -882,7 +849,7 @@ export function CommentIndicator(props: ICommentIndicatorProps): JSX.Element {
           const comments = await commentStore.getCommentsByCell(cellId);
           // Get latest 3 comments for preview
           const sortedComments = (comments || [])
-            .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+            .sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
             .slice(0, 3);
           setPreviewComments(sortedComments);
         } catch (error) {
@@ -1110,7 +1077,6 @@ export class commentSystem {
 
     this._panelWidget.id = 'comment-panel';
     this._panelWidget.title.label = this._translator.load('notebook').__('Comments');
-    this._panelWidget.title.icon = '💬';
     this._panelWidget.title.closable = true;
 
     return this._panelWidget;
@@ -1140,7 +1106,8 @@ export class commentSystem {
       // Re-render the panel with updated props
       const newPanel = ReactWidget.create(<CommentPanel {...props} />);
       newPanel.id = this._panelWidget.id;
-      newPanel.title = this._panelWidget.title;
+      newPanel.title.label = this._panelWidget.title.label;
+      newPanel.title.closable = this._panelWidget.title.closable;
 
       // Replace the content
       this._panelWidget.dispose();
@@ -1198,7 +1165,7 @@ export class commentSystem {
       await this._commentStore.resolveComment(commentId);
 
       // Get the comment to find its cell
-      const comment = await this._commentStore.get(commentId);
+      const comment = await this._commentStore.getCommentById(commentId);
       if (comment && comment.cellId) {
         // Update indicator for this cell
         this._updateIndicatorForCell(comment.cellId);
@@ -1243,10 +1210,6 @@ export class commentSystem {
     const indicator = this._indicators.get(cellId);
     if (indicator && this._commentStore) {
       try {
-        const comments = await this._commentStore.getCommentsByCell(cellId);
-        const commentCount = comments ? comments.length : 0;
-        const hasUnresolved = comments ? comments.some(c => !c.isResolved) : false;
-
         // Update the indicator component (this would require a state management approach)
         // For now, we'll recreate it
         const currentNotebook = this._notebookTracker.currentWidget;
@@ -1302,7 +1265,7 @@ function CommentIndicatorContainer(props: {
         setLoading(true);
         const comments = await commentStore.getCommentsByCell(cellId);
         const count = comments ? comments.length : 0;
-        const unresolved = comments ? comments.some(c => !c.isResolved) : false;
+        const unresolved = comments ? comments.some((c: any) => !c.isResolved) : false;
 
         setCommentCount(count);
         setHasUnresolved(unresolved);
@@ -1319,17 +1282,13 @@ function CommentIndicatorContainer(props: {
 
     // Subscribe to comment changes
     if (commentStore.subscribeToNotifications) {
-      const unsubscribe = commentStore.subscribeToNotifications((notification: any) => {
-        if (notification.comment?.cellId === cellId) {
+      const unsubscribe = commentStore.subscribeToNotifications((comment: any, action: string) => {
+        if (comment?.cellId === cellId) {
           loadCommentData();
         }
       });
 
-      return () => {
-        if (unsubscribe) {
-          unsubscribe();
-        }
-      };
+      return unsubscribe;
     }
   }, [cellId, commentStore]);
 

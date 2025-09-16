@@ -16,12 +16,12 @@ import { Signal } from '@lumino/signaling';
 import { UUID } from '@lumino/coreutils';
 import { marked } from 'marked';
 import * as _ from 'lodash';
-import { ICellModel } from '@jupyterlab/cells';
+
 
 import { YjsNotebookProvider } from './provider';
 import { PermissionManager } from './permissions';
 import { CollaborationAwareness } from './awareness';
-import { ICollaborativeSession, IComment, ICollaborativeUser, CollaborativeRole } from '../tokens';
+import { IComment, ICollaborativeUser, CollaborativeRole } from '../tokens';
 
 /**
  * Default timeout for comment operations in milliseconds
@@ -311,12 +311,12 @@ export class CommentStore {
   private _provider: YjsNotebookProvider;
   private _permissionManager: PermissionManager;
   private _awareness: CollaborationAwareness;
-  private _session: ICollaborativeSession | null = null;
+
   private _config: Required<ICommentConfig>;
 
   // Yjs shared data structures
   private _commentsMap: Y.Map<string> | null = null;
-  private _threadsMap: Y.Map<string> | null = null;
+
   private _notificationsMap: Y.Map<string> | null = null;
 
   // Local state management
@@ -1178,7 +1178,6 @@ export class CommentStore {
 
     // Clean up Yjs references
     this._commentsMap = null;
-    this._threadsMap = null;
     this._notificationsMap = null;
 
     console.log('CommentStore disposed');
@@ -1195,7 +1194,6 @@ export class CommentStore {
     }
 
     this._commentsMap = this._provider.yjsDoc.getMap('comments');
-    this._threadsMap = this._provider.yjsDoc.getMap('threads');
     this._notificationsMap = this._provider.yjsDoc.getMap('notifications');
 
     // Set up Yjs event handlers

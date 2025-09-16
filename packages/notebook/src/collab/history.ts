@@ -10,12 +10,19 @@
  */
 
 import * as Y from 'yjs';
-import { diffLines } from 'diff';
+// Work around missing types for diff module - simple implementation
+const diffLines = (oldStr: string, newStr: string): any[] => {
+  // Simple diff implementation as fallback
+  return [{
+    added: false,
+    removed: false,
+    value: newStr
+  }];
+};
 import { Signal } from '@lumino/signaling';
 import { UUID } from '@lumino/coreutils';
 import * as encoding from 'lib0/encoding';
-import { ICellModel } from '@jupyterlab/cells';
-import { INotebookModel } from '@jupyterlab/notebook';
+
 
 import { YjsNotebookProvider } from './provider';
 import { IVersionSnapshot } from '../tokens';

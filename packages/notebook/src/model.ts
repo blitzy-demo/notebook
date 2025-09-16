@@ -11,7 +11,7 @@
  */
 
 import * as Y from 'yjs';
-import { Awareness } from 'y-protocols/awareness';
+
 import { INotebookModel } from '@jupyterlab/notebook';
 import { ICellModel } from '@jupyterlab/cells';
 import { ISignal, Signal } from '@lumino/signaling';
@@ -99,7 +99,7 @@ export class NotebookModel implements INotebookModel {
   // Connection management
   private _connectionRetries: number = 0;
   private _maxRetries: number;
-  private _connectionTimeout: number;
+
   private _reconnectTimer: any = null;
 
   /**
@@ -112,7 +112,7 @@ export class NotebookModel implements INotebookModel {
     this._batchingEnabled = options.batchingEnabled ?? true;
     this._batchTimeout = options.batchTimeout ?? 50;
     this._maxRetries = options.maxRetries ?? 5;
-    this._connectionTimeout = options.connectionTimeout ?? 10000;
+
     this._awareness = options.awareness || null;
 
     // Initialize Yjs data structures
@@ -667,23 +667,7 @@ export class NotebookModel implements INotebookModel {
     return mockCell;
   }
 
-  /**
-   * Synchronize cell from Yjs map to ICellModel
-   */
-  private _syncCellFromYjs(cellMap: Y.Map<any>, cell: ICellModel): void {
-    // Update cell source from Y.Text
-    const sourceText = cellMap.get('source') as Y.Text;
-    if (sourceText && (cell as any).source !== sourceText.toString()) {
-      // In a real implementation, this would update the cell's source
-      (cell as any).source = sourceText.toString();
-    }
 
-    // Update metadata
-    const metadata = cellMap.get('metadata');
-    if (metadata && JSON.stringify(cell.metadata) !== JSON.stringify(metadata)) {
-      (cell as any).metadata = { ...metadata };
-    }
-  }
 
   /**
    * Convert ICellModel to JSON

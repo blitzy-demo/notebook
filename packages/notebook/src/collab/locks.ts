@@ -573,7 +573,7 @@ export class CellLockManager {
     const userLocks: ICellLockStatus[] = [];
 
     const lockEntries = Array.from(this._lockStates.entries());
-    for (const [cellId, state] of lockEntries) {
+    for (const [, state] of lockEntries) {
       if (state.isLocked && state.lockedBy === userId && this._isLockValid(state)) {
         userLocks.push(this._convertToLockStatus(state));
       }
@@ -593,7 +593,7 @@ export class CellLockManager {
     const allLocks: ICellLockStatus[] = [];
 
     const allEntries = Array.from(this._lockStates.entries());
-    for (const [cellId, state] of allEntries) {
+    for (const [, state] of allEntries) {
       if (this._isLockValid(state)) {
         allLocks.push(this._convertToLockStatus(state));
       }

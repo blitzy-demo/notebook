@@ -10,12 +10,9 @@
  */
 
 import { NotebookPanel as BaseNotebookPanel } from '@jupyterlab/notebook';
-import { Awareness } from 'y-protocols/awareness';
 import { Signal } from '@lumino/signaling';
-import * as React from 'react';
 
 import { CollaborationAwareness } from './collab/awareness';
-import { ICollaborationProvider } from './tokens';
 import { NotebookModel } from './model';
 import { ICollaborativeUser } from './tokens';
 
@@ -116,7 +113,6 @@ export class NotebookPanel extends BaseNotebookPanel {
   private _awarenessUpdateHandler = this._handleAwarenessUpdate.bind(this);
   private _userJoinHandler = this._handleUserJoin.bind(this);
   private _userLeaveHandler = this._handleUserLeave.bind(this);
-  private _cursorTrackingHandler = this._handleCursorTracking.bind(this);
 
   // Signals
   private _onAwarenessUpdateSignal = new Signal<NotebookPanel, ICollaborativeUser[]>(this);
@@ -412,12 +408,13 @@ export class NotebookPanel extends BaseNotebookPanel {
         return;
       }
 
-      const cellId = (activeCell.model.metadata.get('id') as string) || activeCell.model.id;
+      const metadataId = (activeCell.model.metadata as any)?.get?.('id') || null;
+      const cellId = (typeof metadataId === 'string' ? metadataId : null) || activeCell.model.id;
 
       // Get cursor position from editor
       let cursorOffset = 0;
-      if (activeCell.editor && activeCell.editor.getCursorPosition) {
-        const cursor = activeCell.editor.getCursorPosition();
+      if (activeCell.editor && typeof (activeCell.editor as any).getCursorPosition === 'function') {
+        const cursor = (activeCell.editor as any).getCursorPosition();
         if (cursor) {
           cursorOffset = cursor.column || 0;
         }
@@ -448,7 +445,8 @@ export class NotebookPanel extends BaseNotebookPanel {
       if (this.content.widgets) {
         this.content.widgets.forEach((cell, index) => {
           if (this.content.isSelected(cell)) {
-            const cellId = (cell.model.metadata.get('id') as string) || cell.model.id;
+            const metadataId = (cell.model.metadata as any)?.get?.('id') || null;
+            const cellId = (typeof metadataId === 'string' ? metadataId : null) || cell.model.id;
             selectedCells.push(cellId);
           }
         });
@@ -666,7 +664,8 @@ export class NotebookPanel extends BaseNotebookPanel {
     }
 
     for (const cell of this.content.widgets) {
-      const modelId = (cell.model.metadata.get('id') as string) || cell.model.id;
+      const metadataId = (cell.model.metadata as any)?.get?.('id') || null;
+      const modelId = (typeof metadataId === 'string' ? metadataId : null) || cell.model.id;
       if (modelId === cellId) {
         return cell.node as HTMLElement;
       }
@@ -870,20 +869,6 @@ export class NotebookPanel extends BaseNotebookPanel {
         console.error('Error handling user leave:', error);
       }
     }
-  }
-
-  /**
-   * Handle cursor tracking events
-   */
-  private _handleCursorTracking(event: Event): void {
-    if (this._isDisposed || !this._autoTrackCursor || !this._awareness) {
-      return;
-    }
-
-    // Defer cursor tracking to avoid excessive updates
-    setTimeout(() => {
-      this._trackLocalCursor();
-    }, 100);
   }
 
   /**

@@ -12,12 +12,11 @@
 
 import * as React from 'react';
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { Decoration, DecorationSet, WidgetType } from '@codemirror/view';
+import { Decoration, WidgetType } from '@codemirror/view';
 import { Cell } from '@jupyterlab/cells';
 import { ReactWidget } from '@jupyterlab/apputils';
 
 import { CollaborationAwareness, UserColor } from '../../../notebook/src/collab/awareness';
-import { ICollaborationAwareness } from '../../../application/src/tokens';
 import { ICollaborativeUser } from '../../../notebook/src/tokens';
 
 /**
@@ -184,8 +183,8 @@ export function UserPresence({
     isConnected: false
   });
 
-  const decorationSetRef = useRef<DecorationSet | null>(null);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const timeoutRef = useRef<number | null>(null);
 
   /**
    * Update user cursor position in the editor
@@ -227,17 +226,7 @@ export function UserPresence({
     });
   }, []);
 
-  /**
-   * Assign color to user based on user ID
-   */
-  const assignUserColor = useCallback((userId: string): UserColor => {
-    const colors = Object.values(UserColor);
-    const hash = userId.split('').reduce((a, b) => {
-      a = ((a << 5) - a) + b.charCodeAt(0);
-      return a & a;
-    }, 0);
-    return colors[Math.abs(hash) % colors.length];
-  }, []);
+
 
   /**
    * Render cursor decorations for all users
@@ -279,17 +268,14 @@ export function UserPresence({
 
       const selectedCells = presenceState.selections.get(user.userId);
       if (selectedCells && selectedCells.includes(cell.model.id)) {
-        // Create a selection highlight decoration
-        const selectionDecoration = Decoration.mark({
+        // Apply to entire cell content - in a real implementation, this would need
+        // more sophisticated range detection
+        decorations.push(Decoration.mark({
           class: 'jp-UserPresence-selection',
           attributes: {
             style: `background-color: ${user.color}20; border: 1px solid ${user.color}40;`
           }
-        });
-
-        // Apply to entire cell content - in a real implementation, this would need
-        // more sophisticated range detection
-        decorations.push(selectionDecoration.range(0, (cell.editor?.model as any)?.sharedModel?.source?.length || 0));
+        }) as any);
       }
     }
 
@@ -359,7 +345,7 @@ export function UserPresence({
     const updateInterval = setInterval(() => {
       if (awareness.isEnabled) {
         const allUsers = awareness.getAllUsers();
-        allUsers.forEach(user => {
+        allUsers.forEach((user: ICollaborativeUser) => {
           const cursorPos = awareness.getCursorPosition(user.userId);
           if (cursorPos) {
             updateCursorPosition(user.userId, cursorPos.cellId, cursorPos.offset);
@@ -462,7 +448,7 @@ export function UserPresence({
       </div>
 
       {/* Debug information - remove in production */}
-      {process.env.NODE_ENV === 'development' && (
+      {((globalThis as any).process?.env?.NODE_ENV === 'development') && (
         <div className="jp-UserPresence-debug">
           <small>
             Users: {presenceState.activeUsers.length},
@@ -543,14 +529,12 @@ export namespace UserPresenceComponent {
     for (const user of activeUsers) {
       const selectedCells = awareness.getSelectedCells(user.userId);
       if (selectedCells && selectedCells.includes(cell.model?.id || '')) {
-        const selectionDecoration = Decoration.mark({
+        decorations.push(Decoration.mark({
           class: 'jp-UserPresence-selection',
           attributes: {
             style: `background-color: ${user.color}20; border: 1px solid ${user.color}40;`
           }
-        });
-
-        decorations.push(selectionDecoration.range(0, (cell.editor?.model as any)?.sharedModel?.source?.length || 0));
+        }) as any);
       }
     }
 

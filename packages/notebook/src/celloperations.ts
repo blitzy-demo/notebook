@@ -24,11 +24,10 @@
 import * as React from 'react';
 import { ICellModel } from '@jupyterlab/cells';
 import { INotebookModel } from '@jupyterlab/notebook';
-import { ISignal } from '@lumino/signaling';
 import { UUID } from '@lumino/coreutils';
 
 import { CellLockManager } from './collab/locks';
-import { ICellLockManager, ICellLockStatus } from './tokens';
+import { ICellLockStatus } from './tokens';
 
 /**
  * Specialized error class for cell operation failures with lock status context
@@ -80,7 +79,7 @@ export class CellLockStatusComponent extends React.Component<{
   onLockRelease?: () => void;
 }> {
   render() {
-    const { cellId, lockStatus, onLockRelease } = this.props;
+    const { lockStatus, onLockRelease } = this.props;
 
     if (!lockStatus || !lockStatus.isLocked) {
       return null;
@@ -776,7 +775,7 @@ export const CellOperations = {
 
       // Create new cell with second part
       const newCellId = UUID.uuid4();
-      const newCell = this._createCellModel(originalCell.type);
+      const newCell = this._createCellModel(originalCell.type as 'code' | 'markdown' | 'raw');
       this._setCellText(newCell, secondPart);
 
       // Copy metadata to new cell

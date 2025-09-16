@@ -119,7 +119,7 @@ export function PermissionsDialog(props: IPermissionsDialogProps): JSX.Element {
         const cachedPermissions = permissionManager.getCachedPermissions();
         const users: IPermissionUser[] = [];
 
-        for (const entry of Array.from(cachedPermissions.entries())) {
+        for (const entry of Array.from((cachedPermissions as Map<string, any>).entries())) {
           const [userId, role] = entry;
           users.push({
             userId,
@@ -736,7 +736,7 @@ export class permissionsDialog {
     };
 
     const dialog = React.createElement(PermissionsDialog, dialogProps);
-    const root = createRoot(element);
+    const root = (createRoot as any)(element);
     root.render(dialog);
   }
 

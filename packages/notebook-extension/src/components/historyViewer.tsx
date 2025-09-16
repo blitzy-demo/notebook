@@ -129,7 +129,7 @@ export const HistoryViewer: React.FC<IHistoryViewerProps> = ({
   const [versions, setVersions] = useState<IVersionSnapshot[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<IVersionSnapshot | null>(null);
   const [diffMode, setDiffMode] = useState<DiffMode>(DiffMode.INLINE);
-  const [filterOptions, setFilterOptions] = useState<IHistoryFilterOptions>({});
+  const [filterOptions] = useState<IHistoryFilterOptions>({});
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -463,12 +463,13 @@ export const HistoryViewer: React.FC<IHistoryViewerProps> = ({
 
         {!loading && !error && filteredVersions.length > 0 && (
           <List
-            style={{ height: height - 120 }} // Account for header
-            rowCount={filteredVersions.length}
-            rowHeight={80} // Base height for collapsed items
-            rowComponent={renderVersionItem}
+            height={height - 120} // Account for header
+            itemCount={filteredVersions.length}
+            itemSize={80} // Base height for collapsed items
             className="jp-HistoryViewer-list"
-          />
+          >
+            {({ index }: { index: number }) => renderVersionItem({ index })}
+          </List>
         )}
       </div>
 
