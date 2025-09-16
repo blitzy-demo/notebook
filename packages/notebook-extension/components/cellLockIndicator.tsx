@@ -4,396 +4,561 @@
  */
 
 /**
- * Cell lock indicator component that provides visual feedback when cells are locked for editing by other users.
- * Renders lock icons, user information, and timeout countdowns as overlays on locked cells, integrating with
- * the CellLockManager to prevent simultaneous editing conflicts.
+ * CellLockIndicator React component providing visual feedback for cell locking
+ * in collaborative Jupyter Notebook editing sessions.
  *
- * Key features:
- * - Display lock icons on cells being edited by others
- * - Show lock owner information with avatar and name
- * - Display timeout countdown for automatic lock release
- * - Integrate with CellLockManager for lock state updates
- * - Prevent edit attempts on locked cells with visual feedback
- * - Support lock transfer and queue visualization
+ * This component renders lock overlays on cells being edited by other users,
+ * displaying lock owner information, countdown timers, and queue status.
+ * Integrates with CellLockManager for real-time lock state updates.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
-
-import { Cell, ICellModel } from '@jupyterlab/cells';
-import { ITranslator } from '@jupyterlab/translation';
+import * as React from 'react';
 import { ReactWidget } from '@jupyterlab/apputils';
-
-import { CellLockManager } from 'packages/notebook/src/collab/locks';
-import { ICellLockManager, ICellLockStatus, ICollaborativeUser } from 'packages/notebook/src/tokens';
+import { Cell } from '@jupyterlab/cells';
+import { ITranslator } from '@jupyterlab/translation';
+import { CellLockManager } from '../../../notebook/src/collab/locks';
+import { ICellLockStatus } from '../../../notebook/src/tokens';
 
 /**
  * Props interface for the CellLockIndicator component
  */
 export interface ICellLockIndicatorProps {
   /**
-   * The lock manager service for handling cell-level locking
+   * The cell lock manager instance for accessing lock state and subscribing to changes
    */
-  lockManager: ICellLockManager;
+  lockManager: CellLockManager;
 
   /**
-   * The cell that this indicator is monitoring
+   * The cell widget instance this indicator is attached to
    */
   cell: Cell;
 
   /**
-   * Translation service for internationalization
+   * Translation service for internationalized text
    */
   translator: ITranslator;
 }
 
 /**
- * Internal state interface for tracking lock status and user information
+ * Internal state interface for lock information
  */
-interface ICellLockState {
-  /**
-   * Whether the cell is currently locked
-   */
+interface ILockInfo {
+  cellId: string;
   isLocked: boolean;
-
-  /**
-   * Information about the user who holds the lock
-   */
-  lockOwner: ICollaborativeUser | null;
-
-  /**
-   * Time remaining before automatic lock release (in seconds)
-   */
+  lockOwner: string | null;
+  lockTime: Date | null;
+  timeout: number;
+  queuedUsers: string[];
   timeRemaining: number;
-
-  /**
-   * Users waiting in queue for this cell
-   */
-  queuedUsers: ICollaborativeUser[];
-
-  /**
-   * Whether the lock is about to expire (< 10 seconds)
-   */
-  isExpiringSoon: boolean;
 }
 
 /**
- * CellLockIndicator React component for displaying cell lock status and user information
+ * CellLockIndicator React component that displays lock status overlay on cells
  */
-export const CellLockIndicator = ({
+export const CellLockIndicator: React.FC<ICellLockIndicatorProps> = ({
   lockManager,
   cell,
   translator
-}: ICellLockIndicatorProps): JSX.Element => {
+}) => {
   const trans = translator.load('notebook');
 
   // State for tracking lock information
-  const [lockState, setLockState] = useState<ICellLockState>({
+  const [lockInfo, setLockInfo] = React.useState<ILockInfo>({
+    cellId: cell.model.id,
     isLocked: false,
     lockOwner: null,
-    timeRemaining: 0,
+    lockTime: null,
+    timeout: 30000,
     queuedUsers: [],
-    isExpiringSoon: false
+    timeRemaining: 0
   });
 
-  // Refs for timer management
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const lockStatusRef = useRef<ICellLockStatus | null>(null);
+  // Refs for managing timers
+  const countdownTimer = React.useRef<number | null>(null);
+  const pulseAnimationEnabled = React.useRef<boolean>(false);
 
   /**
-   * Get the cell ID from the cell model
+   * Update lock information from ICellLockStatus
    */
-  const getCellId = (): string => {
-    const model = cell.model;
-    return model?.id || '';
-  };
-
-  /**
-   * Convert user ID to ICollaborativeUser object (mock implementation)
-   * In a real implementation, this would fetch user data from the awareness system
-   */
-  const getUserInfo = (userId: string): ICollaborativeUser => {
-    return {
-      userId,
-      username: userId,
-      displayName: userId,
-      avatar: '', // Would be populated from user service
-      color: '#4285f4', // Default blue color
-      cursorPosition: null,
-      selectedCells: [],
-      isActive: true,
-      lastActivity: new Date()
-    };
-  };
-
-  /**
-   * Update lock state from ICellLockStatus
-   */
-  const updateLockState = (status: ICellLockStatus | null) => {
+  const updateLockInfo = React.useCallback((status: ICellLockStatus | null) => {
     if (!status) {
-      setLockState({
+      setLockInfo(prev => ({
+        ...prev,
         isLocked: false,
         lockOwner: null,
+        lockTime: null,
         timeRemaining: 0,
-        queuedUsers: [],
-        isExpiringSoon: false
-      });
+        queuedUsers: []
+      }));
       return;
     }
 
-    const lockOwner = status.lockedBy ? getUserInfo(status.lockedBy) : null;
-    const queuedUsers = status.queuedUsers.map(getUserInfo);
+    const timeRemaining = status.lockTime && status.isLocked
+      ? Math.max(0, status.timeout - (Date.now() - status.lockTime.getTime()))
+      : 0;
 
-    let timeRemaining = 0;
-    if (status.isLocked && status.lockTime) {
-      const elapsed = Date.now() - status.lockTime.getTime();
-      timeRemaining = Math.max(0, Math.floor((status.timeout - elapsed) / 1000));
-    }
-
-    setLockState({
+    setLockInfo({
+      cellId: status.cellId,
       isLocked: status.isLocked,
-      lockOwner,
-      timeRemaining,
-      queuedUsers,
-      isExpiringSoon: timeRemaining < 10 && timeRemaining > 0
+      lockOwner: status.lockedBy,
+      lockTime: status.lockTime,
+      timeout: status.timeout,
+      queuedUsers: status.queuedUsers,
+      timeRemaining: Math.floor(timeRemaining / 1000) // Convert to seconds
     });
-
-    lockStatusRef.current = status;
-  };
-
-  /**
-   * Handle lock state changes from the lock manager
-   */
-  const handleLockChange = (
-    sender: ICellLockManager,
-    args: { cellId: string; status: ICellLockStatus }
-  ) => {
-    const cellId = getCellId();
-    if (args.cellId === cellId) {
-      updateLockState(args.status);
-    }
-  };
+  }, []);
 
   /**
    * Start countdown timer for lock expiration
    */
-  const startTimer = () => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
+  const startCountdownTimer = React.useCallback(() => {
+    if (countdownTimer.current) {
+      clearInterval(countdownTimer.current);
     }
 
-    timerRef.current = setInterval(() => {
-      const status = lockStatusRef.current;
-      if (!status || !status.isLocked || !status.lockTime) {
-        return;
-      }
+    if (!lockInfo.isLocked || !lockInfo.lockTime) {
+      return;
+    }
 
-      const elapsed = Date.now() - status.lockTime.getTime();
-      const remaining = Math.max(0, Math.floor((status.timeout - elapsed) / 1000));
+    countdownTimer.current = window.setInterval(() => {
+      const now = Date.now();
+      const elapsed = now - lockInfo.lockTime!.getTime();
+      const remaining = Math.max(0, lockInfo.timeout - elapsed);
+      const secondsRemaining = Math.floor(remaining / 1000);
 
-      if (remaining === 0) {
-        // Lock has expired, stop timer
-        if (timerRef.current) {
-          clearInterval(timerRef.current);
-          timerRef.current = null;
-        }
-      }
-
-      setLockState(prev => ({
+      setLockInfo(prev => ({
         ...prev,
-        timeRemaining: remaining,
-        isExpiringSoon: remaining < 10 && remaining > 0
+        timeRemaining: secondsRemaining
       }));
+
+      // Enable pulse animation when time is running out
+      pulseAnimationEnabled.current = secondsRemaining <= 10;
+
+      // Clear timer when expired
+      if (secondsRemaining <= 0 && countdownTimer.current) {
+        window.clearInterval(countdownTimer.current);
+        countdownTimer.current = null;
+      }
     }, 1000);
-  };
+  }, [lockInfo.isLocked, lockInfo.lockTime, lockInfo.timeout]);
 
   /**
-   * Stop countdown timer
+   * Handle lock state changes from the lock manager
    */
-  const stopTimer = () => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
+  const handleLockChange = React.useCallback((_: CellLockManager, data: { cellId: string; status: ICellLockStatus }) => {
+    if (data.cellId === cell.model.id) {
+      updateLockInfo(data.status);
     }
-  };
+  }, [cell.model.id, updateLockInfo]);
 
   /**
    * Handle click attempts on locked cells
    */
-  const handleLockedCellClick = (event: React.MouseEvent) => {
-    if (lockState.isLocked) {
+  const handleLockedCellClick = React.useCallback((event: React.MouseEvent) => {
+    if (lockInfo.isLocked) {
       event.preventDefault();
       event.stopPropagation();
 
-      const ownerName = lockState.lockOwner?.displayName || 'Another user';
-      const message = trans.__('Cell is locked by %1. Please wait for them to finish editing.', ownerName);
+      // Create and show temporary tooltip
+      const tooltip = document.createElement('div');
+      tooltip.className = 'jp-CellLockIndicator-tooltip';
+      tooltip.textContent = trans.__(`Cell is locked by ${lockInfo.lockOwner}. ${lockInfo.timeRemaining}s remaining.`);
+      tooltip.style.cssText = `
+        position: fixed;
+        top: ${event.clientY + 10}px;
+        left: ${event.clientX + 10}px;
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 8px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        z-index: 10000;
+        pointer-events: none;
+        animation: fadeInOut 2s ease-in-out forwards;
+      `;
 
-      // Show warning tooltip or notification
-      console.warn(message);
-      // In real implementation, would show a proper notification/tooltip
+      document.body.appendChild(tooltip);
+
+      // Remove tooltip after animation
+      setTimeout(() => {
+        if (tooltip.parentNode) {
+          document.body.removeChild(tooltip);
+        }
+      }, 2000);
     }
-  };
+  }, [lockInfo.isLocked, lockInfo.lockOwner, lockInfo.timeRemaining, trans]);
 
   /**
-   * Format time remaining into human-readable string
+   * Get user display information for lock owner
    */
-  const formatTimeRemaining = (seconds: number): string => {
-    if (seconds < 60) {
-      return trans.__('%1s', seconds.toString());
-    }
+  const getUserDisplayInfo = React.useCallback((userId: string | null) => {
+    if (!userId) return null;
 
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return trans.__('%1m %2s', minutes.toString(), remainingSeconds.toString());
-  };
+    // For now, return basic user info - this could be enhanced with actual user lookup
+    return {
+      name: userId,
+      avatar: `https://api.dicebear.com/6.x/initials/svg?seed=${userId}`,
+      color: `hsl(${userId.charCodeAt(0) * 137.508}%, 50%, 50%)`
+    };
+  }, []);
 
-  // Effect for subscribing to lock state changes
-  useEffect(() => {
-    const cellId = getCellId();
-    if (!cellId) {
+  // Set up effect for lock state monitoring and timer management
+  React.useEffect(() => {
+    if (cell.isDisposed || !lockManager) {
       return;
     }
 
-    // Initial lock status check
-    const initialStatus = lockManager.lockStatus(cellId);
-    updateLockState(initialStatus);
+    let isComponentMounted = true;
 
-    // Subscribe to lock changes
-    lockManager.onLockChange.connect(handleLockChange);
+    // Async function to handle initial setup
+    const setupLockMonitoring = async () => {
+      try {
+        // Get initial lock status
+        const initialStatus = lockManager.lockStatus(cell.model.id);
 
-    return () => {
-      // Cleanup: disconnect from signals
-      lockManager.onLockChange.disconnect(handleLockChange);
-      stopTimer();
+        if (isComponentMounted) {
+          updateLockInfo(initialStatus);
+        }
+
+        // Subscribe to lock changes
+        lockManager.onLockChange.connect(handleLockChange);
+
+      } catch (error) {
+        console.error('Error setting up lock monitoring:', error);
+      }
     };
-  }, [lockManager, cell]);
 
-  // Effect for managing countdown timer
-  useEffect(() => {
-    if (lockState.isLocked && lockState.timeRemaining > 0) {
-      startTimer();
-    } else {
-      stopTimer();
+    setupLockMonitoring();
+
+    // Cleanup function
+    return () => {
+      isComponentMounted = false;
+
+      if (countdownTimer.current) {
+        window.clearInterval(countdownTimer.current);
+        countdownTimer.current = null;
+      }
+
+      try {
+        if (lockManager && lockManager.onLockChange) {
+          lockManager.onLockChange.disconnect(handleLockChange);
+        }
+      } catch (error) {
+        console.warn('Error disconnecting from lock manager:', error);
+      }
+    };
+  }, [cell.model.id, cell.isDisposed, lockManager, handleLockChange, updateLockInfo]);
+
+  // Update countdown timer when lock state changes
+  React.useEffect(() => {
+    if (lockInfo.isLocked) {
+      startCountdownTimer();
+    } else if (countdownTimer.current) {
+      window.clearInterval(countdownTimer.current);
+      countdownTimer.current = null;
     }
+  }, [lockInfo.isLocked, startCountdownTimer]);
 
-    return () => {
-      stopTimer();
-    };
-  }, [lockState.isLocked, lockState.lockOwner]);
-
-  // Don't render if cell is not locked
-  if (!lockState.isLocked || !lockState.lockOwner) {
-    return <></>;
+  // Don't render if cell is disposed or not locked
+  if (cell.isDisposed || !lockInfo.isLocked || !lockInfo.lockOwner) {
+    return null;
   }
+
+  const userInfo = getUserDisplayInfo(lockInfo.lockOwner);
+  const isExpiringSoon = lockInfo.timeRemaining <= 10;
 
   return (
     <div
-      className={`jp-CellLockIndicator ${lockState.isExpiringSoon ? 'jp-CellLockIndicator-expiring' : ''}`}
+      className={`jp-CellLockIndicator ${isExpiringSoon ? 'jp-CellLockIndicator-expiring' : ''}`}
       onClick={handleLockedCellClick}
-      title={trans.__('This cell is locked by %1', lockState.lockOwner.displayName)}
+      role="alert"
+      aria-label={trans.__(`Cell locked by ${lockInfo.lockOwner}, ${lockInfo.timeRemaining} seconds remaining`)}
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 1000,
+        pointerEvents: 'all',
+        transition: 'opacity 0.3s ease-in-out'
+      }}
     >
-      <div className="jp-CellLockIndicator-overlay">
-        {/* Lock icon */}
-        <div className="jp-CellLockIndicator-icon">
-          🔒
+      {/* Lock overlay */}
+      <div
+        className="jp-CellLockIndicator-overlay"
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(255, 255, 255, 0.85)',
+          backdropFilter: 'blur(2px)',
+          border: `2px solid ${userInfo?.color || '#ff6b6b'}`,
+          borderRadius: '4px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '16px',
+          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+          animation: isExpiringSoon ? 'pulse 1s infinite' : undefined
+        }}
+      >
+        {/* Lock icon and user info */}
+        <div
+          className="jp-CellLockIndicator-header"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            marginBottom: '12px'
+          }}
+        >
+          <div
+            className="jp-CellLockIndicator-icon"
+            style={{
+              fontSize: '24px',
+              opacity: 0.8
+            }}
+          >
+            🔒
+          </div>
+
+          {userInfo && (
+            <div
+              className="jp-CellLockIndicator-user"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <img
+                src={userInfo.avatar}
+                alt={`${userInfo.name} avatar`}
+                className="jp-CellLockIndicator-avatar"
+                style={{
+                  width: '24px',
+                  height: '24px',
+                  borderRadius: '50%',
+                  border: `2px solid ${userInfo.color}`,
+                  backgroundColor: 'white'
+                }}
+                onError={(e) => {
+                  // Fallback to initials if image fails
+                  const target = e.target as HTMLImageElement;
+                  target.style.display = 'none';
+                }}
+              />
+              <span
+                className="jp-CellLockIndicator-username"
+                style={{
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  color: '#333'
+                }}
+              >
+                {userInfo.name}
+              </span>
+            </div>
+          )}
         </div>
 
-        {/* User information */}
-        <div className="jp-CellLockIndicator-userInfo">
-          {lockState.lockOwner.avatar && (
-            <img
-              className="jp-CellLockIndicator-avatar"
-              src={lockState.lockOwner.avatar}
-              alt={lockState.lockOwner.displayName}
-              width={24}
-              height={24}
-            />
-          )}
-          <span className="jp-CellLockIndicator-userName">
-            {lockState.lockOwner.displayName}
+        {/* Countdown timer */}
+        <div
+          className="jp-CellLockIndicator-timer"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            marginBottom: '8px'
+          }}
+        >
+          <span
+            className={`jp-CellLockIndicator-countdown ${isExpiringSoon ? 'jp-CellLockIndicator-countdown-warning' : ''}`}
+            style={{
+              fontSize: '18px',
+              fontWeight: 'bold',
+              color: isExpiringSoon ? '#ff4444' : '#666',
+              minWidth: '32px',
+              textAlign: 'center'
+            }}
+          >
+            {lockInfo.timeRemaining}s
+          </span>
+          <span
+            className="jp-CellLockIndicator-timer-label"
+            style={{
+              fontSize: '12px',
+              color: '#888'
+            }}
+          >
+            {trans.__('remaining')}
           </span>
         </div>
 
-        {/* Timer countdown */}
-        {lockState.timeRemaining > 0 && (
-          <div className="jp-CellLockIndicator-timer">
-            <span className="jp-CellLockIndicator-timerLabel">
-              {trans.__('Auto-release in:')}
-            </span>
-            <span className="jp-CellLockIndicator-timerValue">
-              {formatTimeRemaining(lockState.timeRemaining)}
-            </span>
-          </div>
-        )}
+        {/* Queue indicator if users are waiting */}
+        {lockInfo.queuedUsers.length > 0 && (
+          <div
+            className="jp-CellLockIndicator-queue"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '4px',
+              marginBottom: '8px',
+              padding: '6px 8px',
+              backgroundColor: 'rgba(255, 193, 7, 0.1)',
+              borderRadius: '8px',
+              border: '1px solid rgba(255, 193, 7, 0.3)'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span
+                className="jp-CellLockIndicator-queue-icon"
+                style={{ fontSize: '14px' }}
+              >
+                ⏳
+              </span>
+              <span
+                className="jp-CellLockIndicator-queue-count"
+                style={{
+                  fontSize: '12px',
+                  color: '#856404',
+                  fontWeight: 500
+                }}
+              >
+                {lockInfo.queuedUsers.length} {trans.__('waiting')}
+              </span>
+            </div>
 
-        {/* Queue indicator */}
-        {lockState.queuedUsers.length > 0 && (
-          <div className="jp-CellLockIndicator-queue">
-            <span className="jp-CellLockIndicator-queueLabel">
-              {trans.__('Waiting:')}
-            </span>
-            <div className="jp-CellLockIndicator-queueUsers">
-              {lockState.queuedUsers.slice(0, 3).map((user, index) => (
-                <span
-                  key={user.userId}
-                  className="jp-CellLockIndicator-queueUser"
-                  title={user.displayName}
+            {/* Show queued users avatars */}
+            <div style={{ display: 'flex', gap: '2px', flexWrap: 'wrap', maxWidth: '120px' }}>
+              {lockInfo.queuedUsers.slice(0, 3).map((userId, index) => {
+                const queuedUserInfo = getUserDisplayInfo(userId);
+                return (
+                  <img
+                    key={userId}
+                    src={queuedUserInfo?.avatar || `https://api.dicebear.com/6.x/initials/svg?seed=${userId}`}
+                    alt={`${userId} avatar`}
+                    title={`${userId} (position ${index + 1} in queue)`}
+                    style={{
+                      width: '16px',
+                      height: '16px',
+                      borderRadius: '50%',
+                      border: `1px solid ${queuedUserInfo?.color || '#ccc'}`,
+                      backgroundColor: 'white'
+                    }}
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.style.display = 'none';
+                    }}
+                  />
+                );
+              })}
+              {lockInfo.queuedUsers.length > 3 && (
+                <div
+                  style={{
+                    width: '16px',
+                    height: '16px',
+                    borderRadius: '50%',
+                    backgroundColor: '#f0f0f0',
+                    border: '1px solid #ccc',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '8px',
+                    color: '#666'
+                  }}
+                  title={`${lockInfo.queuedUsers.length - 3} more users waiting`}
                 >
-                  {user.avatar ? (
-                    <img
-                      src={user.avatar}
-                      alt={user.displayName}
-                      width={16}
-                      height={16}
-                    />
-                  ) : (
-                    user.displayName.charAt(0).toUpperCase()
-                  )}
-                </span>
-              ))}
-              {lockState.queuedUsers.length > 3 && (
-                <span className="jp-CellLockIndicator-queueMore">
-                  +{lockState.queuedUsers.length - 3}
-                </span>
+                  +{lockInfo.queuedUsers.length - 3}
+                </div>
               )}
             </div>
           </div>
         )}
 
-        {/* Pulse animation for expiring locks */}
-        {lockState.isExpiringSoon && (
-          <div className="jp-CellLockIndicator-pulseEffect" />
-        )}
+        {/* Warning message */}
+        <div
+          className="jp-CellLockIndicator-message"
+          style={{
+            fontSize: '12px',
+            color: '#666',
+            textAlign: 'center',
+            maxWidth: '200px',
+            lineHeight: 1.4
+          }}
+        >
+          {trans.__('This cell is being edited by another user')}
+        </div>
       </div>
+
+      {/* CSS-in-JS Animation Styles */}
+      <style>
+        {`
+          @keyframes pulse {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.8; transform: scale(1.02); }
+            100% { opacity: 1; transform: scale(1); }
+          }
+
+          @keyframes fadeInOut {
+            0% { opacity: 0; transform: translateY(10px); }
+            20% { opacity: 1; transform: translateY(0); }
+            80% { opacity: 1; transform: translateY(0); }
+            100% { opacity: 0; transform: translateY(-10px); }
+          }
+
+          .jp-CellLockIndicator-expiring .jp-CellLockIndicator-overlay {
+            animation: pulse 1s infinite;
+          }
+
+          .jp-CellLockIndicator:hover .jp-CellLockIndicator-overlay {
+            background-color: rgba(255, 255, 255, 0.95);
+            transform: scale(1.01);
+          }
+
+          .jp-CellLockIndicator-avatar {
+            transition: all 0.2s ease;
+          }
+
+          .jp-CellLockIndicator-avatar:hover {
+            transform: scale(1.1);
+          }
+
+          .jp-CellLockIndicator-overlay {
+            transition: all 0.2s ease;
+          }
+
+          .jp-CellLockIndicator-queue {
+            transition: all 0.2s ease;
+          }
+
+          .jp-CellLockIndicator-queue:hover {
+            background-color: rgba(255, 193, 7, 0.2);
+          }
+        `}
+      </style>
     </div>
   );
 };
 
 /**
- * A namespace for CellLockIndicatorComponent static methods.
+ * Namespace containing static methods for creating CellLockIndicator widgets
  */
 export namespace CellLockIndicatorComponent {
   /**
-   * Create a new CellLockIndicatorComponent
+   * Create a new CellLockIndicator ReactWidget
    *
-   * @param lockManager The cell lock manager
-   * @param cell The cell to monitor for lock status
-   * @param translator The translator
+   * @param props - Component properties including lockManager, cell, and translator
+   * @returns ReactWidget containing the CellLockIndicator component
    */
-  export const create = ({
-    lockManager,
-    cell,
-    translator
-  }: {
-    lockManager: ICellLockManager;
-    cell: Cell;
-    translator: ITranslator;
-  }): ReactWidget => {
+  export const create = (props: ICellLockIndicatorProps): ReactWidget => {
     return ReactWidget.create(
-      <CellLockIndicator
-        lockManager={lockManager}
-        cell={cell}
-        translator={translator}
-      />
+      <CellLockIndicator {...props} />
     );
   };
 }
