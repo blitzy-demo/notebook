@@ -31,13 +31,20 @@ import { ISettingRegistry } from '@jupyterlab/settingregistry';
 
 import { ITranslator, nullTranslator } from '@jupyterlab/translation';
 
-import { INotebookShell } from '@jupyter-notebook/application';
+import { INotebookShell, ICollaborationBar, ICollaborationComments } from '@jupyter-notebook/application';
 
 import { Poll } from '@lumino/polling';
 
 import { Widget } from '@lumino/widgets';
 
 import { TrustedComponent } from './trusted';
+
+import { CollaborationBar } from './components/CollaborationBar';
+import { userPresence } from './components/userPresence';
+import { cellLockIndicator } from './components/cellLockIndicator';
+import { historyViewer } from './components/historyViewer';
+import { permissionsDialog } from './components/permissionsDialog';
+import { commentSystem } from './components/commentSystem';
 
 /**
  * The class for kernel status errors.
@@ -82,6 +89,21 @@ namespace CommandIDs {
    * A command to toggle full width of the notebook
    */
   export const toggleFullWidth = 'notebook:toggle-full-width';
+
+  /**
+   * A command to toggle collaboration features
+   */
+  export const toggleCollaboration = 'collaboration:toggle';
+
+  /**
+   * A command to show version history
+   */
+  export const showHistory = 'collaboration:show-history';
+
+  /**
+   * A command to manage permissions
+   */
+  export const managePermissions = 'collaboration:manage-permissions';
 }
 
 /**
@@ -668,13 +690,339 @@ const editNotebookMetadata: JupyterFrontEndPlugin<void> = {
         shell.currentWidget instanceof NotebookPanel,
     });
 
+    // Add collaboration toggle command
+    commands.addCommand(CommandIDs.toggleCollaboration, {
+      label: trans.__('Toggle Collaboration'),
+      execute: async () => {
+        // This would typically toggle collaboration features on/off
+        console.log('Toggle collaboration command executed');
+      },
+      isEnabled: () =>
+        shell.currentWidget !== null &&
+        shell.currentWidget instanceof NotebookPanel,
+    });
+
+    // Add manage permissions command
+    commands.addCommand(CommandIDs.managePermissions, {
+      label: trans.__('Manage Permissions'),
+      execute: async () => {
+        // This would open the permissions dialog
+        try {
+          const permissionsComponent = permissionsDialog.create();
+          permissionsComponent.showDialog();
+        } catch (error) {
+          console.error('Failed to open permissions dialog:', error);
+        }
+      },
+      isEnabled: () =>
+        shell.currentWidget !== null &&
+        shell.currentWidget instanceof NotebookPanel,
+    });
+
     if (palette) {
       palette.addItem({
         command: CommandIDs.openEditNotebookMetadata,
         category: 'Notebook Operations',
       });
+      palette.addItem({
+        command: CommandIDs.toggleCollaboration,
+        category: 'Collaboration',
+      });
+      palette.addItem({
+        command: CommandIDs.showHistory,
+        category: 'Collaboration',
+      });
+      palette.addItem({
+        command: CommandIDs.managePermissions,
+        category: 'Collaboration',
+      });
     }
   },
+};
+
+/**
+ * A plugin for collaboration awareness and user presence display
+ */
+const collaborationAwareness: JupyterFrontEndPlugin<ICollaborationBar> = {
+  id: '@jupyter-notebook/notebook-extension:collab-awareness-extension',
+  description: 'A plugin for collaboration awareness and user presence display.',
+  autoStart: true,
+  requires: [ISettingRegistry, INotebookTracker, INotebookShell],
+  provides: ICollaborationBar,
+  activate: (
+    app: JupyterFrontEnd,
+    settingRegistry: ISettingRegistry,
+    notebookTracker: INotebookTracker,
+    notebookShell: INotebookShell
+  ): ICollaborationBar => {
+    let collaborationEnabled = false;
+    let collaborationBar: CollaborationBar | null = null;
+    let userPresenceComponent: userPresence | null = null;
+
+    // Check if collaboration is enabled in settings
+    const checkCollaborationEnabled = async (): Promise<boolean> => {
+      try {
+        const settings = await settingRegistry.load(collaborationAwareness.id);
+        return settings.get('collaborationEnabled').composite as boolean ?? false;
+      } catch (error) {
+        console.warn('Failed to load collaboration settings:', error);
+        return false;
+      }
+    };
+
+    // Initialize collaboration components if enabled
+    const initializeCollaboration = async () => {
+      collaborationEnabled = await checkCollaborationEnabled();
+
+      if (collaborationEnabled) {
+        try {
+          // Create collaboration bar widget
+          collaborationBar = CollaborationBar.create();
+          collaborationBar.updatePresence([]);
+          collaborationBar.showConnectionStatus(false);
+
+          // Add to shell
+          notebookShell.add(collaborationBar, 'top', { rank: 100 });
+
+          // Create user presence component
+          userPresenceComponent = userPresence.create();
+
+          console.log('Collaboration awareness initialized');
+        } catch (error) {
+          console.error('Failed to initialize collaboration awareness:', error);
+          collaborationEnabled = false;
+        }
+      }
+    };
+
+    // Initialize on startup
+    app.restored.then(() => {
+      initializeCollaboration();
+    });
+
+    // Create the ICollaborationBar service implementation
+    const collaborationBarService: ICollaborationBar = {
+      updatePresence: (users: any[]) => {
+        if (collaborationEnabled && collaborationBar) {
+          collaborationBar.updatePresence(users);
+        }
+        if (collaborationEnabled && userPresenceComponent) {
+          userPresenceComponent.updateUserPresence(users);
+        }
+      },
+
+      showConnectionStatus: (connected: boolean) => {
+        if (collaborationEnabled && collaborationBar) {
+          collaborationBar.showConnectionStatus(connected);
+        }
+      },
+
+      addUser: (user: any) => {
+        if (collaborationEnabled && collaborationBar) {
+          collaborationBar.addUser(user);
+        }
+        if (collaborationEnabled && userPresenceComponent) {
+          userPresenceComponent.updateUserPresence([user]);
+        }
+      },
+
+      removeUser: (userId: string) => {
+        if (collaborationEnabled && collaborationBar) {
+          collaborationBar.removeUser(userId);
+        }
+      },
+
+      getActiveUsers: () => {
+        if (collaborationEnabled && collaborationBar) {
+          return collaborationBar.getActiveUsers();
+        }
+        return [];
+      }
+    };
+
+    return collaborationBarService;
+  }
+};
+
+/**
+ * A plugin for collaborative cell locking with visual indicators
+ */
+const collaborationLocks: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:collab-locks-extension',
+  description: 'A plugin for collaborative cell locking with visual indicators.',
+  autoStart: true,
+  requires: [ISettingRegistry, INotebookTracker],
+  activate: (
+    app: JupyterFrontEnd,
+    settingRegistry: ISettingRegistry,
+    notebookTracker: INotebookTracker
+  ) => {
+    let collaborationEnabled = false;
+    let cellLockComponent: cellLockIndicator | null = null;
+
+    // Check if collaboration is enabled
+    const checkCollaborationEnabled = async (): Promise<boolean> => {
+      try {
+        const settings = await settingRegistry.load(collaborationLocks.id);
+        return settings.get('collaborationEnabled').composite as boolean ?? false;
+      } catch (error) {
+        console.warn('Failed to load collaboration settings:', error);
+        return false;
+      }
+    };
+
+    // Initialize cell lock indicators
+    const initializeLocks = async () => {
+      collaborationEnabled = await checkCollaborationEnabled();
+
+      if (collaborationEnabled) {
+        try {
+          cellLockComponent = cellLockIndicator.create();
+
+          // Hook into notebook activation to add lock indicators
+          notebookTracker.widgetAdded.connect((sender, notebook) => {
+            if (collaborationEnabled && cellLockComponent) {
+              notebook.content.widgets.forEach(cell => {
+                // Add lock indicator overlay for each cell
+                cellLockComponent!.showLockIndicator(cell.model.id, false, null);
+              });
+            }
+          });
+
+          console.log('Collaboration locks initialized');
+        } catch (error) {
+          console.error('Failed to initialize collaboration locks:', error);
+          collaborationEnabled = false;
+        }
+      }
+    };
+
+    // Initialize on startup
+    app.restored.then(() => {
+      initializeLocks();
+    });
+  }
+};
+
+/**
+ * A plugin for collaborative version history and diff viewing
+ */
+const collaborationHistory: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:collab-history-extension',
+  description: 'A plugin for collaborative version history and diff viewing.',
+  autoStart: true,
+  requires: [ISettingRegistry, INotebookTracker],
+  activate: (
+    app: JupyterFrontEnd,
+    settingRegistry: ISettingRegistry,
+    notebookTracker: INotebookTracker
+  ) => {
+    let collaborationEnabled = false;
+    let historyViewerComponent: historyViewer | null = null;
+
+    // Check if collaboration is enabled
+    const checkCollaborationEnabled = async (): Promise<boolean> => {
+      try {
+        const settings = await settingRegistry.load(collaborationHistory.id);
+        return settings.get('collaborationEnabled').composite as boolean ?? false;
+      } catch (error) {
+        console.warn('Failed to load collaboration settings:', error);
+        return false;
+      }
+    };
+
+    // Initialize history viewer
+    const initializeHistory = async () => {
+      collaborationEnabled = await checkCollaborationEnabled();
+
+      if (collaborationEnabled) {
+        try {
+          historyViewerComponent = historyViewer.create();
+
+          console.log('Collaboration history initialized');
+        } catch (error) {
+          console.error('Failed to initialize collaboration history:', error);
+          collaborationEnabled = false;
+        }
+      }
+    };
+
+    // Add show history command
+    app.commands.addCommand(CommandIDs.showHistory, {
+      label: 'Show Version History',
+      execute: () => {
+        if (collaborationEnabled && historyViewerComponent) {
+          historyViewerComponent.showHistoryPanel();
+        }
+      },
+      isEnabled: () => collaborationEnabled && notebookTracker.currentWidget !== null
+    });
+
+    // Initialize on startup
+    app.restored.then(() => {
+      initializeHistory();
+    });
+  }
+};
+
+/**
+ * A plugin for collaborative comments and reviews
+ */
+const collaborationComments: JupyterFrontEndPlugin<void> = {
+  id: '@jupyter-notebook/notebook-extension:collab-comments-extension',
+  description: 'A plugin for collaborative comments and reviews.',
+  autoStart: true,
+  requires: [ISettingRegistry, INotebookTracker],
+  activate: (
+    app: JupyterFrontEnd,
+    settingRegistry: ISettingRegistry,
+    notebookTracker: INotebookTracker
+  ) => {
+    let collaborationEnabled = false;
+    let commentSystemComponent: commentSystem | null = null;
+
+    // Check if collaboration is enabled
+    const checkCollaborationEnabled = async (): Promise<boolean> => {
+      try {
+        const settings = await settingRegistry.load(collaborationComments.id);
+        return settings.get('collaborationEnabled').composite as boolean ?? false;
+      } catch (error) {
+        console.warn('Failed to load collaboration settings:', error);
+        return false;
+      }
+    };
+
+    // Initialize comments system
+    const initializeComments = async () => {
+      collaborationEnabled = await checkCollaborationEnabled();
+
+      if (collaborationEnabled) {
+        try {
+          commentSystemComponent = commentSystem.create();
+
+          // Hook into notebook activation to show comment indicators
+          notebookTracker.widgetAdded.connect((sender, notebook) => {
+            if (collaborationEnabled && commentSystemComponent) {
+              notebook.content.widgets.forEach(cell => {
+                // Show comment indicators for cells with comments
+                commentSystemComponent!.showComments(cell.model.id);
+              });
+            }
+          });
+
+          console.log('Collaboration comments initialized');
+        } catch (error) {
+          console.error('Failed to initialize collaboration comments:', error);
+          collaborationEnabled = false;
+        }
+      }
+    };
+
+    // Initialize on startup
+    app.restored.then(() => {
+      initializeComments();
+    });
+  }
 };
 
 /**
@@ -692,6 +1040,10 @@ const plugins: JupyterFrontEndPlugin<any>[] = [
   scrollOutput,
   tabIcon,
   trusted,
+  collaborationAwareness,
+  collaborationLocks,
+  collaborationHistory,
+  collaborationComments,
 ];
 
 export default plugins;
