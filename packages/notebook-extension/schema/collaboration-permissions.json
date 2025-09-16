@@ -1,0 +1,87 @@
+{
+  "jupyter.lab.setting-icon": "notebook-ui-components:jupyter",
+  "jupyter.lab.setting-icon-label": "Jupyter Notebook Collaboration Permissions",
+  "title": "Jupyter Notebook Collaboration Permissions",
+  "description": "Permission and access control configuration for collaborative notebook editing sessions",
+  "jupyter.lab.menus": {
+    "main": [
+      {
+        "id": "jp-mainmenu-view",
+        "items": [
+          {
+            "type": "submenu",
+            "submenu": {
+              "id": "jp-collaboration-permissions-submenu",
+              "label": "Collaboration Permissions",
+              "items": [
+                {
+                  "command": "collaboration:manage-permissions",
+                  "rank": 10
+                },
+                {
+                  "type": "separator",
+                  "rank": 20
+                },
+                {
+                  "command": "collaboration:configure-guest-access",
+                  "rank": 30
+                },
+                {
+                  "command": "collaboration:review-pending-requests",
+                  "rank": 40
+                }
+              ]
+            },
+            "rank": 36
+          }
+        ]
+      }
+    ]
+  },
+  "properties": {
+    "enablePermissionManagement": {
+      "type": "boolean",
+      "title": "Enable Permission Management",
+      "description": "Allow users with admin permissions to modify access control settings for collaborative sessions. Disabling this locks current permission settings and prevents role changes during active sessions.",
+      "default": true
+    },
+    "defaultNewUserRole": {
+      "type": "string",
+      "title": "Default Role for New Collaborators",
+      "description": "Default permission level automatically assigned to new users joining collaborative editing sessions. Higher roles grant more capabilities but increase security risk. View-only is recommended for public or untrusted environments.",
+      "default": "view",
+      "enum": ["view", "edit", "admin"],
+      "enumLabels": [
+        "View - Read-only access with commenting capabilities",
+        "Edit - Full editing and execution permissions",
+        "Admin - Complete control including permission management"
+      ]
+    },
+    "allowGuestAccess": {
+      "type": "boolean",
+      "title": "Allow Guest Access",
+      "description": "Permit anonymous or unauthenticated users to participate in collaborative sessions. WARNING: This creates significant security risks as guest users cannot be tracked or audited. Only enable in trusted, isolated environments.",
+      "default": false
+    },
+    "requireApprovalForEdit": {
+      "type": "boolean",
+      "title": "Require Admin Approval for Edit Access",
+      "description": "Require explicit approval from users with admin permissions before granting edit access to new collaborators. This creates a security checkpoint but may slow collaboration workflows. Recommended for sensitive or production notebooks.",
+      "default": false
+    },
+    "permissionInheritance": {
+      "type": "string",
+      "title": "Permission Inheritance Strategy",
+      "description": "Define how user permissions cascade from parent contexts to collaborative notebook sessions. Folder inheritance applies directory-level permissions, while workspace inheritance uses broader organizational settings. None requires explicit per-session configuration.",
+      "default": "folder",
+      "enum": ["none", "folder", "workspace"],
+      "enumLabels": [
+        "None - No inheritance, explicit per-notebook configuration required",
+        "Folder - Inherit permissions from parent directory settings",
+        "Workspace - Inherit permissions from workspace or hub configuration"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "type": "object"
+}
