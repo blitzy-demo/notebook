@@ -10,12 +10,13 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { createRoot } from 'react-dom/client';
 import { showErrorMessage } from '@jupyterlab/apputils';
 import { ITranslator } from '@jupyterlab/translation';
 import { closeIcon } from '@jupyterlab/ui-components';
 
-import { PermissionManager } from '@jupyter-notebook/notebook/lib/collab/permissions';
-import { CollaborativeRole } from '@jupyter-notebook/notebook/lib/tokens';
+import { PermissionManager } from '../../../notebook/src/collab/permissions';
+import { CollaborativeRole } from '../../../notebook/src/tokens';
 
 /**
  * Interface defining props for the PermissionsDialog component
@@ -92,9 +93,9 @@ export function PermissionsDialog(props: IPermissionsDialogProps): JSX.Element {
   // State management
   const [activeTab, setActiveTab] = useState<'users' | 'invite' | 'settings'>('users');
   const [userList, setUserList] = useState<IPermissionUser[]>([]);
-  const [selectedUser, setSelectedUser] = useState<string | null>(null);
+
   const [newUserEmail, setNewUserEmail] = useState<string>('');
-  const [pendingChanges, setPendingChanges] = useState<IPendingChange[]>([]);
+  const [, setPendingChanges] = useState<IPendingChange[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [isCurrentUserAdmin, setIsCurrentUserAdmin] = useState<boolean>(false);
@@ -118,7 +119,8 @@ export function PermissionsDialog(props: IPermissionsDialogProps): JSX.Element {
         const cachedPermissions = permissionManager.getCachedPermissions();
         const users: IPermissionUser[] = [];
 
-        for (const [userId, role] of cachedPermissions.entries()) {
+        for (const entry of Array.from(cachedPermissions.entries())) {
+          const [userId, role] = entry;
           users.push({
             userId,
             username: userId, // In real implementation, this would be fetched from user service
@@ -150,7 +152,7 @@ export function PermissionsDialog(props: IPermissionsDialogProps): JSX.Element {
     fetchPermissions();
 
     // Set up real-time permission change listener
-    const handlePermissionChange = (data: { userId: string; newRole: CollaborativeRole; previousRole: CollaborativeRole }) => {
+    const handlePermissionChange = (sender: PermissionManager, data: { userId: string; newRole: CollaborativeRole; previousRole: CollaborativeRole }) => {
       setUserList(prevUsers => {
         const updatedUsers = [...prevUsers];
         const userIndex = updatedUsers.findIndex(u => u.userId === data.userId);
@@ -192,7 +194,7 @@ export function PermissionsDialog(props: IPermissionsDialogProps): JSX.Element {
       setIsLoading(true);
       setError(null);
 
-      const previousRole = await permissionManager.getUserRole(userId);
+      // const previousRole = await permissionManager.getUserRole(userId); // Reserved for future audit logging
 
       // Add to pending changes
       const pendingChange: IPendingChange = {
@@ -734,9 +736,8 @@ export class permissionsDialog {
     };
 
     const dialog = React.createElement(PermissionsDialog, dialogProps);
-    const React = require('react');
-    const ReactDOM = require('react-dom');
-    ReactDOM.render(dialog, element);
+    const root = createRoot(element);
+    root.render(dialog);
   }
 
   /**
