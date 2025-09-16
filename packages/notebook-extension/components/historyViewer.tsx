@@ -9,8 +9,9 @@
  * and version restoration capabilities with cell-level granularity.
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { FixedSizeList } from 'react-window';
+import * as React from 'react';
+const { useState, useEffect, useMemo, useCallback } = React;
+import { List } from 'react-window';
 import { ReactWidget } from '@jupyterlab/apputils';
 import { INotebookTracker } from '@jupyterlab/notebook';
 import { DiffViewer, DiffPanel, DiffModel } from '@jupyterlab/ui-components';
@@ -923,7 +924,7 @@ export const HistoryViewer: React.FC<IHistoryViewerProps> = ({
               <p>No version history available</p>
             </div>
           ) : (
-            <FixedSizeList
+            <List
               height={maxHeight}
               itemCount={timelineEntries.length}
               itemSize={80}
@@ -938,7 +939,7 @@ export const HistoryViewer: React.FC<IHistoryViewerProps> = ({
               }}
             >
               {renderTimelineEntry}
-            </FixedSizeList>
+            </List>
           )}
 
           {versions.length < totalVersions && (
