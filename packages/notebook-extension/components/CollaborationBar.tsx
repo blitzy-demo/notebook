@@ -10,14 +10,15 @@
  * avatars, status indicators, and quick access to collaboration features.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import * as React from 'react';
+const { useState, useEffect, useCallback } = React;
 import { ReactWidget } from '@jupyterlab/apputils';
 import { INotebookTracker } from '@jupyterlab/notebook';
 import { ITranslator } from '@jupyterlab/translation';
 
-import { CollaborationAwareness } from '../../../notebook/src/collab/awareness';
-import { ICollaborationAwareness } from '../../../application/src/tokens';
-import { ICollaborativeUser } from '../../../notebook/src/tokens';
+import { CollaborationAwareness } from '../../notebook/src/collab/awareness';
+import { ICollaborationBar, ICollaborationAwareness } from '../../application/src/tokens';
+import { ICollaborativeUser } from '../../notebook/src/tokens';
 
 /**
  * Props interface for the CollaborationBar functional component
@@ -102,7 +103,7 @@ const CollaborationBarComponent = ({
   /**
    * Handle user join events with smooth animations
    */
-  const handleUserJoin = useCallback((user: ICollaborativeUser) => {
+  const handleUserJoin = useCallback((sender: CollaborationAwareness, user: ICollaborativeUser) => {
     if (!collaborationEnabled) return;
 
     const uiUser: IUIUser = {
@@ -139,7 +140,7 @@ const CollaborationBarComponent = ({
   /**
    * Handle user leave events with smooth animations
    */
-  const handleUserLeave = useCallback((user: ICollaborativeUser) => {
+  const handleUserLeave = useCallback((sender: CollaborationAwareness, user: ICollaborativeUser) => {
     if (!collaborationEnabled) return;
 
     // Start leaving animation
@@ -355,9 +356,9 @@ const CollaborationBarComponent = ({
 };
 
 /**
- * Static namespace for CollaborationBarComponent factory methods
+ * Static namespace for CollaborationBar factory methods
  */
-export namespace CollaborationBarComponent {
+export namespace CollaborationBarWidget {
   /**
    * Create a new CollaborationBar ReactWidget instance
    *
@@ -402,7 +403,7 @@ export class CollaborationBar {
     translator: ITranslator
   ) {
     this._awareness = awareness;
-    this._widget = CollaborationBarComponent.create({
+    this._widget = CollaborationBarWidget.create({
       awareness,
       notebookTracker,
       translator
