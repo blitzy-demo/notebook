@@ -17,7 +17,10 @@ from typing import Optional
 
 import pytest
 from fakeredis import FakeRedis
-from y_py import Y
+from y_py import YDoc, encode_state_as_update
+
+# Global storage for YDoc test metadata since YDoc doesn't allow arbitrary attributes
+_YDOC_TEST_METADATA = {}
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -81,42 +84,59 @@ def yjs_doc():
 
     def _create_yjs_doc(notebook_path: str = "test.ipynb"):
         # Create new Y.Doc instance
-        doc = Y.YDoc()
+        doc = YDoc()
 
         # Set up standard notebook structure
         cells = doc.get_array("cells")
         metadata = doc.get_map("metadata")
         nbformat = doc.get_map("nbformat_node")
 
-        # Initialize with basic notebook metadata
-        nbformat["nbformat"] = 4
-        nbformat["nbformat_minor"] = 5
+        # Initialize with basic notebook metadata using transactions
+        with doc.begin_transaction() as txn:
+            nbformat.set(txn, "nbformat", 4)
+            nbformat.set(txn, "nbformat_minor", 5)
 
-        metadata["kernelspec"] = {
-            "display_name": "Python 3",
-            "language": "python",
-            "name": "python3",
-        }
-        metadata["language_info"] = {
-            "codemirror_mode": {"name": "ipython", "version": 3},
-            "file_extension": ".py",
-            "mimetype": "text/x-python",
-            "name": "python",
-            "nbconvert_exporter": "python",
-            "pygments_lexer": "ipython3",
-            "version": "3.9.0",
-        }
-
-        # Add helper methods to the doc object
-        doc._test_notebook_path = notebook_path
-        doc._test_update_history = []
-
-        def track_updates(update, origin):
-            doc._test_update_history.append(
-                {"update": update, "origin": origin, "timestamp": asyncio.get_event_loop().time()}
+            metadata.set(
+                txn,
+                "kernelspec",
+                {
+                    "display_name": "Python 3",
+                    "language": "python",
+                    "name": "python3",
+                },
+            )
+            metadata.set(
+                txn,
+                "language_info",
+                {
+                    "codemirror_mode": {"name": "ipython", "version": 3},
+                    "file_extension": ".py",
+                    "mimetype": "text/x-python",
+                    "name": "python",
+                    "nbconvert_exporter": "python",
+                    "pygments_lexer": "ipython3",
+                    "version": "3.9.0",
+                },
             )
 
-        doc.observe_update_v1(track_updates)
+        # Store test attributes in global storage since YDoc doesn't allow arbitrary attributes
+        doc_id = doc.client_id
+        _YDOC_TEST_METADATA[doc_id] = {"notebook_path": notebook_path, "update_history": []}
+
+        def track_updates(txn):
+            if doc_id in _YDOC_TEST_METADATA:
+                _YDOC_TEST_METADATA[doc_id]["update_history"].append(
+                    {"transaction": str(txn), "timestamp": asyncio.get_event_loop().time()}
+                )
+
+        doc.observe_after_transaction(track_updates)
+
+        # Add a helper method to access test metadata
+        def get_test_metadata():
+            return _YDOC_TEST_METADATA.get(doc_id, {})
+
+        # Store the helper function globally so tests can access it
+        _YDOC_TEST_METADATA[f"{doc_id}_getter"] = get_test_metadata
 
         return doc
 
@@ -394,7 +414,8 @@ def multi_user_session():
                 }
 
                 insert_index = params.get("index", len(cells))
-                cells.insert(insert_index, [cell_data])
+                with user["doc"].begin_transaction() as txn:
+                    cells.insert(txn, insert_index, cell_data)
 
                 user["actions_performed"].append(
                     {
@@ -406,7 +427,7 @@ def multi_user_session():
 
                 # Simulate WebSocket sync
                 if user["websocket"].connected:
-                    update_data = Y.encode_state_as_update(user["doc"])
+                    update_data = encode_state_as_update(user["doc"])
                     await user["websocket"].send_sync_message(update_data)
 
             async def _edit_cell_action(self, user: dict, params: dict):
@@ -429,7 +450,7 @@ def multi_user_session():
 
                 # Simulate WebSocket sync
                 if user["websocket"].connected:
-                    update_data = Y.encode_state_as_update(user["doc"])
+                    update_data = encode_state_as_update(user["doc"])
                     await user["websocket"].send_sync_message(update_data)
 
             async def _delete_cell_action(self, user: dict, params: dict):
@@ -438,7 +459,8 @@ def multi_user_session():
                 cell_index = params.get("index", 0)
 
                 if cell_index < len(cells):
-                    cells.delete(cell_index)
+                    with user["doc"].begin_transaction() as txn:
+                        cells.delete(txn, cell_index)
 
                 user["actions_performed"].append(
                     {
@@ -450,7 +472,7 @@ def multi_user_session():
 
                 # Simulate WebSocket sync
                 if user["websocket"].connected:
-                    update_data = Y.encode_state_as_update(user["doc"])
+                    update_data = encode_state_as_update(user["doc"])
                     await user["websocket"].send_sync_message(update_data)
 
             async def _move_cell_action(self, user: dict, params: dict):
@@ -460,13 +482,14 @@ def multi_user_session():
                 to_index = params.get("to_index", 1)
 
                 if from_index < len(cells) and to_index <= len(cells):
-                    # Get cell data
-                    cell_data = cells[from_index]
-                    # Delete from original position
-                    cells.delete(from_index)
-                    # Insert at new position (adjust index if moving forward)
-                    insert_index = to_index if to_index < from_index else to_index - 1
-                    cells.insert(insert_index, [cell_data])
+                    with user["doc"].begin_transaction() as txn:
+                        # Get cell data
+                        cell_data = cells[from_index]
+                        # Delete from original position
+                        cells.delete(txn, from_index)
+                        # Insert at new position (adjust index if moving forward)
+                        insert_index = to_index if to_index < from_index else to_index - 1
+                        cells.insert(txn, insert_index, cell_data)
 
                 user["actions_performed"].append(
                     {
@@ -478,7 +501,7 @@ def multi_user_session():
 
                 # Simulate WebSocket sync
                 if user["websocket"].connected:
-                    update_data = Y.encode_state_as_update(user["doc"])
+                    update_data = encode_state_as_update(user["doc"])
                     await user["websocket"].send_sync_message(update_data)
 
             async def wait_for_synchronization(self, timeout: float = 10.0):
@@ -500,10 +523,10 @@ def multi_user_session():
                     return True
 
                 # Get state vectors from all docs
-                base_state = Y.encode_state_as_update(self.yjs_docs[0])
+                base_state = encode_state_as_update(self.yjs_docs[0])
 
                 for doc in self.yjs_docs[1:]:
-                    doc_state = Y.encode_state_as_update(doc)
+                    doc_state = encode_state_as_update(doc)
                     if base_state != doc_state:
                         return False
 
