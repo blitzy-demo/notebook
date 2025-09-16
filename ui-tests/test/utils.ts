@@ -81,7 +81,8 @@ export async function waitForNotebook(
 /**
  * Wait for collaboration WebSocket connection and readiness
  */
-export async function waitForCollaboration(page: Page): Promise<void> {
+export async function waitForCollaboration(page: any): Promise<void> {
+
   // Wait for collaboration indicators to be present
   await page.waitForSelector('[data-testid="collaboration-status"]', { timeout: 10000 });
 

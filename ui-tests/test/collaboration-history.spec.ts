@@ -19,11 +19,9 @@
 import path from 'path';
 
 import { expect } from '@jupyterlab/galata';
-import { Page } from '@playwright/test';
 
 import { test } from './fixtures';
 import { waitForCollaboration } from './utils';
-import { cleanupCollaborationSession } from './collaboration-helpers';
 
 const TEST_NOTEBOOK = 'collaboration-history-test.ipynb';
 const MULTI_USER_NOTEBOOK = 'multi-user-history-test.ipynb';
@@ -67,8 +65,6 @@ test.describe('Change History and Versioning', () => {
   });
 
   test('should track edit history for each cell', async ({ page, tmpPath }) => {
-    // Navigate to test notebook
-    const notebookPath = `notebooks/${tmpPath}/${TEST_NOTEBOOK}`;
 
     // Focus on the first cell
     const cellSelector = '.jp-Cell:first-child .jp-InputArea-editor';
@@ -127,7 +123,6 @@ test.describe('Change History and Versioning', () => {
   });
 
   test('should display version timeline', async ({ page, tmpPath }) => {
-    const notebookPath = `notebooks/${tmpPath}/${TEST_NOTEBOOK}`;
 
     // Create multiple versions by editing different cells
     const cells = await page.locator('.jp-Cell').count();
@@ -177,7 +172,6 @@ test.describe('Change History and Versioning', () => {
   });
 
   test('should show diff between versions', async ({ page, tmpPath }) => {
-    const notebookPath = `notebooks/${tmpPath}/${TEST_NOTEBOOK}`;
 
     // Create initial version
     const cellSelector = '.jp-Cell:first-child .jp-InputArea-editor';
@@ -201,9 +195,9 @@ test.describe('Change History and Versioning', () => {
     // Select two versions for comparison
     const timelineItems = await page.locator('[data-testid="timeline-item"]');
     await timelineItems.first().click();
-    await page.keyboard.press('Control');
+    await page.keyboard.down('Control');
     await timelineItems.nth(1).click();
-    await page.keyboard.release('Control');
+    await page.keyboard.up('Control');
 
     // Click compare versions button
     await page.click('[data-testid="compare-versions-btn"]');
@@ -246,7 +240,6 @@ test.describe('Change History and Versioning', () => {
   });
 
   test('should create snapshots at intervals', async ({ page, tmpPath }) => {
-    const notebookPath = `notebooks/${tmpPath}/${TEST_NOTEBOOK}`;
 
     // Configure shorter snapshot interval for testing
     await page.evaluate(() => {
@@ -319,7 +312,6 @@ test.describe('Change History and Versioning', () => {
   });
 
   test('should restore previous version', async ({ page, tmpPath }) => {
-    const notebookPath = `notebooks/${tmpPath}/${TEST_NOTEBOOK}`;
 
     // Create initial content
     const cellSelector = '.jp-Cell:first-child .jp-InputArea-editor';
@@ -386,7 +378,7 @@ test.describe('Change History and Versioning', () => {
   test('should preserve authorship information', async ({ page, browserName, tmpPath }) => {
     test.skip(browserName === 'webkit', 'Multi-context test not supported in webkit');
 
-    const notebookPath = `notebooks/${tmpPath}/${MULTI_USER_NOTEBOOK}`;
+    const notebookPath = `notebooks/${tmpPath}/collaboration-history-authorship.ipynb`;
 
     // Create second browser context for different user
     const context2 = await page.context().browser()?.newContext({
@@ -480,13 +472,11 @@ test.describe('Change History and Versioning', () => {
       }
 
     } finally {
-      await cleanupCollaborationSession();
       await context2.close();
     }
   });
 
   test('should handle history for deleted cells', async ({ page, tmpPath }) => {
-    const notebookPath = `notebooks/${tmpPath}/${TEST_NOTEBOOK}`;
 
     // Add content to first cell
     const cellSelector = '.jp-Cell:first-child .jp-InputArea-editor';
@@ -568,7 +558,7 @@ test.describe('Change History and Versioning', () => {
   test('should merge concurrent version branches', async ({ page, browserName, tmpPath }) => {
     test.skip(browserName === 'webkit', 'Multi-context test not supported in webkit');
 
-    const notebookPath = `notebooks/${tmpPath}/${MULTI_USER_NOTEBOOK}`;
+
 
     // Create second browser context
     const context2 = await page.context().browser()?.newContext({
@@ -585,6 +575,7 @@ test.describe('Change History and Versioning', () => {
 
     try {
       // Both users navigate to same notebook
+      const notebookPath = `notebooks/${tmpPath}/${MULTI_USER_NOTEBOOK}`;
       await page.goto(`${notebookPath}?collaborative=true&user=alice`);
       await page2.goto(`${notebookPath}?collaborative=true&user=bob`);
 
@@ -684,13 +675,11 @@ test.describe('Change History and Versioning', () => {
       expect(branchCount).toBeGreaterThanOrEqual(2); // Alice and Bob branches
 
     } finally {
-      await cleanupCollaborationSession();
       await context2.close();
     }
   });
 
   test('should export version history', async ({ page, tmpPath }) => {
-    const notebookPath = `notebooks/${tmpPath}/${TEST_NOTEBOOK}`;
 
     // Create multiple versions
     const cellSelector = '.jp-Cell:first-child .jp-InputArea-editor';
