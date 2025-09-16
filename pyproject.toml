@@ -204,6 +204,10 @@ testpaths = [
     "tests/",
 ]
 timeout = 300
+markers = [
+    "asyncio: mark tests as async",
+    "performance: mark tests as performance tests",
+]
 filterwarnings = [
     "error",
     "ignore:There is no current event loop:DeprecationWarning",
