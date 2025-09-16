@@ -30,7 +30,10 @@
   --jp-collab-avatar-border-width: 2px;
   --jp-collab-avatar-border-style: solid;
   --jp-collab-avatar-border-color-light: var(--jp-border-color0, #000000);
-  --jp-collab-avatar-border-color-dark: var(--jp-ui-inverse-font-color0, #ffffff);
+  --jp-collab-avatar-border-color-dark: var(
+    --jp-ui-inverse-font-color0,
+    #ffffff
+  );
 
   /* Presence Bar Layout */
   --jp-collab-presence-bar-height: 32px;
@@ -46,7 +49,7 @@
   --jp-collab-overflow-badge-border: 2px solid var(--jp-border-color1);
 
   /* Presence Visual Hierarchy */
-  --jp-collab-active-user-opacity: 1.0;
+  --jp-collab-active-user-opacity: 1;
   --jp-collab-idle-user-opacity: 0.7;
   --jp-collab-offline-user-opacity: 0.4;
 
@@ -58,8 +61,8 @@
    */
 
   /* Lock Colors - High contrast, WCAG AA compliant */
-  --jp-collab-lock-self-color: #1976d2;        /* Blue for self-locked cells */
-  --jp-collab-lock-other-color: #d32f2f;       /* Red for other-locked cells */
+  --jp-collab-lock-self-color: #1976d2; /* Blue for self-locked cells */
+  --jp-collab-lock-other-color: #d32f2f; /* Red for other-locked cells */
   --jp-collab-lock-available-color: transparent; /* No lock indicator */
 
   /* Lock Icon Positioning - 8px offset from cell border */
@@ -67,7 +70,7 @@
   --jp-collab-lock-icon-offset-left: 8px;
   --jp-collab-lock-icon-position: absolute;
   --jp-collab-lock-icon-opacity: 0.9;
-  --jp-collab-lock-icon-hover-opacity: 1.0;
+  --jp-collab-lock-icon-hover-opacity: 1;
 
   /* Lock Tooltip Styling */
   --jp-collab-lock-tooltip-background: var(--jp-layout-color0);
@@ -132,7 +135,7 @@
   /* Hover and Focus States */
   --jp-collab-hover-opacity: 0.8;
   --jp-collab-focus-opacity: 0.9;
-  --jp-collab-active-opacity: 1.0;
+  --jp-collab-active-opacity: 1;
   --jp-collab-disabled-opacity: 0.3;
 
   /*
@@ -186,14 +189,14 @@
    */
 
   /* Cursor Colors - Unique colors for different users */
-  --jp-collab-cursor-color-1: #1976d2;  /* Blue */
-  --jp-collab-cursor-color-2: #d32f2f;  /* Red */
-  --jp-collab-cursor-color-3: #388e3c;  /* Green */
-  --jp-collab-cursor-color-4: #f57c00;  /* Orange */
-  --jp-collab-cursor-color-5: #7b1fa2;  /* Purple */
-  --jp-collab-cursor-color-6: #0097a7;  /* Teal */
-  --jp-collab-cursor-color-7: #5d4037;  /* Brown */
-  --jp-collab-cursor-color-8: #616161;  /* Gray */
+  --jp-collab-cursor-color-1: #1976d2; /* Blue */
+  --jp-collab-cursor-color-2: #d32f2f; /* Red */
+  --jp-collab-cursor-color-3: #388e3c; /* Green */
+  --jp-collab-cursor-color-4: #f57c00; /* Orange */
+  --jp-collab-cursor-color-5: #7b1fa2; /* Purple */
+  --jp-collab-cursor-color-6: #0097a7; /* Teal */
+  --jp-collab-cursor-color-7: #5d4037; /* Brown */
+  --jp-collab-cursor-color-8: #616161; /* Gray */
 
   /* Cursor Visual Properties */
   --jp-collab-cursor-width: 2px;
@@ -222,9 +225,12 @@
  * Adjustments for dark theme compatibility
  * =================================================================
  */
-[data-jp-theme-light="false"] {
+[data-jp-theme-light='false'] {
   /* Avatar borders in dark theme */
-  --jp-collab-avatar-border-color-light: var(--jp-ui-inverse-font-color0, #ffffff);
+  --jp-collab-avatar-border-color-light: var(
+    --jp-ui-inverse-font-color0,
+    #ffffff
+  );
 
   /* Diff backgrounds in dark theme - adjusted for contrast */
   --jp-collab-diff-added-background: rgba(76, 175, 80, 0.2);
@@ -248,11 +254,11 @@
 @media (prefers-contrast: high) {
   :root {
     /* Increased contrast for lock indicators */
-    --jp-collab-lock-self-color: #0d47a1;      /* Darker blue */
-    --jp-collab-lock-other-color: #b71c1c;     /* Darker red */
+    --jp-collab-lock-self-color: #0d47a1; /* Darker blue */
+    --jp-collab-lock-other-color: #b71c1c; /* Darker red */
 
     /* Enhanced diff colors */
-    --jp-collab-diff-added-background: #c8f7c5;   /* Higher contrast green */
+    --jp-collab-diff-added-background: #c8f7c5; /* Higher contrast green */
     --jp-collab-diff-removed-background: #ffcdd2; /* Higher contrast red */
 
     /* Stronger borders */
