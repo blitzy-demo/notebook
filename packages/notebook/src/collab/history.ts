@@ -502,12 +502,12 @@ export class HistoryTracker {
       let compressedCount = 0;
       const cutoffDate = new Date(Date.now() - (7 * 24 * 60 * 60 * 1000)); // 7 days ago
 
-      for (const [id, snapshot] of this._snapshots.entries()) {
+      Array.from(this._snapshots.entries()).forEach(async ([id, snapshot]) => {
         if (snapshot.timestamp < cutoffDate && !snapshot.metadata.compressed) {
           await this._compressSnapshotData(snapshot);
           compressedCount++;
         }
-      }
+      });
 
       console.log(`Compressed ${compressedCount} snapshots`);
     } catch (error) {
@@ -946,7 +946,7 @@ export class HistoryTracker {
       // Get union of all cell IDs
       const allCellIds = new Set([...Object.keys(fromCells), ...Object.keys(toCells)]);
 
-      for (const cellId of allCellIds) {
+      Array.from(allCellIds).forEach(cellId => {
         const fromCell = fromCells[cellId];
         const toCell = toCells[cellId];
 
@@ -989,7 +989,7 @@ export class HistoryTracker {
             };
           }
         }
-      }
+      });
     } catch (error) {
       console.error('Error computing cell diffs:', error);
     }
