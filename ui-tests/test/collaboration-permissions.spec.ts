@@ -8,19 +8,22 @@
 
 import * as path from 'path';
 import { expect } from '@jupyterlab/galata';
-import { expect as playwrightExpect, Page } from '@playwright/test';
+import { expect as playwrightExpect } from '@playwright/test';
+// Page import removed to fix unused import warning
 
 import { test } from './fixtures';
 import {
   createMultipleContexts,
   createCollaborativeSession
 } from './utils';
-import {
-  CollaborationUser,
-  CollaborationSession,
-  generateMockUsers,
-  cleanupCollaborationSession
-} from './collaboration-helpers';
+// Collaboration helpers imports commented to fix unused import warnings
+// These would be needed in a full implementation:
+// import {
+//   CollaborationUser,
+//   CollaborationSession,
+//   generateMockUsers,
+//   cleanupCollaborationSession
+// } from './collaboration-helpers';
 
 // Test notebook path for permissions testing
 const PERMISSIONS_NOTEBOOK = 'permissions-test.ipynb';
