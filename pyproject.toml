@@ -207,6 +207,9 @@ timeout = 300
 markers = [
     "asyncio: mark tests as async",
     "performance: mark tests as performance tests",
+    "integration: mark tests as integration tests",
+    "collaboration: mark tests as collaboration tests",
+    "websocket: mark tests as WebSocket communication tests",
 ]
 filterwarnings = [
     "error",

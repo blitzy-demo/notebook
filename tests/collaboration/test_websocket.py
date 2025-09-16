@@ -287,10 +287,22 @@ class TestBidirectionalMessageExchange:
         for i in range(250):  # Exceed burst limit
             await client.write_message(json.dumps({"type": "ping", "seq": i}))
 
-        # Should receive rate limit error
-        error_response = await client.read_message(timeout=5.0)
-        assert error_response["type"] == "error"
-        assert "rate limit" in error_response["error"].lower()
+        # Read through messages until we find the rate limit error
+        # The first 200 messages will get pong responses, then message 201 triggers rate limit
+        error_found = False
+        for _attempt in range(210):  # Give some buffer for the error message
+            try:
+                response = await client.read_message(timeout=1.0)
+                if (
+                    response.get("type") == "error"
+                    and "rate limit" in response.get("error", "").lower()
+                ):
+                    error_found = True
+                    break
+            except asyncio.TimeoutError:
+                break
+
+        assert error_found, "Rate limit error message was not received"
 
         await client.close()
 
