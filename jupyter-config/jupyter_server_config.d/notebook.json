@@ -2,6 +2,116 @@
   "ServerApp": {
     "jpserver_extensions": {
       "notebook": true
+    },
+    "NotebookApp": {
+      "collaboration_enabled": false,
+      "collaboration_server_url": null,
+      "websocket_url": "/api/collaboration/ws",
+      "websocket_ping_interval": 30,
+      "websocket_ping_timeout": 10,
+      "websocket_close_timeout": 10,
+      "connection_timeout": 30,
+      "reconnection_delay": 1000,
+      "reconnection_delay_max": 30000,
+      "reconnection_attempts": 10,
+      "message_batch_interval": 50,
+      "message_batch_size": 100,
+      "websocket_max_message_size": 65536,
+      "websocket_rate_limit": {
+        "enabled": true,
+        "messages_per_second": 100,
+        "burst_limit": 200,
+        "window_size": 60
+      },
+      "connection_limits": {
+        "max_connections_per_user": 10,
+        "max_total_connections": 1000,
+        "idle_timeout": 300
+      },
+      "security": {
+        "require_tls": false,
+        "allowed_origins": ["*"],
+        "cors_allow_credentials": true,
+        "csrf_protection": true
+      },
+      "permission_model": {
+        "enabled": true,
+        "default_role": "edit",
+        "roles": {
+          "view": {
+            "can_read": true,
+            "can_edit": false,
+            "can_execute": false,
+            "can_comment": true
+          },
+          "edit": {
+            "can_read": true,
+            "can_edit": true,
+            "can_execute": true,
+            "can_comment": true
+          },
+          "admin": {
+            "can_read": true,
+            "can_edit": true,
+            "can_execute": true,
+            "can_comment": true,
+            "can_manage_permissions": true,
+            "can_view_history": true
+          }
+        },
+        "jupyterhub_integration": {
+          "enabled": false,
+          "role_mapping": {
+            "admin": ["admin"],
+            "edit": ["member", "user"],
+            "view": ["guest", "readonly"]
+          }
+        }
+      },
+      "yjs_persistence": {
+        "enabled": true,
+        "storage_backend": "sqlite",
+        "storage_path": "collaboration_store",
+        "document_timeout": 3600,
+        "snapshot_interval": 300,
+        "cleanup_interval": 86400,
+        "max_document_size": 10485760,
+        "compression": {
+          "enabled": true,
+          "algorithm": "gzip",
+          "level": 6
+        }
+      },
+      "awareness": {
+        "timeout": 30000,
+        "cleanup_interval": 10000,
+        "max_users": 50,
+          "user_colors": [
+            "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FECA57",
+            "#FF9FF3", "#54A0FF", "#5F27CD", "#00D2D3", "#FF9F43",
+            "#FF6348", "#2ED573", "#3742FA", "#A55EEA", "#26DE81",
+            "#FC5C65", "#FD79A8", "#FDCB6E", "#6C5CE7", "#00B894"
+          ]
+      },
+      "history": {
+        "enabled": true,
+        "max_versions": 100,
+        "snapshot_threshold": 50,
+        "retention_days": 30,
+        "diff_algorithm": "myers"
+      },
+      "comments": {
+        "enabled": true,
+        "max_comment_length": 2000,
+        "notification_enabled": true,
+        "auto_resolve_timeout": 604800
+      },
+      "logging": {
+        "level": "INFO",
+        "log_collaboration_events": true,
+        "log_performance_metrics": true,
+        "log_user_actions": false
+      }
     }
   }
 }
