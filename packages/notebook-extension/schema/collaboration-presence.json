@@ -1,0 +1,52 @@
+{
+  "jupyter.lab.setting-icon": "notebook-ui-components:jupyter",
+  "jupyter.lab.setting-icon-label": "Collaboration Presence",
+  "title": "Collaboration Presence Display",
+  "description": "Configuration settings for displaying user presence and awareness in collaborative editing sessions",
+  "properties": {
+    "showUserAvatars": {
+      "type": "boolean",
+      "title": "Show User Avatars",
+      "description": "Display avatars for all active users in the collaboration session to provide visual identification of participants",
+      "default": true
+    },
+    "showCursorPosition": {
+      "type": "boolean",
+      "title": "Show Remote Cursor Positions",
+      "description": "Display real-time cursor positions and text selections of other users within notebook cells for enhanced awareness",
+      "default": true
+    },
+    "showSelectionHighlights": {
+      "type": "boolean",
+      "title": "Show Selection Highlights",
+      "description": "Highlight text selections and cell ranges made by other users with colored overlays for better collaborative visibility",
+      "default": true
+    },
+    "presenceIndicatorPosition": {
+      "type": "string",
+      "title": "Presence Indicator Position",
+      "description": "Choose where to display the user presence bar showing active collaborators - either at the top or bottom of the notebook interface",
+      "default": "top",
+      "enum": ["top", "bottom"],
+      "enumLabels": [
+        "Top - Display presence bar at the top of the notebook",
+        "Bottom - Display presence bar at the bottom of the notebook"
+      ]
+    },
+    "userColorScheme": {
+      "type": "string",
+      "title": "User Color Scheme",
+      "description": "Color assignment strategy for distinguishing between different users in the collaborative session",
+      "default": "automatic",
+      "enum": ["automatic", "highContrast", "pastel", "vibrant"],
+      "enumLabels": [
+        "Automatic - System-assigned colors optimized for readability and distinction",
+        "High Contrast - Bold, high-contrast colors for maximum visibility and accessibility",
+        "Pastel - Soft, muted colors that are easy on the eyes during long sessions",
+        "Vibrant - Bright, saturated colors that stand out prominently in the interface"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "type": "object"
+}
