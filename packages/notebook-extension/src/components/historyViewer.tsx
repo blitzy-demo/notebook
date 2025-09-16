@@ -10,17 +10,17 @@
  * and provides cell-level granularity for change tracking and comparison.
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { FixedSizeList } from 'react-window';
+import * as React from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { List } from 'react-window';
 import { ReactWidget } from '@jupyterlab/apputils';
 import { INotebookTracker } from '@jupyterlab/notebook';
 import { ITranslator } from '@jupyterlab/translation';
 import { historyIcon } from '@jupyterlab/ui-components';
-import { Time } from '@lumino/coreutils';
 
-import { IRestoreResult } from '../../notebook/src/collab/history';
-import { IVersionSnapshot } from '../../notebook/src/tokens';
-import { ICollaborationHistory } from '../../application/src/tokens';
+import { IRestoreResult } from '../../../notebook/src/collab/history';
+import { IVersionSnapshot } from '../../../notebook/src/tokens';
+import { ICollaborationHistory } from '../../../application/src/tokens';
 
 /**
  * Props interface for HistoryViewer component
@@ -279,13 +279,13 @@ export const HistoryViewer: React.FC<IHistoryViewerProps> = ({
    * Format timestamp for display
    */
   const formatTimestamp = useCallback((timestamp: Date): string => {
-    return Time.format(timestamp);
+    return timestamp.toLocaleString();
   }, []);
 
   /**
    * Render individual version item
    */
-  const renderVersionItem = useCallback(({ index, style }: { index: number; style: React.CSSProperties }) => {
+  const renderVersionItem = useCallback(({ index }: { index: number }) => {
     const version = filteredVersions[index];
     if (!version) {
       return null;
@@ -296,7 +296,6 @@ export const HistoryViewer: React.FC<IHistoryViewerProps> = ({
 
     return (
       <div
-        style={style}
         className={`jp-HistoryViewer-item ${isSelected ? 'jp-HistoryViewer-item-selected' : ''}`}
         onClick={() => handleVersionSelect(version)}
       >
@@ -354,7 +353,7 @@ export const HistoryViewer: React.FC<IHistoryViewerProps> = ({
                 <h4>{trans.__('Cell Changes:')}</h4>
                 {Object.entries(version.cellChanges).map(([cellId, change]) => (
                   <div key={cellId} className="jp-HistoryViewer-cell-change">
-                    <strong>{cellId}:</strong> {change.type || 'modified'}
+                    <strong>{cellId}:</strong> {(change as any)?.type || 'modified'}
                   </div>
                 ))}
               </div>
@@ -463,14 +462,13 @@ export const HistoryViewer: React.FC<IHistoryViewerProps> = ({
         )}
 
         {!loading && !error && filteredVersions.length > 0 && (
-          <FixedSizeList
-            height={height - 120} // Account for header
-            itemCount={filteredVersions.length}
-            itemSize={80} // Base height for collapsed items
+          <List
+            style={{ height: height - 120 }} // Account for header
+            rowCount={filteredVersions.length}
+            rowHeight={80} // Base height for collapsed items
+            rowComponent={renderVersionItem}
             className="jp-HistoryViewer-list"
-          >
-            {renderVersionItem}
-          </FixedSizeList>
+          />
         )}
       </div>
 
