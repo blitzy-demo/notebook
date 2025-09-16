@@ -286,7 +286,7 @@ export class NotebookPanel extends BaseNotebookPanel {
     checkModel();
     if (this.model) {
       // Set up signal connection for model changes
-      this.modelChanged.connect(() => {
+      this.model.contentChanged.connect(() => {
         checkModel();
       });
     }
@@ -305,10 +305,7 @@ export class NotebookPanel extends BaseNotebookPanel {
 
       // Initialize awareness with the provider
       if (notebookModel.provider) {
-        this._awareness.initializeAwareness({
-          websocketProvider: notebookModel.provider,
-          awareness: notebookModel.provider.awareness
-        } as any);
+        this._awareness.initializeAwareness(notebookModel.provider as any);
 
         // Set up update handlers
         notebookModel.onYjsUpdate.connect(this._awarenessUpdateHandler);
@@ -415,14 +412,14 @@ export class NotebookPanel extends BaseNotebookPanel {
         return;
       }
 
-      const cellId = activeCell.model.metadata.get('id') as string || activeCell.model.id;
+      const cellId = (activeCell.model.metadata.get('id') as string) || activeCell.model.id;
 
       // Get cursor position from editor
       let cursorOffset = 0;
-      if (activeCell.editor) {
+      if (activeCell.editor && activeCell.editor.getCursorPosition) {
         const cursor = activeCell.editor.getCursorPosition();
         if (cursor) {
-          cursorOffset = cursor.column;
+          cursorOffset = cursor.column || 0;
         }
       }
 
@@ -451,7 +448,7 @@ export class NotebookPanel extends BaseNotebookPanel {
       if (this.content.widgets) {
         this.content.widgets.forEach((cell, index) => {
           if (this.content.isSelected(cell)) {
-            const cellId = cell.model.metadata.get('id') as string || cell.model.id;
+            const cellId = (cell.model.metadata.get('id') as string) || cell.model.id;
             selectedCells.push(cellId);
           }
         });
@@ -669,7 +666,7 @@ export class NotebookPanel extends BaseNotebookPanel {
     }
 
     for (const cell of this.content.widgets) {
-      const modelId = cell.model.metadata.get('id') as string || cell.model.id;
+      const modelId = (cell.model.metadata.get('id') as string) || cell.model.id;
       if (modelId === cellId) {
         return cell.node as HTMLElement;
       }
