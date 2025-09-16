@@ -12,8 +12,7 @@
 import { Token } from '@lumino/coreutils';
 import { ISignal } from '@lumino/signaling';
 import { INotebookTracker } from '@jupyterlab/notebook';
-import { ICellModel } from '@jupyterlab/cells';
-import { Y } from 'yjs';
+import * as Y from 'yjs';
 import { Awareness } from 'y-protocols/awareness';
 
 /**
