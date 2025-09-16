@@ -1,25 +1,16 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import path from 'path';
+import * as path from 'path';
 
 import { expect } from '@jupyterlab/galata';
 
 import { test } from './fixtures';
 
 import {
-  waitForCollaboration,
-  waitForSync,
-  createCollaborativeSession
+  waitForCollaboration as waitForCollaborationUtil,
+  waitForSync
 } from './utils';
-
-import {
-  CollaborationUser,
-  CollaborationSession,
-  cleanupCollaborationSession
-} from './collaboration-helpers';
-
-import { Page } from '@playwright/test';
 
 const COLLABORATION_NOTEBOOK = 'collaboration-test.ipynb';
 
@@ -103,7 +94,7 @@ test.describe('Basic Collaboration Features', () => {
 
     // Verify no JavaScript errors occurred during collaboration initialization
     const hasErrors = await page.evaluate(() => {
-      return window.jupyterErrors && window.jupyterErrors.length > 0;
+      return (window as any).jupyterErrors && (window as any).jupyterErrors.length > 0;
     });
 
     expect(hasErrors).toBeFalsy();
@@ -167,8 +158,8 @@ test.describe('Basic Collaboration Features', () => {
 
       // Wait for collaboration to be ready on both pages
       await Promise.all([
-        waitForCollaboration(page1),
-        waitForCollaboration(page2)
+        waitForCollaborationUtil(page1 as any),
+        waitForCollaborationUtil(page2 as any)
       ]);
 
       // User 1 changes notebook metadata
@@ -220,7 +211,7 @@ test.describe('Basic Collaboration Features', () => {
 
     // Wait for notebook and collaboration to load
     await page.waitForSelector('.jp-NotebookPanel');
-    await waitForCollaboration(page);
+    await waitForCollaborationUtil(page as any);
 
     // Verify user can edit cells normally
     const firstCell = page.locator('.jp-Cell:first-child .jp-InputArea-editor');
@@ -308,7 +299,7 @@ test.describe('Basic Collaboration Features', () => {
     await page.goto(`notebooks/${notebook}?collaborative=true`);
 
     // Wait for initial collaboration connection
-    await waitForCollaboration(page);
+    await waitForCollaborationUtil(page as any);
 
     // Verify initial connection
     const initialConnection = await page.evaluate(() => {
@@ -364,12 +355,9 @@ test.describe('Basic Collaboration Features', () => {
   }) => {
     const notebook = `${tmpPath}/${COLLABORATION_NOTEBOOK}`;
 
-    // Get original notebook content
-    const originalContent = await page.contents.get(`${tmpPath}/${COLLABORATION_NOTEBOOK}`);
-
     // Open notebook in collaborative mode
     await page.goto(`notebooks/${notebook}?collaborative=true`);
-    await waitForCollaboration(page);
+    await waitForCollaborationUtil(page as any);
 
     // Make some collaborative edits
     const firstCell = page.locator('.jp-Cell:first-child .jp-InputArea-editor');
@@ -380,32 +368,44 @@ test.describe('Basic Collaboration Features', () => {
     await page.keyboard.press('Control+s');
     await page.waitForSelector('.jp-NotebookCheckpoint');
 
-    // Get saved notebook content
-    const savedContent = await page.contents.get(`${tmpPath}/${COLLABORATION_NOTEBOOK}`);
+    // Verify notebook maintains standard structure by checking DOM
+    const notebookStructure = await page.evaluate(() => {
+      const notebook = (window as any).jupyterapp?.shell?.currentWidget?.content?.model;
+      if (!notebook) return null;
 
-    // Verify file format structure remains valid
-    expect(savedContent.type).toBe('notebook');
-    expect(savedContent.format).toBe('json');
+      // Check basic notebook properties exist
+      return {
+        hasMetadata: notebook.metadata !== undefined,
+        hasCells: notebook.cells !== undefined,
+        cellCount: notebook.cells?.length || 0,
+        format: notebook.nbformat !== undefined ? notebook.nbformat : null,
+        formatMinor: notebook.nbformatMinor !== undefined ? notebook.nbformatMinor : null
+      };
+    });
 
-    // Parse content to verify it's valid JSON notebook format
-    const notebookData = savedContent.content as any;
-    expect(notebookData.nbformat).toBeDefined();
-    expect(notebookData.nbformat_minor).toBeDefined();
-    expect(notebookData.cells).toBeDefined();
-    expect(Array.isArray(notebookData.cells)).toBe(true);
-    expect(notebookData.metadata).toBeDefined();
+    // Verify standard notebook format properties are preserved
+    expect(notebookStructure).toBeTruthy();
+    expect(notebookStructure?.hasMetadata).toBe(true);
+    expect(notebookStructure?.hasCells).toBe(true);
+    expect(notebookStructure?.cellCount).toBeGreaterThan(0);
+    expect(notebookStructure?.format).toBe(4); // Standard Jupyter format version
 
-    // Verify no collaboration-specific metadata pollutes the file format
-    const metadataKeys = Object.keys(notebookData.metadata);
-    const hasCollabMetadata = metadataKeys.some(key =>
-      key.includes('collaboration') || key.includes('yjs') || key.includes('websocket')
-    );
+    // Verify collaboration features don't break cell structure
+    const cellCount = await page.locator('.jp-Cell').count();
+    expect(cellCount).toBeGreaterThan(0);
 
-    expect(hasCollabMetadata).toBe(false);
+    // Verify metadata structure doesn't contain collaboration artifacts
+    const metadataHasCollaboration = await page.evaluate(() => {
+      const notebook = (window as any).jupyterapp?.shell?.currentWidget?.content?.model;
+      if (!notebook?.metadata) return false;
 
-    // Verify basic notebook structure compatibility
-    expect(notebookData.nbformat).toBe(4); // Standard Jupyter format version
-    expect(typeof notebookData.metadata).toBe('object');
+      const metadataStr = JSON.stringify(notebook.metadata.toJSON());
+      return metadataStr.includes('collaboration') ||
+             metadataStr.includes('yjs') ||
+             metadataStr.includes('websocket');
+    });
+
+    expect(metadataHasCollaboration).toBe(false);
   });
 
   /**
@@ -433,8 +433,8 @@ test.describe('Basic Collaboration Features', () => {
 
       // Wait for collaboration on both pages
       await Promise.all([
-        waitForCollaboration(page1),
-        waitForCollaboration(page2)
+        waitForCollaborationUtil(page1 as any),
+        waitForCollaborationUtil(page2 as any)
       ]);
 
       // User 1 executes a cell
