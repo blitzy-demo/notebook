@@ -40,11 +40,11 @@ import { Widget } from '@lumino/widgets';
 import { TrustedComponent } from './trusted';
 
 import { CollaborationBar } from './components/CollaborationBar';
-import { userPresence } from './components/userPresence';
-import { cellLockIndicator } from './components/cellLockIndicator';
-import { historyViewer } from './components/historyViewer';
-import { permissionsDialog } from './components/permissionsDialog';
-import { commentSystem } from './components/commentSystem';
+import { UserPresenceComponent } from './components/userPresence';
+import { CellLockIndicatorComponent } from './components/cellLockIndicator';
+import { HistoryViewerComponent } from './components/historyViewer';
+import { PermissionsDialogComponent } from './components/permissionsDialog';
+import { CommentSystemComponent } from './components/commentSystem';
 
 /**
  * The class for kernel status errors.
@@ -708,8 +708,8 @@ const editNotebookMetadata: JupyterFrontEndPlugin<void> = {
       execute: async () => {
         // This would open the permissions dialog
         try {
-          const permissionsComponent = permissionsDialog.create();
-          permissionsComponent.showDialog();
+          const permissionsComponent = PermissionsDialogComponent.create();
+          PermissionsDialogComponent.showDialog(permissionsComponent);
         } catch (error) {
           console.error('Failed to open permissions dialog:', error);
         }
@@ -757,7 +757,7 @@ const collaborationAwareness: JupyterFrontEndPlugin<ICollaborationBar> = {
   ): ICollaborationBar => {
     let collaborationEnabled = false;
     let collaborationBar: CollaborationBar | null = null;
-    let userPresenceComponent: userPresence | null = null;
+    let userPresenceComponent: any = null;
 
     // Check if collaboration is enabled in settings
     const checkCollaborationEnabled = async (): Promise<boolean> => {
@@ -785,7 +785,7 @@ const collaborationAwareness: JupyterFrontEndPlugin<ICollaborationBar> = {
           notebookShell.add(collaborationBar, 'top', { rank: 100 });
 
           // Create user presence component
-          userPresenceComponent = userPresence.create();
+          userPresenceComponent = UserPresenceComponent.create({});
 
           console.log('Collaboration awareness initialized');
         } catch (error) {
@@ -807,7 +807,7 @@ const collaborationAwareness: JupyterFrontEndPlugin<ICollaborationBar> = {
           collaborationBar.updatePresence(users);
         }
         if (collaborationEnabled && userPresenceComponent) {
-          userPresenceComponent.updateUserPresence(users);
+          UserPresenceComponent.updateUserPresence(userPresenceComponent, users);
         }
       },
 
@@ -822,7 +822,7 @@ const collaborationAwareness: JupyterFrontEndPlugin<ICollaborationBar> = {
           collaborationBar.addUser(user);
         }
         if (collaborationEnabled && userPresenceComponent) {
-          userPresenceComponent.updateUserPresence([user]);
+          UserPresenceComponent.updateUserPresence(userPresenceComponent, [user]);
         }
       },
 
@@ -858,7 +858,7 @@ const collaborationLocks: JupyterFrontEndPlugin<void> = {
     notebookTracker: INotebookTracker
   ) => {
     let collaborationEnabled = false;
-    let cellLockComponent: cellLockIndicator | null = null;
+    let cellLockComponent: any = null;
 
     // Check if collaboration is enabled
     const checkCollaborationEnabled = async (): Promise<boolean> => {
@@ -877,14 +877,14 @@ const collaborationLocks: JupyterFrontEndPlugin<void> = {
 
       if (collaborationEnabled) {
         try {
-          cellLockComponent = cellLockIndicator.create();
+          cellLockComponent = CellLockIndicatorComponent.create({});
 
           // Hook into notebook activation to add lock indicators
           notebookTracker.widgetAdded.connect((sender, notebook) => {
             if (collaborationEnabled && cellLockComponent) {
               notebook.content.widgets.forEach(cell => {
                 // Add lock indicator overlay for each cell
-                cellLockComponent!.showLockIndicator(cell.model.id, false, null);
+                CellLockIndicatorComponent.showLockIndicator(cell.model.id, false, null);
               });
             }
           });
@@ -918,7 +918,7 @@ const collaborationHistory: JupyterFrontEndPlugin<void> = {
     notebookTracker: INotebookTracker
   ) => {
     let collaborationEnabled = false;
-    let historyViewerComponent: historyViewer | null = null;
+    let historyViewerComponent: any = null;
 
     // Check if collaboration is enabled
     const checkCollaborationEnabled = async (): Promise<boolean> => {
@@ -937,7 +937,7 @@ const collaborationHistory: JupyterFrontEndPlugin<void> = {
 
       if (collaborationEnabled) {
         try {
-          historyViewerComponent = historyViewer.create();
+          historyViewerComponent = HistoryViewerComponent.create();
 
           console.log('Collaboration history initialized');
         } catch (error) {
@@ -952,7 +952,7 @@ const collaborationHistory: JupyterFrontEndPlugin<void> = {
       label: 'Show Version History',
       execute: () => {
         if (collaborationEnabled && historyViewerComponent) {
-          historyViewerComponent.showHistoryPanel();
+          HistoryViewerComponent.showHistoryPanel();
         }
       },
       isEnabled: () => collaborationEnabled && notebookTracker.currentWidget !== null
@@ -979,7 +979,7 @@ const collaborationComments: JupyterFrontEndPlugin<void> = {
     notebookTracker: INotebookTracker
   ) => {
     let collaborationEnabled = false;
-    let commentSystemComponent: commentSystem | null = null;
+    let commentSystemComponent: any = null;
 
     // Check if collaboration is enabled
     const checkCollaborationEnabled = async (): Promise<boolean> => {
@@ -998,14 +998,14 @@ const collaborationComments: JupyterFrontEndPlugin<void> = {
 
       if (collaborationEnabled) {
         try {
-          commentSystemComponent = commentSystem.create();
+          commentSystemComponent = CommentSystemComponent.create();
 
           // Hook into notebook activation to show comment indicators
           notebookTracker.widgetAdded.connect((sender, notebook) => {
             if (collaborationEnabled && commentSystemComponent) {
               notebook.content.widgets.forEach(cell => {
                 // Show comment indicators for cells with comments
-                commentSystemComponent!.showComments(cell.model.id);
+                CommentSystemComponent.showComments(cell.model.id);
               });
             }
           });
