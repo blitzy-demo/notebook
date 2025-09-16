@@ -572,7 +572,8 @@ export class CellLockManager {
 
     const userLocks: ICellLockStatus[] = [];
 
-    for (const [cellId, state] of this._lockStates.entries()) {
+    const lockEntries = Array.from(this._lockStates.entries());
+    for (const [cellId, state] of lockEntries) {
       if (state.isLocked && state.lockedBy === userId && this._isLockValid(state)) {
         userLocks.push(this._convertToLockStatus(state));
       }
@@ -591,7 +592,8 @@ export class CellLockManager {
 
     const allLocks: ICellLockStatus[] = [];
 
-    for (const [cellId, state] of this._lockStates.entries()) {
+    const allEntries = Array.from(this._lockStates.entries());
+    for (const [cellId, state] of allEntries) {
       if (this._isLockValid(state)) {
         allLocks.push(this._convertToLockStatus(state));
       }
@@ -611,7 +613,8 @@ export class CellLockManager {
     const now = Date.now();
     const expiredCells: string[] = [];
 
-    for (const [cellId, state] of this._lockStates.entries()) {
+    const stateEntries = Array.from(this._lockStates.entries());
+    for (const [cellId, state] of stateEntries) {
       if (this._isLockExpired(state, now)) {
         expiredCells.push(cellId);
       }
@@ -671,13 +674,15 @@ export class CellLockManager {
     }
 
     // Clear all lock timeouts
-    for (const timeoutId of this._lockTimeouts.values()) {
+    const lockTimeoutValues = Array.from(this._lockTimeouts.values());
+    for (const timeoutId of lockTimeoutValues) {
       clearTimeout(timeoutId);
     }
     this._lockTimeouts.clear();
 
     // Clear all queue timeouts
-    for (const timeoutId of this._queueTimeouts.values()) {
+    const queueTimeoutValues = Array.from(this._queueTimeouts.values());
+    for (const timeoutId of queueTimeoutValues) {
       clearTimeout(timeoutId);
     }
     this._queueTimeouts.clear();
@@ -702,7 +707,9 @@ export class CellLockManager {
     this._awareness.onUserLeave.connect(this._handleUserDisconnected, this);
 
     // Listen for Yjs map changes to track external lock state changes
-    this._lockStates.observeDeep(this._handleLockStateChange.bind(this));
+    this._lockStates.observeDeep((events: any[], transaction: any) => {
+      this._handleLockStateChange(events as Y.YMapEvent<ILockState>[]);
+    });
   }
 
   /**
@@ -736,7 +743,8 @@ export class CellLockManager {
     }
 
     for (const event of events) {
-      for (const [cellId] of event.changes.keys) {
+      const changedKeys = Array.from(event.changes.keys.entries());
+      for (const [cellId] of changedKeys) {
         const state = this._lockStates.get(cellId);
         if (state) {
           this._emitLockChange(cellId, state);
@@ -1052,12 +1060,14 @@ export class CellLockManager {
     }
 
     // Clear all timeouts
-    for (const timeoutId of this._lockTimeouts.values()) {
+    const lockTimeouts = Array.from(this._lockTimeouts.values());
+    for (const timeoutId of lockTimeouts) {
       clearTimeout(timeoutId);
     }
     this._lockTimeouts.clear();
 
-    for (const timeoutId of this._queueTimeouts.values()) {
+    const queueTimeouts = Array.from(this._queueTimeouts.values());
+    for (const timeoutId of queueTimeouts) {
       clearTimeout(timeoutId);
     }
     this._queueTimeouts.clear();
