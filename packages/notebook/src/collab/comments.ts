@@ -15,7 +15,7 @@ import * as Y from 'yjs';
 import { Signal } from '@lumino/signaling';
 import { UUID } from '@lumino/coreutils';
 import { marked } from 'marked';
-import _ from 'lodash';
+import * as _ from 'lodash';
 import { ICellModel } from '@jupyterlab/cells';
 
 import { YjsNotebookProvider } from './provider';
@@ -465,7 +465,8 @@ export class CommentStore {
 
     } catch (error) {
       console.error('Error creating comment:', error);
-      throw new CommentError('CREATE_FAILED', 'create', `Failed to create comment: ${error.message}`, undefined, { error });
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new CommentError('CREATE_FAILED', 'create', `Failed to create comment: ${errorMessage}`, undefined, { error });
     }
   }
 
@@ -558,7 +559,8 @@ export class CommentStore {
 
     } catch (error) {
       console.error('Error updating comment:', error);
-      throw new CommentError('UPDATE_FAILED', 'update', `Failed to update comment: ${error.message}`, commentId, { error });
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new CommentError('UPDATE_FAILED', 'update', `Failed to update comment: ${errorMessage}`, commentId, { error });
     }
   }
 
@@ -616,7 +618,8 @@ export class CommentStore {
 
     } catch (error) {
       console.error('Error deleting comment:', error);
-      throw new CommentError('DELETE_FAILED', 'delete', `Failed to delete comment: ${error.message}`, commentId, { error });
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new CommentError('DELETE_FAILED', 'delete', `Failed to delete comment: ${errorMessage}`, commentId, { error });
     }
   }
 
@@ -684,36 +687,38 @@ export class CommentStore {
           if (rootComment) {
             threads.set(rootId, {
               rootComment,
-              comments: [],
+              comments: [] as IComment[],
               cellId,
-              status: CommentStatus.OPEN,
+              status: CommentStatus.OPEN as CommentStatus,
               commentCount: 0,
               lastActivity: rootComment.timestamp,
-              participants: []
-            });
+              participants: [] as string[]
+            } as ICommentThread);
           }
         }
 
         const thread = threads.get(rootId);
         if (thread) {
-          thread.comments.push(comment);
-          thread.commentCount++;
+          // Create mutable copy for modifications
+          const mutableThread = thread as any;
+          mutableThread.comments.push(comment);
+          mutableThread.commentCount++;
 
           // Update last activity
-          if (comment.timestamp > thread.lastActivity) {
-            thread.lastActivity = comment.timestamp;
+          if (comment.timestamp > mutableThread.lastActivity) {
+            mutableThread.lastActivity = comment.timestamp;
           }
 
           // Add to participants
-          if (!thread.participants.includes(comment.author.userId)) {
-            thread.participants.push(comment.author.userId);
+          if (!mutableThread.participants.includes(comment.author.userId)) {
+            mutableThread.participants.push(comment.author.userId);
           }
 
           // Update thread status (resolved if all comments resolved)
-          if (thread.status === CommentStatus.OPEN && comment.isResolved) {
-            const allResolved = thread.comments.every(c => c.isResolved);
+          if (mutableThread.status === CommentStatus.OPEN && comment.isResolved) {
+            const allResolved = mutableThread.comments.every((c: IComment) => c.isResolved);
             if (allResolved) {
-              thread.status = CommentStatus.RESOLVED;
+              mutableThread.status = CommentStatus.RESOLVED;
             }
           }
         }
@@ -726,7 +731,8 @@ export class CommentStore {
 
     } catch (error) {
       console.error('Error getting threaded comments:', error);
-      throw new CommentError('GET_THREADS_FAILED', 'getThreadedComments', `Failed to get threaded comments: ${error.message}`, undefined, { cellId });
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new CommentError('GET_THREADS_FAILED', 'getThreadedComments', `Failed to get threaded comments: ${errorMessage}`, undefined, { cellId });
     }
   }
 
@@ -788,7 +794,8 @@ export class CommentStore {
 
     } catch (error) {
       console.error('Error exporting comments:', error);
-      throw new CommentError('EXPORT_FAILED', 'exportComments', `Failed to export comments: ${error.message}`, undefined, { options });
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new CommentError('EXPORT_FAILED', 'exportComments', `Failed to export comments: ${errorMessage}`, undefined, { options });
     }
   }
 
@@ -920,7 +927,8 @@ export class CommentStore {
    */
   getNotificationCount(): number {
     let count = 0;
-    for (const notification of this._notifications.values()) {
+    const notifications = Array.from(this._notifications.values());
+    for (const notification of notifications) {
       if (!notification.isRead) {
         count++;
       }
@@ -1088,7 +1096,8 @@ export class CommentStore {
       return resolvedComments;
     } catch (error) {
       console.error('Error resolving thread:', error);
-      throw new CommentError('RESOLVE_THREAD_FAILED', 'resolveThread', `Failed to resolve thread: ${error.message}`, rootCommentId);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      throw new CommentError('RESOLVE_THREAD_FAILED', 'resolveThread', `Failed to resolve thread: ${errorMessage}`, rootCommentId);
     }
   }
 
@@ -1669,13 +1678,13 @@ export class CommentStore {
 
     if (includeThreading) {
       // Group by threads
-      const threads = _.groupBy(comments, comment =>
+      const threads = _.groupBy(comments, (comment: IComment) =>
         comment.parentId ? this._findThreadRoot(comment) : comment.id
       );
 
-      Object.values(threads).forEach(threadComments => {
+      Object.values(threads).forEach((threadComments: IComment[]) => {
         const sortedComments = _.sortBy(threadComments, 'timestamp');
-        sortedComments.forEach((comment, index) => {
+        sortedComments.forEach((comment: IComment, index: number) => {
           const indent = comment.parentId ? '  ' : '';
           const userInfo = includeUserInfo ? ` - ${comment.author.displayName}` : '';
           const timestamp = comment.timestamp.toISOString();
@@ -1692,7 +1701,7 @@ export class CommentStore {
       });
     } else {
       // Simple chronological list
-      comments.forEach((comment, index) => {
+      comments.forEach((comment: IComment, index: number) => {
         const userInfo = includeUserInfo ? ` - ${comment.author.displayName}` : '';
         const timestamp = comment.timestamp.toISOString();
 
