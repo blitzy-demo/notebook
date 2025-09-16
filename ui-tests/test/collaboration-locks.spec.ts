@@ -1,14 +1,9 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import path from 'path';
-
 import { expect } from '@jupyterlab/galata';
-import { Page } from '@playwright/test';
 
 import { test } from './fixtures';
-import { createMultipleContexts } from './utils';
-import { cleanupCollaborationSession } from './collaboration-helpers';
 
 /**
  * Cell-Level Locking Test Suite
@@ -82,10 +77,10 @@ test.describe('Cell-Level Locking', () => {
     };
 
     // Upload the test notebook
-    await page.contents.uploadFile(
-      testNotebook,
-      `${tmpPath}/${COLLABORATION_NOTEBOOK}`,
-      'json'
+    await page.contents.uploadContent(
+      JSON.stringify(testNotebook),
+      'text',
+      `${tmpPath}/${COLLABORATION_NOTEBOOK}`
     );
   });
 
@@ -124,16 +119,16 @@ test.describe('Cell-Level Locking', () => {
     await page.waitForSelector(`${firstCodeCellSelector}.jp-mod-focused`, { timeout: 3000 });
 
     // Verify lock acquisition by checking for lock indicator
-    const lockIndicator = page.locator('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]');
-    await expect(lockIndicator).toBeVisible({ timeout: 2000 });
+    await page.waitForSelector('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]', { timeout: 2000 });
 
     // Verify lock indicator shows correct locked state
-    const lockState = await lockIndicator.getAttribute('data-locked');
+    const lockIndicatorElement = page.locator('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]');
+    const lockState = await lockIndicatorElement.getAttribute('data-locked');
     expect(lockState).toBe('true');
 
     // Verify cell has locked styling
     const cellElement = page.locator('.jp-Cell:nth-child(2)');
-    await expect(cellElement).toHaveClass(/jp-mod-locked/);
+    expect(await cellElement.getAttribute('class')).toContain('jp-mod-locked');
   });
 
   test('should display lock indicator for locked cells', async ({
@@ -160,39 +155,38 @@ test.describe('Cell-Level Locking', () => {
     await page.click(targetCellSelector);
 
     // Wait for lock indicator to appear
+    await page.waitForSelector('.jp-Cell:nth-child(3) [data-testid="cell-lock-indicator"]', { timeout: 3000 });
     const lockIndicator = page.locator('.jp-Cell:nth-child(3) [data-testid="cell-lock-indicator"]');
-    await expect(lockIndicator).toBeVisible({ timeout: 3000 });
 
     // Verify lock indicator visual properties
-    const lockIcon = lockIndicator.locator('.jp-collab-lock-icon');
-    await expect(lockIcon).toBeVisible();
+    await page.waitForSelector('.jp-Cell:nth-child(3) [data-testid="cell-lock-indicator"] .jp-collab-lock-icon');
 
     // Verify lock indicator shows user information
     const userInfo = await lockIndicator.getAttribute('data-locked-by');
     expect(userInfo).toBeTruthy();
 
     // Verify lock indicator has appropriate styling
-    await expect(lockIndicator).toHaveClass(/jp-collab-lock-active/);
+    expect(await lockIndicator.getAttribute('class')).toContain('jp-collab-lock-active');
 
     // Check that lock indicator tooltip shows correct information
     await lockIndicator.hover();
-    const tooltip = page.locator('[data-testid="lock-tooltip"]');
-    await expect(tooltip).toBeVisible({ timeout: 2000 });
+    await page.waitForSelector('[data-testid="lock-tooltip"]', { timeout: 2000 });
 
+    const tooltip = page.locator('[data-testid="lock-tooltip"]');
     const tooltipText = await tooltip.textContent();
     expect(tooltipText).toContain('locked');
   });
 
   test('should prevent other users from editing locked cell', async ({
-    browser,
     tmpPath,
     collaborationServer,
-    waitForCollaboration
+    waitForCollaboration,
+    createMultipleContexts
   }) => {
     const notebookPath = `notebooks/${tmpPath}/${COLLABORATION_NOTEBOOK}`;
 
     // Create two browser contexts to simulate different users
-    const contexts = await createMultipleContexts(browser, 2);
+    const contexts = await createMultipleContexts(2);
     const page1 = await contexts[0].newPage();
     const page2 = await contexts[1].newPage();
 
@@ -223,8 +217,7 @@ test.describe('Cell-Level Locking', () => {
       await page1.waitForSelector('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]', { timeout: 3000 });
 
       // User 2 should see the cell as locked
-      const lockIndicatorOnPage2 = page2.locator('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]');
-      await expect(lockIndicatorOnPage2).toBeVisible({ timeout: 3000 });
+      await page2.waitForSelector('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]', { timeout: 3000 });
 
       // User 2 tries to click on the locked cell
       await page2.click(cellSelector);
@@ -232,7 +225,7 @@ test.describe('Cell-Level Locking', () => {
       // Verify that User 2 cannot edit (cell should not focus or become editable)
       await page2.waitForTimeout(1000); // Give time for any potential focus
 
-      const isFocusedOnPage2 = await page2.evaluate((selector) => {
+      const isFocusedOnPage2 = await page2.evaluate((selector: string) => {
         const editor = document.querySelector(selector);
         return editor?.classList.contains('jp-mod-focused') || false;
       }, cellSelector);
@@ -240,12 +233,10 @@ test.describe('Cell-Level Locking', () => {
       expect(isFocusedOnPage2).toBe(false);
 
       // Verify lock denial feedback (e.g., toast message, visual feedback)
-      const lockDeniedMessage = page2.locator('[data-testid="lock-denied-message"]');
-      await expect(lockDeniedMessage).toBeVisible({ timeout: 2000 });
+      await page2.waitForSelector('[data-testid="lock-denied-message"]', { timeout: 2000 });
 
     } finally {
-      await contexts[0].close();
-      await contexts[1].close();
+      // Context cleanup is handled by the fixture
     }
   });
 
@@ -272,8 +263,11 @@ test.describe('Cell-Level Locking', () => {
     await page.click(cellSelector);
 
     // Verify lock is acquired
+    await page.waitForSelector('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]', { timeout: 3000 });
     const lockIndicator = page.locator('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]');
-    await expect(lockIndicator).toBeVisible({ timeout: 3000 });
+
+    // Verify lock indicator is visible and active
+    expect(await lockIndicator.isVisible()).toBe(true);
 
     // Blur the cell by clicking elsewhere or pressing Escape
     await page.keyboard.press('Escape');
@@ -282,14 +276,15 @@ test.describe('Cell-Level Locking', () => {
     await page.click('.jp-Cell:nth-child(3) .jp-InputArea-editor');
 
     // Wait for lock to be released (indicator should disappear)
-    await expect(lockIndicator).toBeHidden({ timeout: 3000 });
+    await page.waitForSelector('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]', { state: 'hidden', timeout: 3000 });
 
     // Verify cell no longer has locked styling
     const cellElement = page.locator('.jp-Cell:nth-child(2)');
-    await expect(cellElement).not.toHaveClass(/jp-mod-locked/);
+    expect(await cellElement.getAttribute('class')).not.toContain('jp-mod-locked');
 
     // Verify lock state is cleared
-    const lockState = await lockIndicator.getAttribute('data-locked');
+    const lockIndicatorElement = page.locator('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]');
+    const lockState = await lockIndicatorElement.getAttribute('data-locked');
     expect(lockState).toBe('false');
   });
 
@@ -316,42 +311,43 @@ test.describe('Cell-Level Locking', () => {
     await page.click(cellSelector);
 
     // Verify lock is acquired
+    await page.waitForSelector('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]', { timeout: 3000 });
     const lockIndicator = page.locator('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]');
-    await expect(lockIndicator).toBeVisible({ timeout: 3000 });
+
+    // Verify lock is initially active
+    expect(await lockIndicator.isVisible()).toBe(true);
 
     // Simulate idle behavior (no typing or interaction)
     // Wait for lock timeout (assuming timeout is configured to ~5 seconds for testing)
     await page.waitForTimeout(6000);
 
     // Check if lock timeout warning appears
-    const timeoutWarning = page.locator('[data-testid="lock-timeout-warning"]');
-    await expect(timeoutWarning).toBeVisible({ timeout: 2000 });
+    await page.waitForSelector('[data-testid="lock-timeout-warning"]', { timeout: 2000 });
 
     // Continue waiting for full timeout
     await page.waitForTimeout(3000);
 
     // Verify lock is automatically released due to timeout
-    await expect(lockIndicator).toBeHidden({ timeout: 2000 });
+    await page.waitForSelector('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]', { state: 'hidden', timeout: 2000 });
 
     // Verify cell styling is cleared
     const cellElement = page.locator('.jp-Cell:nth-child(2)');
-    await expect(cellElement).not.toHaveClass(/jp-mod-locked/);
+    expect(await cellElement.getAttribute('class')).not.toContain('jp-mod-locked');
 
     // Verify timeout notification was shown
-    const timeoutNotification = page.locator('[data-testid="lock-timeout-notification"]');
-    await expect(timeoutNotification).toBeVisible({ timeout: 1000 });
+    await page.waitForSelector('[data-testid="lock-timeout-notification"]', { timeout: 1000 });
   });
 
   test('should queue lock requests appropriately', async ({
-    browser,
     tmpPath,
     collaborationServer,
-    waitForCollaboration
+    waitForCollaboration,
+    createMultipleContexts
   }) => {
     const notebookPath = `notebooks/${tmpPath}/${COLLABORATION_NOTEBOOK}`;
 
     // Create three browser contexts to test lock queuing
-    const contexts = await createMultipleContexts(browser, 3);
+    const contexts = await createMultipleContexts(3);
     const pages = await Promise.all(contexts.map(ctx => ctx.newPage()));
 
     try {
@@ -379,13 +375,13 @@ test.describe('Cell-Level Locking', () => {
       ]);
 
       // Verify queue indicators appear for users 2 and 3
+      await Promise.all([
+        pages[1].waitForSelector('[data-testid="lock-queue-indicator"]', { timeout: 3000 }),
+        pages[2].waitForSelector('[data-testid="lock-queue-indicator"]', { timeout: 3000 })
+      ]);
+
       const queueIndicator1 = pages[1].locator('[data-testid="lock-queue-indicator"]');
       const queueIndicator2 = pages[2].locator('[data-testid="lock-queue-indicator"]');
-
-      await Promise.all([
-        expect(queueIndicator1).toBeVisible({ timeout: 3000 }),
-        expect(queueIndicator2).toBeVisible({ timeout: 3000 })
-      ]);
 
       // Verify queue positions are shown
       const queuePosition1 = await queueIndicator1.getAttribute('data-queue-position');
@@ -398,15 +394,14 @@ test.describe('Cell-Level Locking', () => {
       await pages[0].keyboard.press('Escape');
 
       // User 2 should automatically acquire the lock (next in queue)
-      const lockIndicatorUser2 = pages[1].locator('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]');
-      await expect(lockIndicatorUser2).toBeVisible({ timeout: 3000 });
+      await pages[1].waitForSelector('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]', { timeout: 3000 });
 
       // User 3's queue position should update
       const updatedQueuePosition = await queueIndicator2.getAttribute('data-queue-position');
       expect(parseInt(updatedQueuePosition)).toBe(1);
 
     } finally {
-      await Promise.all(contexts.map(ctx => ctx.close()));
+      // Context cleanup is handled by the fixture
     }
   });
 
@@ -433,28 +428,31 @@ test.describe('Cell-Level Locking', () => {
     await page.click(cellSelector);
 
     // Verify lock is acquired
+    await page.waitForSelector('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]', { timeout: 3000 });
     const lockIndicator = page.locator('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]');
-    await expect(lockIndicator).toBeVisible({ timeout: 3000 });
 
     // Simulate connection interruption by stopping collaboration server
-    await collaborationServer.stop();
+    if (collaborationServer) {
+      await collaborationServer.stop();
+    }
 
     // Wait for disconnect indicator
-    const disconnectIndicator = page.locator('[data-testid="collaboration-disconnect"]');
-    await expect(disconnectIndicator).toBeVisible({ timeout: 5000 });
+    await page.waitForSelector('[data-testid="collaboration-disconnect"]', { timeout: 5000 });
 
     // Verify lock is maintained during disconnection (optimistic locking)
-    await expect(lockIndicator).toBeVisible();
+    const isLockVisible = await lockIndicator.isVisible();
+    expect(isLockVisible).toBe(true);
 
     // Restart collaboration server to simulate reconnection
-    await collaborationServer.start();
+    if (collaborationServer) {
+      await collaborationServer.start();
+    }
 
     // Wait for reconnection
-    const reconnectIndicator = page.locator('[data-testid="collaboration-reconnect"]');
-    await expect(reconnectIndicator).toBeVisible({ timeout: 5000 });
+    await page.waitForSelector('[data-testid="collaboration-reconnect"]', { timeout: 5000 });
 
     // Verify lock state is recovered after reconnection
-    await expect(lockIndicator).toBeVisible({ timeout: 3000 });
+    await page.waitForSelector('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]', { timeout: 3000 });
 
     // Verify lock state is consistent
     const lockState = await lockIndicator.getAttribute('data-locked');
@@ -474,15 +472,15 @@ test.describe('Cell-Level Locking', () => {
   });
 
   test('should allow concurrent editing of different cells', async ({
-    browser,
     tmpPath,
     collaborationServer,
-    waitForCollaboration
+    waitForCollaboration,
+    createMultipleContexts
   }) => {
     const notebookPath = `notebooks/${tmpPath}/${COLLABORATION_NOTEBOOK}`;
 
     // Create two browser contexts for concurrent users
-    const contexts = await createMultipleContexts(browser, 2);
+    const contexts = await createMultipleContexts(2);
     const page1 = await contexts[0].newPage();
     const page2 = await contexts[1].newPage();
 
@@ -516,13 +514,13 @@ test.describe('Cell-Level Locking', () => {
       ]);
 
       // Both users should successfully acquire locks on their respective cells
+      await Promise.all([
+        page1.waitForSelector('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]', { timeout: 3000 }),
+        page2.waitForSelector('.jp-Cell:nth-child(3) [data-testid="cell-lock-indicator"]', { timeout: 3000 })
+      ]);
+
       const lockIndicator1 = page1.locator('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]');
       const lockIndicator2 = page2.locator('.jp-Cell:nth-child(3) [data-testid="cell-lock-indicator"]');
-
-      await Promise.all([
-        expect(lockIndicator1).toBeVisible({ timeout: 3000 }),
-        expect(lockIndicator2).toBeVisible({ timeout: 3000 })
-      ]);
 
       // Both users should be able to type in their cells
       await Promise.all([
@@ -549,11 +547,13 @@ test.describe('Cell-Level Locking', () => {
       expect(cell3ContentOnPage1).toContain('Edit by User 2');
 
       // Verify no conflicts occurred (both locks maintained independently)
-      await expect(lockIndicator1).toBeVisible();
-      await expect(lockIndicator2).toBeVisible();
+      const lock1Visible = await lockIndicator1.isVisible();
+      const lock2Visible = await lockIndicator2.isVisible();
+      expect(lock1Visible).toBe(true);
+      expect(lock2Visible).toBe(true);
 
     } finally {
-      await Promise.all(contexts.map(ctx => ctx.close()));
+      // Context cleanup is handled by the fixture
     }
   });
 
@@ -602,8 +602,7 @@ test.describe('Cell-Level Locking', () => {
     expect(activeLockCount).toBe(1); // Only one cell should remain locked
 
     // Verify the locked cell is the last one clicked (cell 3)
-    const finalLockIndicator = page.locator('.jp-Cell:nth-child(4) [data-testid="cell-lock-indicator"]');
-    await expect(finalLockIndicator).toBeVisible();
+    await page.waitForSelector('.jp-Cell:nth-child(4) [data-testid="cell-lock-indicator"]');
 
     // Verify system can continue normal operation after rapid transitions
     await page.keyboard.type(' # Stress test complete');
@@ -625,15 +624,15 @@ test.describe('Cell-Level Locking', () => {
 
   // Performance and reliability test
   test('should maintain performance during concurrent lock operations', async ({
-    browser,
     tmpPath,
     collaborationServer,
-    waitForCollaboration
+    waitForCollaboration,
+    createMultipleContexts
   }) => {
     const notebookPath = `notebooks/${tmpPath}/${COLLABORATION_NOTEBOOK}`;
 
     // Create multiple contexts to simulate heavy concurrent usage
-    const contexts = await createMultipleContexts(browser, 4);
+    const contexts = await createMultipleContexts(4);
     const pages = await Promise.all(contexts.map(ctx => ctx.newPage()));
 
     try {
@@ -673,8 +672,7 @@ test.describe('Cell-Level Locking', () => {
 
       // Verify system is still responsive after concurrent operations
       await pages[0].click('.jp-Cell:nth-child(2) .jp-InputArea-editor');
-      const lockIndicator = pages[0].locator('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]');
-      await expect(lockIndicator).toBeVisible({ timeout: 3000 });
+      await pages[0].waitForSelector('.jp-Cell:nth-child(2) [data-testid="cell-lock-indicator"]', { timeout: 3000 });
 
       // Verify no system errors or lock conflicts
       const errorIndicators = pages[0].locator('[data-testid="collaboration-error"]');
@@ -682,7 +680,7 @@ test.describe('Cell-Level Locking', () => {
       expect(errorCount).toBe(0);
 
     } finally {
-      await Promise.all(contexts.map(ctx => ctx.close()));
+      // Context cleanup is handled by the fixture
     }
   });
 });
