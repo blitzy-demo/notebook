@@ -1,0 +1,1253 @@
+/*
+ * Copyright (c) Jupyter Development Team.
+ * Distributed under the terms of the Modified BSD License.
+ */
+
+/*
+ * Jupyter Notebook Collaboration CSS Styles
+ *
+ * This file contains the core CSS styles for all collaboration UI components
+ * including user presence indicators, cursor overlays, cell lock indicators,
+ * comment threads, history viewer, and permission dialogs.
+ *
+ * The styles implement visual designs according to specifications with proper
+ * accessibility, responsive design, and performance optimizations.
+ */
+
+/* Import CSS variables for theming */
+@import url('./variables.css');
+
+/* =============================================================================
+ * COLLABORATION BAR - User Presence Indicators
+ * =============================================================================
+ *
+ * Implements user avatars with overflow badge and presence indicators
+ * as per Section 7.8.5.1 of the technical specification.
+ */
+
+.jp-collaboration-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 8px 12px;
+  background-color: var(--jp-layout-color1);
+  border-bottom: 1px solid var(--jp-border-color2);
+  min-height: 40px;
+  gap: 6px;
+  font-family: var(--jp-ui-font-family);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-collaboration-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 12px;
+}
+
+.jp-collaboration-status-text {
+  color: var(--jp-ui-font-color1);
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.jp-collaboration-status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--jp-success-color1);
+  box-shadow: 0 0 4px rgba(76, 175, 80, 0.4);
+  transition: all 100ms ease-out;
+  will-change: opacity;
+}
+
+.jp-collaboration-status-indicator.disconnected {
+  background-color: var(--jp-error-color1);
+  box-shadow: 0 0 4px rgba(244, 67, 54, 0.4);
+}
+
+.jp-collaboration-status-indicator.connecting {
+  background-color: var(--jp-warn-color1);
+  box-shadow: 0 0 4px rgba(255, 152, 0, 0.4);
+  animation: jp-collaboration-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes jp-collaboration-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* User Avatars Container */
+.jp-presence-avatars {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 240px; /* Accommodate 8 avatars + spacing */
+  overflow: hidden;
+}
+
+/* Individual Avatar Styling */
+.jp-presence-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--jp-border-color1);
+  background-color: var(--jp-layout-color2);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  transition: opacity 100ms ease-out;
+  will-change: opacity;
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.jp-presence-avatar:hover {
+  opacity: 0.8;
+  border-color: var(--jp-border-color0);
+}
+
+.jp-presence-avatar.active-editor {
+  border-color: var(--jp-brand-color1);
+  box-shadow: 0 0 6px rgba(21, 101, 192, 0.3);
+}
+
+/* Avatar Initials Fallback */
+.jp-presence-avatar-initials {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--jp-ui-font-color1);
+  background: linear-gradient(135deg, var(--jp-brand-color1), var(--jp-brand-color2));
+  border-radius: 50%;
+}
+
+/* Overflow Badge for Additional Users */
+.jp-presence-overflow-badge {
+  width: 24px;
+  height: 24px;
+  background: var(--jp-layout-color2);
+  border: 2px solid var(--jp-border-color1);
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--jp-ui-font-color1);
+  cursor: pointer;
+  transition: opacity 100ms ease-out;
+  will-change: opacity;
+  flex-shrink: 0;
+}
+
+.jp-presence-overflow-badge:hover {
+  opacity: 0.8;
+  background-color: var(--jp-layout-color3);
+}
+
+/* Avatar Tooltip */
+.jp-presence-tooltip {
+  position: absolute;
+  bottom: -32px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+  z-index: 1000;
+  border: 1px solid var(--jp-border-color2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+  pointer-events: none;
+}
+
+.jp-presence-avatar:hover .jp-presence-tooltip {
+  opacity: 1;
+}
+
+/* =============================================================================
+ * CELL LOCK INDICATORS
+ * =============================================================================
+ *
+ * Color-coded lock icons with proper positioning as per Section 7.8.5.2.
+ */
+
+.jp-cell-lock-indicator {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  opacity: 0.9;
+  transition: opacity 100ms ease-out;
+  will-change: opacity;
+  z-index: 100;
+  cursor: help;
+  user-select: none;
+}
+
+.jp-cell-lock-indicator::before {
+  content: "🔒";
+}
+
+/* Blue lock for current user */
+.jp-cell-lock-indicator.self-locked {
+  color: #1976d2;
+  filter: hue-rotate(200deg) saturate(1.2);
+}
+
+/* Red lock for other users */
+.jp-cell-lock-indicator.other-locked {
+  color: #d32f2f;
+  filter: saturate(1.2);
+}
+
+.jp-cell-lock-indicator:hover {
+  opacity: 1;
+  transform: translateY(-50%) scale(1.1);
+}
+
+/* Lock indicator tooltip */
+.jp-cell-lock-tooltip {
+  position: absolute;
+  left: 28px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+  z-index: 1001;
+  border: 1px solid var(--jp-border-color2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+  pointer-events: none;
+}
+
+.jp-cell-lock-indicator:hover .jp-cell-lock-tooltip {
+  opacity: 1;
+}
+
+/* =============================================================================
+ * REMOTE CURSOR OVERLAYS
+ * =============================================================================
+ *
+ * User-specific colored cursors for CodeMirror editor integration.
+ */
+
+.jp-remote-cursor {
+  position: absolute;
+  width: 2px;
+  height: 1.2em;
+  background-color: var(--jp-brand-color1);
+  z-index: 150;
+  pointer-events: none;
+  transition: opacity 100ms ease-out;
+  will-change: opacity;
+  animation: jp-cursor-blink 1s ease-in-out infinite;
+}
+
+@keyframes jp-cursor-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0.3; }
+}
+
+/* User-specific cursor colors */
+.jp-remote-cursor.user-1 { background-color: #1976d2; }
+.jp-remote-cursor.user-2 { background-color: #388e3c; }
+.jp-remote-cursor.user-3 { background-color: #f57c00; }
+.jp-remote-cursor.user-4 { background-color: #7b1fa2; }
+.jp-remote-cursor.user-5 { background-color: #d32f2f; }
+.jp-remote-cursor.user-6 { background-color: #0288d1; }
+.jp-remote-cursor.user-7 { background-color: #689f38; }
+.jp-remote-cursor.user-8 { background-color: #f50057; }
+
+/* Remote selection highlighting */
+.jp-remote-selection {
+  position: absolute;
+  background-color: rgba(33, 150, 243, 0.15);
+  border: 1px solid rgba(33, 150, 243, 0.3);
+  z-index: 140;
+  pointer-events: none;
+  transition: opacity 100ms ease-out;
+  will-change: opacity;
+}
+
+.jp-remote-selection.user-1 { background-color: rgba(25, 118, 210, 0.15); border-color: rgba(25, 118, 210, 0.3); }
+.jp-remote-selection.user-2 { background-color: rgba(56, 142, 60, 0.15); border-color: rgba(56, 142, 60, 0.3); }
+.jp-remote-selection.user-3 { background-color: rgba(245, 124, 0, 0.15); border-color: rgba(245, 124, 0, 0.3); }
+.jp-remote-selection.user-4 { background-color: rgba(123, 31, 162, 0.15); border-color: rgba(123, 31, 162, 0.3); }
+.jp-remote-selection.user-5 { background-color: rgba(211, 47, 47, 0.15); border-color: rgba(211, 47, 47, 0.3); }
+.jp-remote-selection.user-6 { background-color: rgba(2, 136, 209, 0.15); border-color: rgba(2, 136, 209, 0.3); }
+.jp-remote-selection.user-7 { background-color: rgba(104, 159, 56, 0.15); border-color: rgba(104, 159, 56, 0.3); }
+.jp-remote-selection.user-8 { background-color: rgba(245, 0, 87, 0.15); border-color: rgba(245, 0, 87, 0.3); }
+
+/* =============================================================================
+ * DIFF HIGHLIGHTING SYSTEM
+ * =============================================================================
+ *
+ * Version history diff highlighting as per Section 7.8.5.3.
+ */
+
+.jp-diff-added {
+  background-color: #d4fcdc;
+  border-left: 3px solid #4caf50;
+  padding: 2px 4px;
+  margin: 0 1px;
+  display: inline;
+  border-radius: 2px;
+  transition: background-color 100ms ease-out;
+}
+
+.jp-diff-removed {
+  background-color: #ffecec;
+  border-left: 3px solid #f44336;
+  padding: 2px 4px;
+  margin: 0 1px;
+  text-decoration: line-through;
+  opacity: 0.8;
+  display: inline;
+  border-radius: 2px;
+  transition: background-color 100ms ease-out;
+}
+
+.jp-diff-modified {
+  background-color: #fff3e0;
+  border-left: 3px solid #ff9800;
+  padding: 2px 4px;
+  margin: 0 1px;
+  display: inline;
+  border-radius: 2px;
+  transition: background-color 100ms ease-out;
+}
+
+/* Block-level diffs for entire cells */
+.jp-cell-diff-added {
+  background-color: rgba(212, 252, 220, 0.3);
+  border-left: 4px solid #4caf50;
+  margin: 4px 0;
+  transition: background-color 100ms ease-out;
+}
+
+.jp-cell-diff-removed {
+  background-color: rgba(255, 236, 236, 0.3);
+  border-left: 4px solid #f44336;
+  margin: 4px 0;
+  opacity: 0.7;
+  transition: background-color 100ms ease-out;
+}
+
+.jp-cell-diff-modified {
+  background-color: rgba(255, 243, 224, 0.3);
+  border-left: 4px solid #ff9800;
+  margin: 4px 0;
+  transition: background-color 100ms ease-out;
+}
+
+/* =============================================================================
+ * HISTORY VIEWER
+ * =============================================================================
+ *
+ * Timeline navigation, change summary, and diff visualization.
+ */
+
+.jp-history-viewer {
+  padding: 16px;
+  background-color: var(--jp-layout-color1);
+  height: 100%;
+  overflow-y: auto;
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-history-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.jp-history-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-history-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 16px;
+  background-color: var(--jp-layout-color2);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.jp-history-tab {
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--jp-ui-font-color2);
+  cursor: pointer;
+  transition: all 100ms ease-out;
+  border: none;
+  background: none;
+}
+
+.jp-history-tab:hover {
+  color: var(--jp-ui-font-color1);
+  background-color: var(--jp-layout-color3);
+}
+
+.jp-history-tab.active {
+  background-color: var(--jp-brand-color1);
+  color: white;
+}
+
+/* Timeline visualization */
+.jp-history-timeline {
+  margin: 16px 0;
+  position: relative;
+  height: 60px;
+  background-color: var(--jp-layout-color2);
+  border-radius: 4px;
+  padding: 20px 16px;
+  overflow-x: auto;
+}
+
+.jp-timeline-track {
+  position: relative;
+  height: 2px;
+  background-color: var(--jp-border-color2);
+  border-radius: 1px;
+}
+
+.jp-timeline-marker {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  top: -5px;
+  cursor: pointer;
+  transition: all 100ms ease-out;
+  border: 2px solid var(--jp-layout-color1);
+}
+
+.jp-timeline-marker.major {
+  background-color: var(--jp-brand-color1);
+  width: 16px;
+  height: 16px;
+  top: -7px;
+}
+
+.jp-timeline-marker.minor {
+  background-color: var(--jp-ui-font-color3);
+  width: 8px;
+  height: 8px;
+  top: -3px;
+}
+
+.jp-timeline-marker:hover {
+  transform: scale(1.2);
+  z-index: 10;
+}
+
+.jp-timeline-marker.selected {
+  background-color: var(--jp-accent-color1);
+  box-shadow: 0 0 8px rgba(33, 150, 243, 0.5);
+  z-index: 10;
+}
+
+/* Snapshot information */
+.jp-snapshot-info {
+  background-color: var(--jp-layout-color2);
+  border-radius: 6px;
+  padding: 12px;
+  margin: 16px 0;
+}
+
+.jp-snapshot-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.jp-snapshot-author {
+  font-weight: 600;
+  color: var(--jp-ui-font-color1);
+  font-size: 13px;
+}
+
+.jp-snapshot-time {
+  color: var(--jp-ui-font-color2);
+  font-size: 12px;
+}
+
+.jp-snapshot-summary {
+  color: var(--jp-ui-font-color2);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+/* Change details */
+.jp-change-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.jp-change-cell {
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 4px;
+  margin: 8px 0;
+  overflow: hidden;
+}
+
+.jp-change-cell-header {
+  background-color: var(--jp-layout-color3);
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--jp-ui-font-color1);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.jp-change-cell-content {
+  padding: 8px 12px;
+  font-family: var(--jp-code-font-family);
+  font-size: var(--jp-code-font-size);
+  line-height: 1.4;
+  background-color: var(--jp-layout-color1);
+  border-top: 1px solid var(--jp-border-color2);
+}
+
+.jp-history-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.jp-history-button {
+  padding: 8px 16px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 100ms ease-out;
+}
+
+.jp-history-button:hover {
+  background-color: var(--jp-layout-color3);
+  border-color: var(--jp-border-color0);
+}
+
+.jp-history-button.primary {
+  background-color: var(--jp-brand-color1);
+  color: white;
+  border-color: var(--jp-brand-color1);
+}
+
+.jp-history-button.primary:hover {
+  background-color: var(--jp-brand-color0);
+}
+
+/* =============================================================================
+ * COMMENT SYSTEM
+ * =============================================================================
+ *
+ * Threaded comment layout and resolution states.
+ */
+
+.jp-comment-indicator {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: var(--jp-warn-color1);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  z-index: 100;
+  transition: all 100ms ease-out;
+  will-change: transform;
+}
+
+.jp-comment-indicator::before {
+  content: "💬";
+  font-size: 12px;
+}
+
+.jp-comment-indicator.has-comments {
+  background-color: var(--jp-brand-color1);
+}
+
+.jp-comment-indicator.resolved {
+  background-color: var(--jp-success-color1);
+  opacity: 0.7;
+}
+
+.jp-comment-indicator:hover {
+  transform: scale(1.1);
+}
+
+.jp-comment-panel {
+  background-color: var(--jp-layout-color1);
+  border-left: 1px solid var(--jp-border-color2);
+  width: 320px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-comment-panel-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--jp-border-color2);
+  background-color: var(--jp-layout-color2);
+}
+
+.jp-comment-panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--jp-ui-font-color1);
+  margin: 0;
+}
+
+.jp-comment-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.jp-comment-thread {
+  margin-bottom: 16px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.jp-comment-thread.resolved {
+  opacity: 0.7;
+  border-color: var(--jp-success-color2);
+}
+
+.jp-comment {
+  padding: 12px;
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.jp-comment:last-child {
+  border-bottom: none;
+}
+
+.jp-comment-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.jp-comment-author {
+  font-weight: 600;
+  color: var(--jp-ui-font-color1);
+  font-size: 12px;
+}
+
+.jp-comment-time {
+  color: var(--jp-ui-font-color2);
+  font-size: 11px;
+}
+
+.jp-comment-content {
+  color: var(--jp-ui-font-color1);
+  font-size: 13px;
+  line-height: 1.4;
+  margin-bottom: 8px;
+}
+
+.jp-comment-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.jp-comment-action {
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  color: var(--jp-ui-font-color2);
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 100ms ease-out;
+}
+
+.jp-comment-action:hover {
+  background-color: var(--jp-layout-color3);
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-comment-reply-form {
+  padding: 12px;
+  border-top: 1px solid var(--jp-border-color2);
+  background-color: var(--jp-layout-color2);
+}
+
+.jp-comment-input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: var(--jp-ui-font-family);
+  background-color: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+  resize: vertical;
+  min-height: 60px;
+  margin-bottom: 8px;
+}
+
+.jp-comment-input:focus {
+  outline: none;
+  border-color: var(--jp-brand-color1);
+  box-shadow: 0 0 0 1px var(--jp-brand-color1);
+}
+
+.jp-comment-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.jp-comment-submit {
+  padding: 6px 12px;
+  background-color: var(--jp-brand-color1);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 100ms ease-out;
+}
+
+.jp-comment-submit:hover {
+  background-color: var(--jp-brand-color0);
+}
+
+.jp-comment-cancel {
+  padding: 6px 12px;
+  background: none;
+  color: var(--jp-ui-font-color2);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 100ms ease-out;
+}
+
+.jp-comment-cancel:hover {
+  background-color: var(--jp-layout-color3);
+  color: var(--jp-ui-font-color1);
+}
+
+/* =============================================================================
+ * PERMISSION DIALOG
+ * =============================================================================
+ *
+ * Role management UI for access control.
+ */
+
+.jp-permission-dialog {
+  background-color: var(--jp-layout-color1);
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  width: 480px;
+  max-width: 90vw;
+  max-height: 80vh;
+  font-family: var(--jp-ui-font-family);
+}
+
+.jp-permission-header {
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.jp-permission-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--jp-ui-font-color1);
+  margin: 0 0 8px;
+}
+
+.jp-permission-subtitle {
+  font-size: 13px;
+  color: var(--jp-ui-font-color2);
+  margin: 0;
+}
+
+.jp-permission-content {
+  padding: 16px 24px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.jp-permission-section {
+  margin-bottom: 24px;
+}
+
+.jp-permission-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--jp-ui-font-color1);
+  margin: 0 0 12px;
+}
+
+.jp-user-permission-list {
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.jp-user-permission-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.jp-user-permission-item:last-child {
+  border-bottom: none;
+}
+
+.jp-user-permission-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.jp-user-permission-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: var(--jp-layout-color3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-user-permission-details {
+  flex: 1;
+}
+
+.jp-user-permission-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--jp-ui-font-color1);
+  margin: 0 0 2px;
+}
+
+.jp-user-permission-email {
+  font-size: 11px;
+  color: var(--jp-ui-font-color2);
+  margin: 0;
+}
+
+.jp-permission-role-select {
+  padding: 6px 8px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  font-size: 12px;
+  cursor: pointer;
+  min-width: 80px;
+}
+
+.jp-permission-role-select:focus {
+  outline: none;
+  border-color: var(--jp-brand-color1);
+  box-shadow: 0 0 0 1px var(--jp-brand-color1);
+}
+
+.jp-permission-actions {
+  padding: 16px 24px;
+  border-top: 1px solid var(--jp-border-color2);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.jp-permission-invite {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  margin-right: 16px;
+}
+
+.jp-permission-invite-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  font-size: 12px;
+}
+
+.jp-permission-invite-input:focus {
+  outline: none;
+  border-color: var(--jp-brand-color1);
+  box-shadow: 0 0 0 1px var(--jp-brand-color1);
+}
+
+.jp-permission-invite-button {
+  padding: 8px 16px;
+  background-color: var(--jp-brand-color1);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 100ms ease-out;
+}
+
+.jp-permission-invite-button:hover {
+  background-color: var(--jp-brand-color0);
+}
+
+.jp-permission-dialog-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.jp-permission-button {
+  padding: 8px 16px;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 4px;
+  background-color: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 100ms ease-out;
+}
+
+.jp-permission-button:hover {
+  background-color: var(--jp-layout-color3);
+}
+
+.jp-permission-button.primary {
+  background-color: var(--jp-brand-color1);
+  color: white;
+  border-color: var(--jp-brand-color1);
+}
+
+.jp-permission-button.primary:hover {
+  background-color: var(--jp-brand-color0);
+}
+
+/* =============================================================================
+ * RESPONSIVE DESIGN
+ * =============================================================================
+ *
+ * Mobile responsive adjustments with @media queries as per Section 7.8.1.
+ */
+
+@media only screen and (max-width: 760px) {
+  /* Collaboration bar adjustments for mobile */
+  .jp-collaboration-bar {
+    padding: 4px 8px;
+    min-height: 32px;
+  }
+
+  .jp-collaboration-status-text {
+    display: none; /* Hide status text on small screens */
+  }
+
+  .jp-presence-avatars {
+    max-width: 140px; /* Reduce to 5 avatars on mobile */
+  }
+
+  .jp-presence-avatar,
+  .jp-presence-overflow-badge {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* Cell lock indicators smaller on mobile */
+  .jp-cell-lock-indicator {
+    font-size: 12px;
+    left: 4px;
+  }
+
+  /* Comment panel becomes full-width overlay on mobile */
+  .jp-comment-panel {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    z-index: 2000;
+    transform: translateX(100%);
+    transition: transform 200ms ease-out;
+  }
+
+  .jp-comment-panel.open {
+    transform: translateX(0);
+  }
+
+  /* History viewer mobile adjustments */
+  .jp-history-viewer {
+    padding: 8px;
+  }
+
+  .jp-timeline-marker {
+    width: 10px;
+    height: 10px;
+    top: -4px;
+  }
+
+  .jp-timeline-marker.major {
+    width: 14px;
+    height: 14px;
+    top: -6px;
+  }
+
+  /* Permission dialog mobile adjustments */
+  .jp-permission-dialog {
+    width: 100%;
+    max-width: calc(100vw - 32px);
+    border-radius: 0;
+  }
+
+  .jp-permission-invite {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .jp-user-permission-info {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+}
+
+@media only screen and (max-width: 480px) {
+  /* Extra small screens - hide more elements */
+  .jp-presence-avatars {
+    max-width: 100px; /* Show only 3-4 avatars */
+  }
+
+  .jp-history-tabs {
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .jp-history-tab {
+    text-align: center;
+  }
+
+  .jp-permission-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .jp-permission-dialog-actions {
+    flex-direction: column;
+  }
+}
+
+/* =============================================================================
+ * ACCESSIBILITY FEATURES
+ * =============================================================================
+ *
+ * Focus indicators and ARIA support as per Section 7.8.3.
+ */
+
+/* High contrast focus indicators */
+.jp-collaboration-bar *:focus-visible,
+.jp-history-viewer *:focus-visible,
+.jp-comment-panel *:focus-visible,
+.jp-permission-dialog *:focus-visible {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 2px;
+}
+
+/* Focus indicators for interactive elements */
+.jp-presence-avatar:focus-visible,
+.jp-cell-lock-indicator:focus-visible,
+.jp-comment-indicator:focus-visible {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 2px;
+  border-radius: 50%;
+}
+
+.jp-timeline-marker:focus-visible {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 2px;
+  border-radius: 50%;
+}
+
+/* Screen reader only content */
+.jp-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .jp-presence-avatar,
+  .jp-cell-lock-indicator,
+  .jp-comment-indicator {
+    border-width: 3px;
+  }
+
+  .jp-diff-added,
+  .jp-diff-removed,
+  .jp-diff-modified {
+    border-width: 2px;
+  }
+
+  .jp-timeline-marker {
+    border-width: 3px;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .jp-collaboration-status-indicator,
+  .jp-presence-avatar,
+  .jp-cell-lock-indicator,
+  .jp-remote-cursor,
+  .jp-remote-selection,
+  .jp-diff-added,
+  .jp-diff-removed,
+  .jp-diff-modified,
+  .jp-timeline-marker,
+  .jp-comment-action,
+  .jp-history-button,
+  .jp-permission-button {
+    transition: none;
+    animation: none;
+  }
+
+  .jp-remote-cursor {
+    animation: none;
+    opacity: 1;
+  }
+
+  .jp-collaboration-status-indicator.connecting {
+    animation: none;
+  }
+}
+
+/* Print styles */
+@media print {
+  .jp-collaboration-bar,
+  .jp-comment-indicator,
+  .jp-cell-lock-indicator,
+  .jp-remote-cursor,
+  .jp-remote-selection {
+    display: none;
+  }
+
+  .jp-diff-added,
+  .jp-diff-removed,
+  .jp-diff-modified {
+    background-color: transparent !important;
+    color: black !important;
+  }
+
+  .jp-diff-added::before {
+    content: "[ADDED] ";
+    font-weight: bold;
+  }
+
+  .jp-diff-removed::before {
+    content: "[REMOVED] ";
+    font-weight: bold;
+  }
+
+  .jp-diff-modified::before {
+    content: "[MODIFIED] ";
+    font-weight: bold;
+  }
+}
+
+/* =============================================================================
+ * PERFORMANCE OPTIMIZATIONS
+ * =============================================================================
+ *
+ * Hardware acceleration and optimized transitions as per Section 7.8.5.4.
+ */
+
+/* GPU acceleration for frequently animated elements */
+.jp-presence-avatar,
+.jp-cell-lock-indicator,
+.jp-remote-cursor,
+.jp-remote-selection,
+.jp-collaboration-status-indicator {
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
+}
+
+/* Composite layers for overlay elements */
+.jp-comment-indicator,
+.jp-cell-lock-indicator,
+.jp-remote-cursor {
+  will-change: opacity, transform;
+}
+
+/* Optimized scrolling for panels */
+.jp-history-viewer,
+.jp-comment-list,
+.jp-permission-content {
+  -webkit-overflow-scrolling: touch;
+  contain: layout style paint;
+}
+
+/* Contain property for performance */
+.jp-collaboration-bar,
+.jp-comment-panel,
+.jp-history-viewer,
+.jp-permission-dialog {
+  contain: layout style paint;
+}

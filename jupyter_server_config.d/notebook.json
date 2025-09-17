@@ -1,0 +1,19 @@
+{
+  "ServerApp": {
+    "jpserver_extensions": {
+      "notebook": true
+    }
+  },
+  "NotebookApp": {
+    "collaboration_enabled": false,
+    "collaboration_server_url": "ws://localhost:8888/api/collaboration/ws",
+    "collaboration_room_prefix": "notebook:",
+    "collaboration_awareness_timeout": 30000,
+    "collaboration_lock_timeout": 60000,
+    "collaboration_history_enabled": true,
+    "collaboration_permissions_enabled": true,
+    "collaboration_comments_enabled": true,
+    "collaboration_max_users": 50,
+    "collaboration_log_level": "INFO"
+  }
+}

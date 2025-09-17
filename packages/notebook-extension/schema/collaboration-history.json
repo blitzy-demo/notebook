@@ -1,0 +1,49 @@
+{
+  "jupyter.lab.setting-icon": "notebook-ui-components:jupyter",
+  "jupyter.lab.setting-icon-label": "Jupyter Notebook Collaboration History",
+  "title": "Jupyter Notebook Collaboration History",
+  "description": "History retention and versioning settings for collaborative editing. Controls snapshot creation, retention policies, and diff visualization modes for tracking changes across collaborative notebook sessions.",
+  "properties": {
+    "maxHistorySnapshots": {
+      "type": "number",
+      "title": "Maximum History Snapshots",
+      "description": "Maximum number of history snapshots to retain per notebook. Older snapshots will be automatically deleted when this limit is reached.",
+      "default": 100,
+      "minimum": 10,
+      "maximum": 1000
+    },
+    "historyRetentionDays": {
+      "type": "number",
+      "title": "History Retention Days",
+      "description": "Number of days to keep history snapshots before automatic deletion. This setting helps manage storage usage by cleaning up old version history.",
+      "default": 30,
+      "minimum": 1,
+      "maximum": 365
+    },
+    "enableAutoSnapshot": {
+      "type": "boolean",
+      "title": "Enable Automatic Snapshots",
+      "description": "Automatically create snapshots during collaborative editing sessions. When enabled, significant changes will trigger snapshot creation for version tracking.",
+      "default": true
+    },
+    "snapshotOnSave": {
+      "type": "boolean",
+      "title": "Snapshot on Save",
+      "description": "Create a history snapshot every time the notebook is saved. This ensures version tracking at key persistence points.",
+      "default": true
+    },
+    "diffVisualizationMode": {
+      "type": "string",
+      "title": "Diff Visualization Mode",
+      "description": "How to display differences when comparing versions in the history viewer. Affects the visual layout and presentation of changes.",
+      "default": "inline",
+      "enum": [
+        "inline",
+        "sideBySide",
+        "unified"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "type": "object"
+}

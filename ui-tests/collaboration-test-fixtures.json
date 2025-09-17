@@ -1,0 +1,954 @@
+{
+  "version": "1.0.0",
+  "description": "Test data and fixtures for Jupyter Notebook v7 collaborative editing scenarios",
+  "generatedBy": "Blitzy Software Architecture Agent",
+  "lastUpdated": "2024-01-01",
+
+  "userProfiles": {
+    "description": "Predefined user profiles for multi-user collaboration test scenarios",
+    "users": [
+      {
+        "id": "user_alice",
+        "name": "Alice Cooper",
+        "displayName": "Alice",
+        "email": "alice@example.com",
+        "avatar": {
+          "color": "#FF6B6B",
+          "initials": "AC",
+          "imageUrl": null
+        },
+        "cursorColor": "#FF6B6B",
+        "selectionColor": "#FF6B6B33",
+        "role": "edit",
+        "preferences": {
+          "presenceTimeout": 30000,
+          "autoLockTimeout": 120000
+        }
+      },
+      {
+        "id": "user_bob",
+        "name": "Bob Smith",
+        "displayName": "Bob",
+        "email": "bob@example.com",
+        "avatar": {
+          "color": "#4ECDC4",
+          "initials": "BS",
+          "imageUrl": null
+        },
+        "cursorColor": "#4ECDC4",
+        "selectionColor": "#4ECDC433",
+        "role": "edit",
+        "preferences": {
+          "presenceTimeout": 30000,
+          "autoLockTimeout": 120000
+        }
+      },
+      {
+        "id": "user_charlie",
+        "name": "Charlie Brown",
+        "displayName": "Charlie",
+        "email": "charlie@example.com",
+        "avatar": {
+          "color": "#45B7D1",
+          "initials": "CB",
+          "imageUrl": null
+        },
+        "cursorColor": "#45B7D1",
+        "selectionColor": "#45B7D133",
+        "role": "view",
+        "preferences": {
+          "presenceTimeout": 30000,
+          "autoLockTimeout": 120000
+        }
+      },
+      {
+        "id": "user_diana",
+        "name": "Diana Prince",
+        "displayName": "Diana",
+        "email": "diana@example.com",
+        "avatar": {
+          "color": "#96CEB4",
+          "initials": "DP",
+          "imageUrl": null
+        },
+        "cursorColor": "#96CEB4",
+        "selectionColor": "#96CEB433",
+        "role": "admin",
+        "preferences": {
+          "presenceTimeout": 45000,
+          "autoLockTimeout": 180000
+        }
+      },
+      {
+        "id": "user_eve",
+        "name": "Eve Johnson",
+        "displayName": "Eve",
+        "email": "eve@example.com",
+        "avatar": {
+          "color": "#FFEAA7",
+          "initials": "EJ",
+          "imageUrl": null
+        },
+        "cursorColor": "#FFEAA7",
+        "selectionColor": "#FFEAA733",
+        "role": "edit",
+        "preferences": {
+          "presenceTimeout": 30000,
+          "autoLockTimeout": 120000
+        }
+      },
+      {
+        "id": "user_frank",
+        "name": "Frank Miller",
+        "displayName": "Frank",
+        "email": "frank@example.com",
+        "avatar": {
+          "color": "#DDA0DD",
+          "initials": "FM",
+          "imageUrl": null
+        },
+        "cursorColor": "#DDA0DD",
+        "selectionColor": "#DDA0DD33",
+        "role": "edit",
+        "preferences": {
+          "presenceTimeout": 30000,
+          "autoLockTimeout": 120000
+        }
+      }
+    ]
+  },
+
+  "testNotebookStates": {
+    "description": "Predefined notebook states for various collaboration testing scenarios",
+    "simple": {
+      "name": "Simple Test Notebook",
+      "path": "collaborative-test.ipynb",
+      "cells": [
+        {
+          "id": "cell_001",
+          "cell_type": "markdown",
+          "metadata": {},
+          "source": [
+            "# Collaboration Test Notebook\n",
+            "\n",
+            "This notebook is used for testing collaborative editing features."
+          ]
+        },
+        {
+          "id": "cell_002",
+          "cell_type": "code",
+          "execution_count": null,
+          "metadata": {},
+          "outputs": [],
+          "source": [
+            "# Initial code cell for collaboration testing\n",
+            "print(\"Hello, collaborative world!\")"
+          ]
+        }
+      ],
+      "metadata": {
+        "kernelspec": {
+          "display_name": "Python 3 (ipykernel)",
+          "language": "python",
+          "name": "python3"
+        },
+        "language_info": {
+          "name": "python"
+        }
+      },
+      "nbformat": 4,
+      "nbformat_minor": 2
+    },
+
+    "multiCell": {
+      "name": "Multi-Cell Collaboration Test",
+      "path": "multi-cell-collab.ipynb",
+      "cells": [
+        {
+          "id": "cell_101",
+          "cell_type": "markdown",
+          "metadata": {},
+          "source": [
+            "# Multi-Cell Collaboration Test\n",
+            "\n",
+            "Testing concurrent edits across multiple cells."
+          ]
+        },
+        {
+          "id": "cell_102",
+          "cell_type": "code",
+          "execution_count": null,
+          "metadata": {},
+          "outputs": [],
+          "source": [
+            "# Data import cell\n",
+            "import pandas as pd\n",
+            "import numpy as np"
+          ]
+        },
+        {
+          "id": "cell_103",
+          "cell_type": "code",
+          "execution_count": null,
+          "metadata": {},
+          "outputs": [],
+          "source": [
+            "# Data processing cell\n",
+            "data = pd.DataFrame({\n",
+            "    'x': np.random.randn(100),\n",
+            "    'y': np.random.randn(100)\n",
+            "})"
+          ]
+        },
+        {
+          "id": "cell_104",
+          "cell_type": "code",
+          "execution_count": null,
+          "metadata": {},
+          "outputs": [],
+          "source": [
+            "# Visualization cell\n",
+            "import matplotlib.pyplot as plt\n",
+            "\n",
+            "plt.scatter(data['x'], data['y'])\n",
+            "plt.xlabel('X values')\n",
+            "plt.ylabel('Y values') \n",
+            "plt.title('Collaborative Data Visualization')\n",
+            "plt.show()"
+          ]
+        }
+      ],
+      "metadata": {
+        "kernelspec": {
+          "display_name": "Python 3 (ipykernel)",
+          "language": "python",
+          "name": "python3"
+        },
+        "language_info": {
+          "name": "python"
+        }
+      },
+      "nbformat": 4,
+      "nbformat_minor": 2
+    }
+  },
+
+  "yjsDocumentStates": {
+    "description": "Predefined Yjs document states for consistency and conflict resolution testing",
+    "initialEmpty": {
+      "description": "Empty Y.Doc state for starting fresh collaboration sessions",
+      "documentId": "test_doc_001",
+      "cells": [],
+      "metadata": {},
+      "stateVector": [],
+      "updateHistory": []
+    },
+
+    "singleCellState": {
+      "description": "Y.Doc with one cell for basic synchronization testing",
+      "documentId": "test_doc_002",
+      "cells": [
+        {
+          "id": "yjs_cell_001",
+          "type": "code",
+          "source": "print('Hello from Yjs')",
+          "metadata": {},
+          "yTextLength": 22
+        }
+      ],
+      "metadata": {
+        "collaborativeSession": true,
+        "activeUsers": []
+      },
+      "stateVector": [1, 0, 0],
+      "updateHistory": [
+        {
+          "timestamp": 1640995200000,
+          "userId": "user_alice",
+          "operation": "insertCell",
+          "cellId": "yjs_cell_001"
+        }
+      ]
+    },
+
+    "conflictResolutionState": {
+      "description": "Y.Doc state designed to trigger merge conflicts for testing CRDT behavior",
+      "documentId": "test_doc_003",
+      "cells": [
+        {
+          "id": "conflict_cell_001",
+          "type": "code",
+          "source": "# This cell will be edited by multiple users simultaneously",
+          "metadata": {},
+          "yTextLength": 58,
+          "pendingOperations": [
+            {
+              "userId": "user_alice",
+              "operation": "insert",
+              "position": 58,
+              "content": "\nprint('Alice was here')"
+            },
+            {
+              "userId": "user_bob",
+              "operation": "insert",
+              "position": 58,
+              "content": "\nprint('Bob was here')"
+            }
+          ]
+        }
+      ],
+      "metadata": {
+        "collaborativeSession": true,
+        "activeUsers": ["user_alice", "user_bob"]
+      },
+      "stateVector": [2, 1, 1],
+      "updateHistory": [
+        {
+          "timestamp": 1640995200000,
+          "userId": "user_alice",
+          "operation": "insertCell",
+          "cellId": "conflict_cell_001"
+        },
+        {
+          "timestamp": 1640995201000,
+          "userId": "user_alice",
+          "operation": "insertText",
+          "cellId": "conflict_cell_001",
+          "position": 58,
+          "content": "\nprint('Alice was here')"
+        },
+        {
+          "timestamp": 1640995201050,
+          "userId": "user_bob",
+          "operation": "insertText",
+          "cellId": "conflict_cell_001",
+          "position": 58,
+          "content": "\nprint('Bob was here')"
+        }
+      ]
+    }
+  },
+
+  "cellContentPatterns": {
+    "description": "Predefined cell content patterns for testing various collaborative editing scenarios",
+    "codePatterns": [
+      {
+        "id": "pattern_import",
+        "description": "Standard import statements for data science",
+        "content": "import pandas as pd\nimport numpy as np\nimport matplotlib.pyplot as plt",
+        "language": "python",
+        "expectedConflicts": "low"
+      },
+      {
+        "id": "pattern_function_def",
+        "description": "Function definition that multiple users might modify",
+        "content": "def process_data(data):\n    # TODO: Implement data processing\n    return data",
+        "language": "python",
+        "expectedConflicts": "high"
+      },
+      {
+        "id": "pattern_long_text",
+        "description": "Long text content for testing performance with large cells",
+        "content": "# This is a long comment that spans multiple lines\n# and contains enough text to test performance\n# with collaborative editing of large text blocks.\n# Line 4\n# Line 5\n# Line 6\n# Line 7\n# Line 8\n# Line 9\n# Line 10",
+        "language": "python",
+        "expectedConflicts": "medium"
+      },
+      {
+        "id": "pattern_json_data",
+        "description": "JSON data structure for testing structured content editing",
+        "content": "data = {\n    'name': 'Test Dataset',\n    'version': '1.0',\n    'records': [],\n    'metadata': {\n        'created_by': 'collaborative_test',\n        'timestamp': '2024-01-01T00:00:00Z'\n    }\n}",
+        "language": "python",
+        "expectedConflicts": "medium"
+      }
+    ],
+
+    "markdownPatterns": [
+      {
+        "id": "pattern_heading",
+        "description": "Markdown heading for testing markdown collaboration",
+        "content": "# Main Heading\n\n## Subheading\n\nThis is a paragraph that multiple users might edit.",
+        "expectedConflicts": "low"
+      },
+      {
+        "id": "pattern_list",
+        "description": "Markdown list that users might modify concurrently",
+        "content": "## Todo List\n\n- [ ] Task 1\n- [ ] Task 2\n- [x] Completed task\n- [ ] Task 4",
+        "expectedConflicts": "high"
+      },
+      {
+        "id": "pattern_table",
+        "description": "Markdown table for testing structured content",
+        "content": "| Feature | Status | Priority |\n|---------|---------|----------|\n| Real-time sync | In Progress | High |\n| User presence | Planned | Medium |\n| Permissions | Planned | High |",
+        "expectedConflicts": "medium"
+      }
+    ]
+  },
+
+  "lockAcquisitionPatterns": {
+    "description": "Test patterns for distributed cell locking mechanisms",
+    "scenarios": [
+      {
+        "id": "sequential_locking",
+        "description": "Sequential lock acquisition by different users",
+        "pattern": [
+          {
+            "timestamp": 0,
+            "userId": "user_alice",
+            "action": "acquireLock",
+            "cellId": "cell_001",
+            "expectedResult": "success"
+          },
+          {
+            "timestamp": 1000,
+            "userId": "user_alice",
+            "action": "releaseLock",
+            "cellId": "cell_001",
+            "expectedResult": "success"
+          },
+          {
+            "timestamp": 1100,
+            "userId": "user_bob",
+            "action": "acquireLock",
+            "cellId": "cell_001",
+            "expectedResult": "success"
+          }
+        ]
+      },
+
+      {
+        "id": "concurrent_locking",
+        "description": "Concurrent lock acquisition attempts",
+        "pattern": [
+          {
+            "timestamp": 0,
+            "userId": "user_alice",
+            "action": "acquireLock",
+            "cellId": "cell_001",
+            "expectedResult": "success"
+          },
+          {
+            "timestamp": 50,
+            "userId": "user_bob",
+            "action": "acquireLock",
+            "cellId": "cell_001",
+            "expectedResult": "conflict"
+          },
+          {
+            "timestamp": 100,
+            "userId": "user_charlie",
+            "action": "acquireLock",
+            "cellId": "cell_001",
+            "expectedResult": "conflict"
+          }
+        ]
+      },
+
+      {
+        "id": "timeout_scenario",
+        "description": "Lock timeout and automatic release testing",
+        "pattern": [
+          {
+            "timestamp": 0,
+            "userId": "user_alice",
+            "action": "acquireLock",
+            "cellId": "cell_001",
+            "expectedResult": "success"
+          },
+          {
+            "timestamp": 60000,
+            "userId": "system",
+            "action": "checkTimeout",
+            "cellId": "cell_001",
+            "expectedResult": "timeout_warning"
+          },
+          {
+            "timestamp": 120000,
+            "userId": "system",
+            "action": "autoRelease",
+            "cellId": "cell_001",
+            "expectedResult": "lock_released"
+          },
+          {
+            "timestamp": 120100,
+            "userId": "user_bob",
+            "action": "acquireLock",
+            "cellId": "cell_001",
+            "expectedResult": "success"
+          }
+        ]
+      }
+    ],
+
+    "timeoutValues": {
+      "autoLockTimeout": 120000,
+      "lockWarningThreshold": 60000,
+      "lockCheckInterval": 5000,
+      "maxLockDuration": 600000
+    }
+  },
+
+  "permissionRoles": {
+    "description": "Role-based access control scenarios for collaboration testing",
+    "roles": [
+      {
+        "name": "view",
+        "displayName": "View Only",
+        "permissions": {
+          "canView": true,
+          "canEdit": false,
+          "canExecute": false,
+          "canComment": true,
+          "canManagePermissions": false,
+          "canViewHistory": true
+        },
+        "ui_restrictions": {
+          "cellEditingDisabled": true,
+          "addCellDisabled": true,
+          "deleteCellDisabled": true,
+          "kernelOperationsDisabled": true
+        }
+      },
+      {
+        "name": "edit",
+        "displayName": "Editor",
+        "permissions": {
+          "canView": true,
+          "canEdit": true,
+          "canExecute": true,
+          "canComment": true,
+          "canManagePermissions": false,
+          "canViewHistory": true
+        },
+        "ui_restrictions": {
+          "cellEditingDisabled": false,
+          "addCellDisabled": false,
+          "deleteCellDisabled": false,
+          "kernelOperationsDisabled": false
+        }
+      },
+      {
+        "name": "admin",
+        "displayName": "Administrator",
+        "permissions": {
+          "canView": true,
+          "canEdit": true,
+          "canExecute": true,
+          "canComment": true,
+          "canManagePermissions": true,
+          "canViewHistory": true
+        },
+        "ui_restrictions": {
+          "cellEditingDisabled": false,
+          "addCellDisabled": false,
+          "deleteCellDisabled": false,
+          "kernelOperationsDisabled": false
+        }
+      }
+    ],
+
+    "accessControlScenarios": [
+      {
+        "id": "mixed_permissions",
+        "description": "Testing collaboration with mixed permission levels",
+        "users": [
+          {"userId": "user_alice", "role": "admin"},
+          {"userId": "user_bob", "role": "edit"},
+          {"userId": "user_charlie", "role": "view"}
+        ],
+        "expectedBehaviors": [
+          {
+            "action": "editCell",
+            "user": "user_alice",
+            "expected": "success"
+          },
+          {
+            "action": "editCell",
+            "user": "user_bob",
+            "expected": "success"
+          },
+          {
+            "action": "editCell",
+            "user": "user_charlie",
+            "expected": "denied"
+          },
+          {
+            "action": "managePermissions",
+            "user": "user_alice",
+            "expected": "success"
+          },
+          {
+            "action": "managePermissions",
+            "user": "user_bob",
+            "expected": "denied"
+          }
+        ]
+      }
+    ]
+  },
+
+  "commentThreads": {
+    "description": "Predefined comment and review workflow test data",
+    "threads": [
+      {
+        "id": "thread_001",
+        "cellId": "cell_001",
+        "anchorType": "cell",
+        "status": "open",
+        "comments": [
+          {
+            "id": "comment_001",
+            "userId": "user_alice",
+            "timestamp": 1640995200000,
+            "content": "This cell needs better error handling. What happens if the input data is malformed?",
+            "type": "suggestion"
+          },
+          {
+            "id": "comment_002",
+            "userId": "user_bob",
+            "timestamp": 1640995260000,
+            "content": "Good point! I'll add try-catch blocks and input validation.",
+            "type": "response",
+            "replyTo": "comment_001"
+          },
+          {
+            "id": "comment_003",
+            "userId": "user_alice",
+            "timestamp": 1640995320000,
+            "content": "Thanks! Also consider logging the errors for debugging.",
+            "type": "suggestion",
+            "replyTo": "comment_002"
+          }
+        ]
+      },
+
+      {
+        "id": "thread_002",
+        "cellId": "cell_002",
+        "anchorType": "line",
+        "anchorPosition": 5,
+        "status": "resolved",
+        "comments": [
+          {
+            "id": "comment_004",
+            "userId": "user_diana",
+            "timestamp": 1640995400000,
+            "content": "This variable name could be more descriptive. What about 'user_data_frame'?",
+            "type": "suggestion"
+          },
+          {
+            "id": "comment_005",
+            "userId": "user_bob",
+            "timestamp": 1640995460000,
+            "content": "Changed to 'user_data_frame' as suggested. Thanks!",
+            "type": "response",
+            "replyTo": "comment_004"
+          },
+          {
+            "id": "comment_006",
+            "userId": "user_diana",
+            "timestamp": 1640995520000,
+            "content": "Perfect! Resolving this thread.",
+            "type": "resolution",
+            "replyTo": "comment_005"
+          }
+        ],
+        "resolvedBy": "user_diana",
+        "resolvedAt": 1640995520000
+      },
+
+      {
+        "id": "thread_003",
+        "cellId": "cell_003",
+        "anchorType": "selection",
+        "anchorPosition": {"start": 10, "end": 25},
+        "status": "open",
+        "comments": [
+          {
+            "id": "comment_007",
+            "userId": "user_eve",
+            "timestamp": 1640995600000,
+            "content": "This function looks complex. Should we break it into smaller functions?",
+            "type": "question"
+          }
+        ]
+      }
+    ],
+
+    "reviewWorkflows": [
+      {
+        "id": "peer_review",
+        "description": "Standard peer review workflow for collaborative notebooks",
+        "steps": [
+          {
+            "stage": "draft",
+            "requiredActions": ["initial_edit", "self_review"],
+            "allowedRoles": ["edit", "admin"]
+          },
+          {
+            "stage": "review_requested",
+            "requiredActions": ["peer_review", "comment_resolution"],
+            "allowedRoles": ["edit", "admin"]
+          },
+          {
+            "stage": "changes_requested",
+            "requiredActions": ["address_comments", "re_review"],
+            "allowedRoles": ["edit", "admin"]
+          },
+          {
+            "stage": "approved",
+            "requiredActions": ["final_approval"],
+            "allowedRoles": ["admin"]
+          }
+        ]
+      }
+    ]
+  },
+
+  "performanceBenchmarks": {
+    "description": "Performance benchmark parameters and thresholds for collaboration testing",
+    "latencyThresholds": {
+      "editRoundTrip": {
+        "target": 100,
+        "unit": "ms",
+        "percentile": 95,
+        "description": "Maximum acceptable latency for edit synchronization"
+      },
+      "presenceUpdate": {
+        "target": 50,
+        "unit": "ms",
+        "percentile": 90,
+        "description": "Maximum latency for presence information updates"
+      },
+      "lockAcquisition": {
+        "target": 200,
+        "unit": "ms",
+        "percentile": 95,
+        "description": "Maximum time to acquire cell lock"
+      },
+      "commentSync": {
+        "target": 150,
+        "unit": "ms",
+        "percentile": 95,
+        "description": "Maximum latency for comment synchronization"
+      }
+    },
+
+    "memoryThresholds": {
+      "baselineIncrease": {
+        "target": 20,
+        "unit": "percent",
+        "description": "Maximum memory usage increase during collaboration"
+      },
+      "perUserOverhead": {
+        "target": 5,
+        "unit": "MB",
+        "description": "Maximum memory overhead per collaborative user"
+      }
+    },
+
+    "concurrentUserLimits": {
+      "minimumSupported": 10,
+      "recommendedMax": 25,
+      "stressTestTarget": 50,
+      "description": "Number of concurrent users for performance testing"
+    },
+
+    "testScenarios": [
+      {
+        "name": "single_user_baseline",
+        "description": "Single user editing for baseline performance measurement",
+        "users": 1,
+        "duration": 300,
+        "operations": ["edit_cell", "add_cell", "delete_cell", "execute_cell"]
+      },
+      {
+        "name": "dual_user_collaboration",
+        "description": "Two users collaborating on same notebook",
+        "users": 2,
+        "duration": 600,
+        "operations": ["concurrent_edit", "sequential_edit", "comment_thread"]
+      },
+      {
+        "name": "multi_user_active",
+        "description": "Multiple active users (10+) collaborative editing",
+        "users": 10,
+        "duration": 900,
+        "operations": ["distributed_editing", "presence_tracking", "lock_contention"]
+      },
+      {
+        "name": "stress_test",
+        "description": "High-load stress testing with maximum supported users",
+        "users": 50,
+        "duration": 1200,
+        "operations": ["high_frequency_edits", "rapid_user_join_leave", "lock_thrashing"]
+      }
+    ],
+
+    "networkConditions": [
+      {
+        "name": "ideal",
+        "description": "Ideal network conditions for baseline testing",
+        "latency": 10,
+        "bandwidth": "100mbps",
+        "packetLoss": 0
+      },
+      {
+        "name": "typical_broadband",
+        "description": "Typical broadband connection",
+        "latency": 50,
+        "bandwidth": "25mbps",
+        "packetLoss": 0.1
+      },
+      {
+        "name": "mobile_3g",
+        "description": "Mobile 3G connection for testing low-bandwidth scenarios",
+        "latency": 200,
+        "bandwidth": "1mbps",
+        "packetLoss": 1.0
+      },
+      {
+        "name": "unstable_connection",
+        "description": "Unstable connection with intermittent issues",
+        "latency": 100,
+        "bandwidth": "10mbps",
+        "packetLoss": 5.0
+      }
+    ]
+  },
+
+  "websocketProtocols": {
+    "description": "WebSocket message protocols and patterns for Yjs synchronization testing",
+    "messageTypes": [
+      {
+        "type": "sync",
+        "description": "Document synchronization message",
+        "structure": {
+          "type": "sync",
+          "documentId": "string",
+          "update": "Uint8Array",
+          "timestamp": "number"
+        },
+        "example": {
+          "type": "sync",
+          "documentId": "test_notebook_001",
+          "update": [1, 2, 3, 4, 5],
+          "timestamp": 1640995200000
+        }
+      },
+      {
+        "type": "awareness",
+        "description": "User presence and awareness information",
+        "structure": {
+          "type": "awareness",
+          "states": "Map<userId, AwarenessState>",
+          "timestamp": "number"
+        },
+        "example": {
+          "type": "awareness",
+          "states": {
+            "user_alice": {
+              "user": {"name": "Alice Cooper", "color": "#FF6B6B"},
+              "cursor": {"cellId": "cell_001", "position": 10},
+              "selection": {"cellId": "cell_001", "start": 5, "end": 15}
+            }
+          },
+          "timestamp": 1640995200000
+        }
+      },
+      {
+        "type": "lock",
+        "description": "Cell locking protocol message",
+        "structure": {
+          "type": "lock",
+          "action": "string",
+          "cellId": "string",
+          "userId": "string",
+          "timestamp": "number"
+        },
+        "example": {
+          "type": "lock",
+          "action": "acquire",
+          "cellId": "cell_001",
+          "userId": "user_alice",
+          "timestamp": 1640995200000
+        }
+      }
+    ],
+
+    "connectionPatterns": [
+      {
+        "name": "clean_connect_disconnect",
+        "description": "Normal connection lifecycle",
+        "sequence": [
+          {"event": "connect", "timestamp": 0},
+          {"event": "authenticate", "timestamp": 100},
+          {"event": "join_document", "timestamp": 200},
+          {"event": "sync_initial_state", "timestamp": 300},
+          {"event": "normal_operation", "duration": 60000},
+          {"event": "disconnect_graceful", "timestamp": 60500}
+        ]
+      },
+      {
+        "name": "reconnection_scenario",
+        "description": "Network interruption and reconnection handling",
+        "sequence": [
+          {"event": "connect", "timestamp": 0},
+          {"event": "normal_operation", "duration": 30000},
+          {"event": "network_interruption", "timestamp": 30000},
+          {"event": "reconnect_attempt", "timestamp": 35000},
+          {"event": "state_recovery", "timestamp": 35500},
+          {"event": "resume_operation", "timestamp": 36000}
+        ]
+      }
+    ]
+  },
+
+  "testDataGeneration": {
+    "description": "Utilities and patterns for generating dynamic test data",
+    "cellContentGenerators": [
+      {
+        "type": "code_cell",
+        "templates": [
+          "import {library}\n{library_usage}",
+          "def {function_name}({parameters}):\n    {function_body}\n    return {return_value}",
+          "# {comment}\n{code_block}",
+          "{variable} = {value}\nprint({variable})"
+        ],
+        "variables": {
+          "library": ["pandas", "numpy", "matplotlib.pyplot", "seaborn", "scipy"],
+          "function_name": ["process_data", "analyze_results", "create_visualization", "load_dataset"],
+          "parameters": ["data", "filename", "options", "config"],
+          "comment": ["TODO: Implement this function", "Data processing step", "Analysis section", "Visualization code"]
+        }
+      },
+      {
+        "type": "markdown_cell",
+        "templates": [
+          "# {title}\n\n{description}\n\n## {subtitle}\n\n{content}",
+          "**{emphasis}**: {explanation}\n\n- {list_item_1}\n- {list_item_2}\n- {list_item_3}",
+          "```{language}\n{code_example}\n```\n\n{code_explanation}"
+        ],
+        "variables": {
+          "title": ["Data Analysis", "Results Summary", "Methodology", "Conclusions"],
+          "subtitle": ["Overview", "Details", "Examples", "Next Steps"],
+          "language": ["python", "sql", "bash", "javascript"]
+        }
+      }
+    ],
+
+    "userActionSequences": [
+      {
+        "name": "typical_editing_session",
+        "description": "Common user interaction patterns during collaborative editing",
+        "actions": [
+          {"action": "join_session", "probability": 1.0, "duration": 1000},
+          {"action": "browse_cells", "probability": 0.9, "duration": 5000},
+          {"action": "edit_cell", "probability": 0.8, "duration": 30000},
+          {"action": "add_comment", "probability": 0.3, "duration": 10000},
+          {"action": "execute_cell", "probability": 0.6, "duration": 2000},
+          {"action": "add_cell", "probability": 0.4, "duration": 5000}
+        ]
+      }
+    ]
+  }
+}

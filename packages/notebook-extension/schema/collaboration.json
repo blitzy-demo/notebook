@@ -1,0 +1,135 @@
+{
+  "jupyter.lab.setting-icon": "notebook-ui-components:jupyter",
+  "jupyter.lab.setting-icon-label": "Jupyter Notebook Collaboration",
+  "title": "Jupyter Notebook Collaboration",
+  "description": "Real-time collaborative editing settings for Jupyter Notebook",
+  "jupyter.lab.menus": {
+    "main": [
+      {
+        "id": "jp-mainmenu-view",
+        "items": [
+          {
+            "type": "submenu",
+            "submenu": {
+              "id": "jp-collaboration-submenu",
+              "label": "Collaboration",
+              "items": [
+                {
+                  "command": "collaboration:toggle",
+                  "rank": 10
+                },
+                {
+                  "type": "separator",
+                  "rank": 20
+                },
+                {
+                  "command": "collaboration:show-history",
+                  "rank": 30
+                },
+                {
+                  "command": "collaboration:manage-permissions",
+                  "rank": 40
+                },
+                {
+                  "type": "separator",
+                  "rank": 50
+                },
+                {
+                  "command": "collaboration:show-presence",
+                  "rank": 60
+                }
+              ]
+            },
+            "rank": 35
+          }
+        ]
+      }
+    ]
+  },
+  "properties": {
+    "collaborationEnabled": {
+      "type": "boolean",
+      "title": "Enable Collaboration",
+      "description": "Enable real-time collaborative editing for notebooks. When enabled, multiple users can simultaneously edit the same notebook with live synchronization of changes, user presence awareness, and intelligent conflict resolution.",
+      "default": false
+    },
+    "presenceTimeout": {
+      "type": "number",
+      "title": "Presence Timeout (ms)",
+      "description": "Time in milliseconds before marking a user as inactive in collaborative sessions. Users who don't interact with the notebook for this duration will be shown as idle to other collaborators.",
+      "default": 30000,
+      "minimum": 5000,
+      "maximum": 300000
+    },
+    "autoLockTimeout": {
+      "type": "number",
+      "title": "Auto Lock Timeout (ms)",
+      "description": "Time in milliseconds before automatically releasing cell locks. If a user holds a cell lock for this duration without activity, the lock will be automatically released to prevent blocking other users.",
+      "default": 120000,
+      "minimum": 10000,
+      "maximum": 600000
+    },
+    "historySnapshotInterval": {
+      "type": "number",
+      "title": "History Snapshot Interval (seconds)",
+      "description": "Interval in seconds between automatic history snapshots for version tracking. More frequent snapshots provide finer-grained version history but may impact performance.",
+      "default": 300,
+      "minimum": 30,
+      "maximum": 3600
+    },
+    "defaultPermissionRole": {
+      "type": "string",
+      "title": "Default Permission Role",
+      "description": "Default permission level assigned to users joining new collaborative sessions. This can be overridden by administrators on a per-session basis.",
+      "default": "edit",
+      "enum": ["view", "edit", "admin"],
+      "enumLabels": [
+        "View Only - Read access and commenting only",
+        "Edit - Full editing capabilities with cell execution",
+        "Admin - Full control including permission management"
+      ]
+    },
+    "showPresenceIndicators": {
+      "type": "boolean",
+      "title": "Show Presence Indicators",
+      "description": "Display user presence indicators such as avatars, cursor positions, and selection highlights in the notebook interface during collaborative sessions.",
+      "default": true
+    },
+    "enableCellLocking": {
+      "type": "boolean",
+      "title": "Enable Cell Locking",
+      "description": "Enable automatic cell locking to prevent simultaneous edits. When enabled, cells are temporarily locked when a user begins editing to prevent conflicts.",
+      "default": true
+    },
+    "autoSaveInterval": {
+      "type": "number",
+      "title": "Auto Save Interval (seconds)",
+      "description": "Interval in seconds for automatic saving during collaborative sessions. More frequent saves ensure better data consistency but may increase server load.",
+      "default": 30,
+      "minimum": 5,
+      "maximum": 300
+    },
+    "maxConcurrentUsers": {
+      "type": "number",
+      "title": "Max Concurrent Users",
+      "description": "Maximum number of users allowed in a single collaborative session. Limiting concurrent users helps maintain performance and reduces complexity.",
+      "default": 10,
+      "minimum": 2,
+      "maximum": 50
+    },
+    "enableComments": {
+      "type": "boolean",
+      "title": "Enable Comments",
+      "description": "Enable collaborative commenting system allowing users to leave comments on cells for discussion and review purposes.",
+      "default": true
+    },
+    "commentNotifications": {
+      "type": "boolean",
+      "title": "Comment Notifications",
+      "description": "Show notifications when new comments are added or when you are mentioned in comments during collaborative sessions.",
+      "default": true
+    }
+  },
+  "additionalProperties": false,
+  "type": "object"
+}

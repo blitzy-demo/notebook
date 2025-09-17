@@ -1,0 +1,292 @@
+/*
+ * CSS Custom Properties for Collaboration UI Components
+ *
+ * This file defines design tokens and CSS variables for all collaborative
+ * editing features in Jupyter Notebook v7. Variables follow the JupyterLab
+ * theming convention using CSS custom properties on the :root selector.
+ *
+ * Design specifications are based on:
+ * - Section 7.8.5.1: User Presence Indicators
+ * - Section 7.8.5.2: Cell Lock Visual Indicators
+ * - Section 7.8.5.3: Diff Highlighting System
+ * - Section 7.8.5.4: Collaboration Performance Constraints
+ */
+
+:root {
+  /*
+   * =================================================================
+   * USER PRESENCE INDICATORS
+   * Section 7.8.5.1 - Avatar and presence bar styling
+   * =================================================================
+   */
+
+  /* Avatar Dimensions - Fixed 24px × 24px for consistent layout */
+  --jp-collab-avatar-size: 24px;
+  --jp-collab-avatar-width: var(--jp-collab-avatar-size);
+  --jp-collab-avatar-height: var(--jp-collab-avatar-size);
+  --jp-collab-avatar-border-radius: 50%;
+
+  /* Avatar Borders - 2px high-contrast for accessibility (WCAG AA) */
+  --jp-collab-avatar-border-width: 2px;
+  --jp-collab-avatar-border-style: solid;
+  --jp-collab-avatar-border-color-light: var(--jp-border-color0, #000000);
+  --jp-collab-avatar-border-color-dark: var(
+    --jp-ui-inverse-font-color0,
+    #ffffff
+  );
+
+  /* Presence Bar Layout */
+  --jp-collab-presence-bar-height: 32px;
+  --jp-collab-presence-bar-padding: 4px 8px;
+  --jp-collab-presence-bar-gap: 4px;
+  --jp-collab-presence-max-visible-avatars: 8;
+
+  /* Overflow Badge Styling - For 8+ users */
+  --jp-collab-overflow-badge-background: var(--jp-layout-color2);
+  --jp-collab-overflow-badge-color: var(--jp-ui-font-color1);
+  --jp-collab-overflow-badge-font-size: 10px;
+  --jp-collab-overflow-badge-font-weight: 600;
+  --jp-collab-overflow-badge-border: 2px solid var(--jp-border-color1);
+
+  /* Presence Visual Hierarchy */
+  --jp-collab-active-user-opacity: 1;
+  --jp-collab-idle-user-opacity: 0.7;
+  --jp-collab-offline-user-opacity: 0.4;
+
+  /*
+   * =================================================================
+   * CELL LOCK INDICATORS
+   * Section 7.8.5.2 - Lock icon colors and positioning
+   * =================================================================
+   */
+
+  /* Lock Colors - High contrast, WCAG AA compliant */
+  --jp-collab-lock-self-color: #1976d2; /* Blue for self-locked cells */
+  --jp-collab-lock-other-color: #d32f2f; /* Red for other-locked cells */
+  --jp-collab-lock-available-color: transparent; /* No lock indicator */
+
+  /* Lock Icon Positioning - 8px offset from cell border */
+  --jp-collab-lock-icon-size: 14px;
+  --jp-collab-lock-icon-offset-left: 8px;
+  --jp-collab-lock-icon-position: absolute;
+  --jp-collab-lock-icon-opacity: 0.9;
+  --jp-collab-lock-icon-hover-opacity: 1;
+
+  /* Lock Tooltip Styling */
+  --jp-collab-lock-tooltip-background: var(--jp-layout-color0);
+  --jp-collab-lock-tooltip-color: var(--jp-ui-font-color1);
+  --jp-collab-lock-tooltip-font-size: 12px;
+  --jp-collab-lock-tooltip-padding: 4px 8px;
+  --jp-collab-lock-tooltip-border-radius: 4px;
+  --jp-collab-lock-tooltip-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+
+  /*
+   * =================================================================
+   * DIFF HIGHLIGHTING SYSTEM
+   * Section 7.8.5.3 - Version history and change visualization
+   * =================================================================
+   */
+
+  /* Addition Highlights - Light green with 4.8:1 contrast ratio */
+  --jp-collab-diff-added-background: #d4fcdc;
+  --jp-collab-diff-added-border-color: #4caf50;
+  --jp-collab-diff-added-border-width: 3px;
+  --jp-collab-diff-added-border-style: solid;
+  --jp-collab-diff-added-text-color: inherit;
+
+  /* Deletion Highlights - Light red with 4.9:1 contrast ratio */
+  --jp-collab-diff-removed-background: #ffecec;
+  --jp-collab-diff-removed-border-color: #f44336;
+  --jp-collab-diff-removed-border-width: 3px;
+  --jp-collab-diff-removed-border-style: solid;
+  --jp-collab-diff-removed-text-color: inherit;
+  --jp-collab-diff-removed-opacity: 0.8;
+  --jp-collab-diff-removed-text-decoration: line-through;
+
+  /* Diff Padding and Margins */
+  --jp-collab-diff-padding: 2px 4px;
+  --jp-collab-diff-margin: 0 1px;
+  --jp-collab-diff-border-radius: 2px;
+
+  /* Nested Change Indicators */
+  --jp-collab-diff-mixed-border: 2px dashed var(--jp-warn-color1);
+  --jp-collab-diff-conflict-background: var(--jp-error-color3);
+  --jp-collab-diff-conflict-border: 2px solid var(--jp-error-color1);
+
+  /*
+   * =================================================================
+   * COLLABORATION PERFORMANCE CONSTRAINTS
+   * Section 7.8.5.4 - Animation timing and hardware acceleration
+   * =================================================================
+   */
+
+  /* Animation Durations - 100ms frame budget compliance */
+  --jp-collab-transition-duration: 100ms;
+  --jp-collab-transition-timing: ease-out;
+  --jp-collab-animation-duration-fast: 50ms;
+  --jp-collab-animation-duration-normal: 100ms;
+  --jp-collab-animation-duration-slow: 200ms;
+
+  /* Performance-Optimized Properties - CSS-only transitions */
+  --jp-collab-transition-property: opacity;
+  --jp-collab-will-change: opacity;
+  --jp-collab-transform-gpu: translate3d(0, 0, 0);
+
+  /* Hover and Focus States */
+  --jp-collab-hover-opacity: 0.8;
+  --jp-collab-focus-opacity: 0.9;
+  --jp-collab-active-opacity: 1;
+  --jp-collab-disabled-opacity: 0.3;
+
+  /*
+   * =================================================================
+   * GENERAL COLLABORATION VARIABLES
+   * Common spacing, z-index layers, and utility properties
+   * =================================================================
+   */
+
+  /* Z-Index Layers - Ensuring proper stacking context */
+  --jp-collab-presence-z-index: 10;
+  --jp-collab-lock-indicator-z-index: 15;
+  --jp-collab-tooltip-z-index: 1000;
+  --jp-collab-modal-z-index: 1050;
+  --jp-collab-overlay-z-index: 1100;
+
+  /* Common Spacing Values */
+  --jp-collab-spacing-xs: 2px;
+  --jp-collab-spacing-sm: 4px;
+  --jp-collab-spacing-md: 8px;
+  --jp-collab-spacing-lg: 12px;
+  --jp-collab-spacing-xl: 16px;
+  --jp-collab-spacing-xxl: 24px;
+
+  /* Typography Adjustments */
+  --jp-collab-font-size-xs: 10px;
+  --jp-collab-font-size-sm: 11px;
+  --jp-collab-font-size-md: 12px;
+  --jp-collab-font-size-lg: 13px;
+  --jp-collab-font-weight-normal: 400;
+  --jp-collab-font-weight-medium: 500;
+  --jp-collab-font-weight-semibold: 600;
+  --jp-collab-font-weight-bold: 700;
+
+  /* Border Radius Values */
+  --jp-collab-border-radius-sm: 2px;
+  --jp-collab-border-radius-md: 4px;
+  --jp-collab-border-radius-lg: 6px;
+  --jp-collab-border-radius-circle: 50%;
+
+  /* Shadow Definitions */
+  --jp-collab-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --jp-collab-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.15);
+  --jp-collab-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.2);
+
+  /*
+   * =================================================================
+   * CURSOR AND SELECTION INDICATORS
+   * Real-time cursor positioning for collaborative editing
+   * =================================================================
+   */
+
+  /* Cursor Colors - Unique colors for different users */
+  --jp-collab-cursor-color-1: #1976d2; /* Blue */
+  --jp-collab-cursor-color-2: #d32f2f; /* Red */
+  --jp-collab-cursor-color-3: #388e3c; /* Green */
+  --jp-collab-cursor-color-4: #f57c00; /* Orange */
+  --jp-collab-cursor-color-5: #7b1fa2; /* Purple */
+  --jp-collab-cursor-color-6: #0097a7; /* Teal */
+  --jp-collab-cursor-color-7: #5d4037; /* Brown */
+  --jp-collab-cursor-color-8: #616161; /* Gray */
+
+  /* Cursor Visual Properties */
+  --jp-collab-cursor-width: 2px;
+  --jp-collab-cursor-height: 18px;
+  --jp-collab-cursor-border-radius: 1px;
+  --jp-collab-cursor-animation: blink 1s infinite;
+
+  /* Selection Highlight Properties */
+  --jp-collab-selection-opacity: 0.3;
+  --jp-collab-selection-border-width: 1px;
+  --jp-collab-selection-border-style: solid;
+  --jp-collab-selection-border-radius: 2px;
+
+  /* User Label Properties - Displayed above cursors */
+  --jp-collab-user-label-font-size: 10px;
+  --jp-collab-user-label-padding: 2px 4px;
+  --jp-collab-user-label-background: rgba(0, 0, 0, 0.8);
+  --jp-collab-user-label-color: white;
+  --jp-collab-user-label-border-radius: 2px;
+  --jp-collab-user-label-offset-y: -20px;
+}
+
+/*
+ * =================================================================
+ * DARK THEME OVERRIDES
+ * Adjustments for dark theme compatibility
+ * =================================================================
+ */
+[data-jp-theme-light='false'] {
+  /* Avatar borders in dark theme */
+  --jp-collab-avatar-border-color-light: var(
+    --jp-ui-inverse-font-color0,
+    #ffffff
+  );
+
+  /* Diff backgrounds in dark theme - adjusted for contrast */
+  --jp-collab-diff-added-background: rgba(76, 175, 80, 0.2);
+  --jp-collab-diff-removed-background: rgba(244, 67, 54, 0.2);
+
+  /* Lock tooltip in dark theme */
+  --jp-collab-lock-tooltip-background: var(--jp-layout-color2);
+  --jp-collab-lock-tooltip-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+
+  /* User labels in dark theme */
+  --jp-collab-user-label-background: rgba(255, 255, 255, 0.9);
+  --jp-collab-user-label-color: var(--jp-ui-font-color0);
+}
+
+/*
+ * =================================================================
+ * HIGH CONTRAST MODE SUPPORT
+ * Enhanced visibility for accessibility
+ * =================================================================
+ */
+@media (prefers-contrast: high) {
+  :root {
+    /* Increased contrast for lock indicators */
+    --jp-collab-lock-self-color: #0d47a1; /* Darker blue */
+    --jp-collab-lock-other-color: #b71c1c; /* Darker red */
+
+    /* Enhanced diff colors */
+    --jp-collab-diff-added-background: #c8f7c5; /* Higher contrast green */
+    --jp-collab-diff-removed-background: #ffcdd2; /* Higher contrast red */
+
+    /* Stronger borders */
+    --jp-collab-avatar-border-width: 3px;
+    --jp-collab-diff-added-border-width: 4px;
+    --jp-collab-diff-removed-border-width: 4px;
+
+    /* Reduced opacity ranges for better visibility */
+    --jp-collab-idle-user-opacity: 0.8;
+    --jp-collab-offline-user-opacity: 0.6;
+  }
+}
+
+/*
+ * =================================================================
+ * REDUCED MOTION SUPPORT
+ * Respects user preference for reduced animations
+ * =================================================================
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    /* Disable animations for motion-sensitive users */
+    --jp-collab-transition-duration: 0ms;
+    --jp-collab-animation-duration-fast: 0ms;
+    --jp-collab-animation-duration-normal: 0ms;
+    --jp-collab-animation-duration-slow: 0ms;
+
+    /* Remove cursor blinking */
+    --jp-collab-cursor-animation: none;
+  }
+}

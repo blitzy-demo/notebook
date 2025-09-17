@@ -12,7 +12,11 @@
     "test": "playwright test",
     "test:debug": "PWDEBUG=1 playwright test",
     "test:report": "http-server ./playwright-report -a localhost -o",
-    "test:update": "playwright test --update-snapshots"
+    "test:update": "playwright test --update-snapshots",
+    "test:collaboration": "playwright test --grep=@collaboration",
+    "test:collaboration:multi-user": "playwright test --grep=@multi-user --workers=1",
+    "test:collaboration:performance": "playwright test --grep=@performance --timeout=60000",
+    "test:collaboration:debug": "PWDEBUG=1 playwright test --grep=@collaboration"
   },
   "dependencies": {
     "@jupyterlab/galata": "~5.5.0-alpha.0",

@@ -32,10 +32,15 @@ from jupyterlab_server.config import (  # type:ignore[attr-defined]
 from jupyterlab_server.handlers import _camelCase, is_url
 from notebook_shim.shim import NotebookConfigShimMixin  # type:ignore[import-untyped]
 from tornado import web
-from traitlets import Bool, Unicode, default
+from traitlets import Bool, Float, Int, Unicode, default
 from traitlets.config.loader import Config
 
 from ._version import __version__
+from .handlers import (
+    CollaborationSessionsHandler,
+    CollaborationStatusHandler,
+    YjsWebSocketHandler,
+)
 
 HERE = Path(__file__).parent.resolve()
 
@@ -271,6 +276,57 @@ class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[
         """,
     )
 
+    collaboration_enabled = Bool(
+        False,
+        config=True,
+        help="""Enable collaborative editing features for notebooks.
+        When enabled, multiple users can simultaneously edit the same notebook
+        with real-time synchronization, user presence awareness, and conflict resolution.
+        """,
+    )
+
+    collaboration_server_url = Unicode(
+        "",
+        config=True,
+        help="""WebSocket endpoint URL for collaboration server.
+        If empty, uses the default /api/collaboration/ws endpoint.
+        For external collaboration servers, specify full WebSocket URL.
+        """,
+    )
+
+    collaboration_batch_window_ms = Float(
+        50.0,
+        config=True,
+        help="""Message batching window in milliseconds for collaboration updates.
+        Smaller values provide lower latency but higher network traffic.
+        Larger values improve bandwidth efficiency but increase latency.
+        """,
+    )
+
+    collaboration_max_connections = Int(
+        100,
+        config=True,
+        help="""Maximum number of concurrent collaborative connections per document.
+        Higher values support more users but increase memory usage.
+        """,
+    )
+
+    collaboration_lock_timeout_seconds = Int(
+        30,
+        config=True,
+        help="""Timeout in seconds for cell editing locks in collaborative mode.
+        Prevents indefinite locking when users disconnect unexpectedly.
+        """,
+    )
+
+    collaboration_message_size_limit = Int(
+        1048576,  # 1MB
+        config=True,
+        help="""Maximum WebSocket message size in bytes for collaboration updates.
+        Prevents memory exhaustion from oversized CRDT updates.
+        """,
+    )
+
     flags: Flags = flags  # type:ignore[assignment]
     flags["expose-app-in-browser"] = (
         {"JupyterNotebookApp": {"expose_app_in_browser": True}},
@@ -280,6 +336,11 @@ class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[
     flags["custom-css"] = (
         {"JupyterNotebookApp": {"custom_css": True}},
         "Load custom CSS in template html files. Default is True",
+    )
+
+    flags["collaborative"] = (
+        {"JupyterNotebookApp": {"collaboration_enabled": True}},
+        "Enable collaborative editing features with real-time synchronization.",
     )
 
     @default("static_dir")
@@ -326,12 +387,42 @@ class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[
             extension_enabled = False
         return extension_enabled
 
+    def _get_collaboration_settings(self) -> dict[str, t.Any]:
+        """
+        Get collaboration settings dictionary for WebSocket handlers.
+
+        Returns:
+            Dict containing collaboration configuration parameters
+        """
+        return {
+            "collaboration_enabled": self.collaboration_enabled,
+            "batch_window_ms": self.collaboration_batch_window_ms,
+            "max_connections": self.collaboration_max_connections,
+            "lock_timeout_seconds": self.collaboration_lock_timeout_seconds,
+            "message_size_limit": self.collaboration_message_size_limit,
+            "server_url": self.collaboration_server_url or "/api/collaboration/ws",
+            "hub_prefix": getattr(self.serverapp, "hub_prefix", None) if self.serverapp else None,
+            "hub_host": getattr(self.serverapp, "hub_host", None) if self.serverapp else None,
+        }
+
     def initialize_handlers(self) -> None:
         """Initialize handlers."""
         assert self.serverapp is not None  # noqa: S101
         page_config = self.serverapp.web_app.settings.setdefault("page_config_data", {})
         nbclassic_enabled = self.server_extension_is_enabled("nbclassic")
         page_config["nbclassic_enabled"] = nbclassic_enabled
+
+        # Add collaboration configuration to page config
+        page_config["collaboration_enabled"] = self.collaboration_enabled
+        if self.collaboration_enabled:
+            page_config["collaboration_config"] = {
+                "websocket_url": self.collaboration_server_url or "/api/collaboration/ws",
+                "batch_window_ms": self.collaboration_batch_window_ms,
+                "max_connections": self.collaboration_max_connections,
+                "lock_timeout_seconds": self.collaboration_lock_timeout_seconds,
+                "session_api_url": "/api/collaboration/sessions",
+                "status_api_url": "/api/collaboration/status",
+            }
 
         # If running under JupyterHub, add more metadata.
         if "hub_prefix" in self.serverapp.tornado_settings:
@@ -356,6 +447,30 @@ class JupyterNotebookApp(NotebookConfigShimMixin, LabServerApp):  # type:ignore[
         self.handlers.append(("/consoles/(.*)", ConsoleHandler))
         self.handlers.append(("/terminals/(.*)", TerminalHandler))
         self.handlers.append(("/custom/custom.css", CustomCssHandler))
+
+        # Register collaboration handlers when collaborative editing is enabled
+        if self.collaboration_enabled:
+            # WebSocket handler for Yjs CRDT synchronization
+            self.handlers.append(
+                (
+                    r"/api/collaboration/ws(?:/(.*))?",
+                    YjsWebSocketHandler,
+                    {"collaboration_settings": self._get_collaboration_settings()},
+                )
+            )
+
+            # REST API handler for session management
+            self.handlers.append(
+                (r"/api/collaboration/sessions(?:/(.*?))?", CollaborationSessionsHandler)
+            )
+
+            # Status and diagnostic endpoint
+            self.handlers.append((r"/api/collaboration/status", CollaborationStatusHandler))
+
+            self.log.info(
+                "Collaborative editing enabled with WebSocket endpoint at /api/collaboration/ws"
+            )
+
         super().initialize_handlers()
 
     def initialize(self, argv: list[str] | None = None) -> None:  # noqa: ARG002
