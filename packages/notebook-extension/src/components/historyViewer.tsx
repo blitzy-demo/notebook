@@ -12,7 +12,7 @@
 
 import * as React from 'react';
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { List } from 'react-window';
+// import { List } from 'react-window'; // Replaced with simple div for better compatibility
 import { ReactWidget } from '@jupyterlab/apputils';
 import { INotebookTracker } from '@jupyterlab/notebook';
 import { ITranslator } from '@jupyterlab/translation';
@@ -462,14 +462,14 @@ export const HistoryViewer: React.FC<IHistoryViewerProps> = ({
         )}
 
         {!loading && !error && filteredVersions.length > 0 && (
-          <List
-            height={height - 120} // Account for header
-            itemCount={filteredVersions.length}
-            itemSize={80} // Base height for collapsed items
+          <div
             className="jp-HistoryViewer-list"
+            style={{ height: height - 120, overflow: 'auto' }}
           >
-            {({ index }: { index: number }) => renderVersionItem({ index })}
-          </List>
+            {filteredVersions.map((version, index) =>
+              <div key={version.id}>{renderVersionItem({ index })}</div>
+            )}
+          </div>
         )}
       </div>
 
